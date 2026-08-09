@@ -7,12 +7,18 @@
         "libraryId": "1srAG3vWJdM9mHOeZWVfTeSKFEPOY0rFHmpD6LShIOct4BjmpfEIS9K2G",
         "version": "1",
         "developmentMode": true
+      },
+      {
+        "userSymbol": "AutoCommandes",
+        "libraryId": "1-KFtbLyt3S3PKHB8N8PS8kVH3j70pbL4VFai7TMIMJKlZWCHW84ROIks",
+        "version": "1",
+        "developmentMode": true
       }
     ]
   },
   "webapp": {
-    "executeAs": "USER_DEPLOYING",
-    "access": "DOMAIN"
+    "access": "DOMAIN",
+    "executeAs": "USER_DEPLOYING"
   },
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8"
