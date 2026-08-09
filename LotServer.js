@@ -101,3 +101,29 @@ function uiSubmit(fileId, payload) {
   const result = submitLotEntry(fileId, stageResult, payload, { dryRun: false });
   return { changeCount: result.changeCount };
 }
+
+/**
+ * RUN FROM EDITOR: exercises the three UI endpoints without writing.
+ * Uses Lot-24 (S7) — an S3+ tab with two live sub-lots.
+ */
+function testUiEndpoints() {
+  const fileId = '1_qwbM0Hma6cVWJ3lr7jtVtcgId7hUC71kCFjYg_nCmE'; // Lot-24
+
+  Logger.log("=== uiGetLotList (count only) ===");
+  Logger.log(uiGetLotList().length + " lots");
+
+  Logger.log("=== uiLoadLot ===");
+  const loaded = uiLoadLot(fileId);
+  Logger.log(JSON.stringify(loaded, null, 2));
+
+  Logger.log("=== uiPreviewSubmit — mix of new + overwrite ===");
+  // C11 already holds 0.45 (overwrite); I11 is empty (addition).
+  const payload = {
+    fields: {
+      subLots: [
+        { row: 11, poidsMoyen: 0.99, commentaire: "test preview" }
+      ]
+    }
+  };
+  Logger.log(JSON.stringify(uiPreviewSubmit(fileId, payload), null, 2));
+}
