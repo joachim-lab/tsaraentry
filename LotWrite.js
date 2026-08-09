@@ -317,3 +317,41 @@ function testWriteSamplesDryRun() {
   Logger.log("DRY RUN — nothing written.");
   Logger.log(result.rendered);
 }
+
+/**
+ * DIAGNOSTIC — report sample-column usage for every lot that is
+ * currently on a sample-bearing tab (1-5 / 6-10 / 11-15 / 16-21 / S1).
+ * Used to find a partially-filled column to test the append path
+ * against. READ ONLY.
+ */
+function reportSampleCapacity() {
+  const lots = getLotFileList();
+  const sampleTabs = Object.keys(WRITE_CFG.SAMPLE_RANGES);
+  let candidates = 0;
+
+  lots.forEach(lot => {
+    let stageResult;
+    try {
+      stageResult = getLotStage(lot.fileId);
+    } catch (e) {
+      Logger.log(lot.fileName + ": ERREUR " + e);
+      return;
+    }
+
+    if (stageResult.stage !== "s-tab") return;
+    if (sampleTabs.indexOf(stageResult.tabName) === -1) {
+      Logger.log(lot.fileName + " (" + stageResult.tabName + "): pas de colonne d'échantillons");
+      return;
+    }
+
+    const values = getLotFieldValues(lot.fileId, stageResult);
+    const s = values.fields.samples;
+    const flag = s.full ? "COMPLET" : ">>> PLACE LIBRE <<<";
+    if (!s.full) candidates++;
+    Logger.log(lot.fileName + " (" + stageResult.tabName + "): " +
+      s.used + "/" + s.capacity + " — " + flag + "  [" + lot.fileId + "]");
+  });
+
+  Logger.log("");
+  Logger.log("Lots avec de la place libre: " + candidates);
+}
