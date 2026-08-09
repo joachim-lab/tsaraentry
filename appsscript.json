@@ -1,0 +1,19 @@
+{
+  "timeZone": "Africa/Nairobi",
+  "dependencies": {
+    "libraries": [
+      {
+        "userSymbol": "ConsoProvende",
+        "libraryId": "1srAG3vWJdM9mHOeZWVfTeSKFEPOY0rFHmpD6LShIOct4BjmpfEIS9K2G",
+        "version": "1",
+        "developmentMode": true
+      }
+    ]
+  },
+  "webapp": {
+    "access": "DOMAIN",
+    "executeAs": "USER_DEPLOYING"
+  },
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8"
+}
