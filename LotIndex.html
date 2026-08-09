@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 780px; margin: 24px auto; padding: 0 16px; color: #202124; }
+    h1 { font-size: 20px; margin-bottom: 4px; }
+    label { display: block; margin-top: 12px; font-weight: bold; font-size: 13px; }
+    select, input { padding: 8px; font-size: 15px; margin-top: 4px; box-sizing: border-box; }
+    select, input[type=text], input[type=number], input[type=date] { width: 100%; }
+    button { padding: 9px 16px; font-size: 15px; cursor: pointer; border: none; border-radius: 4px; }
+    .primary { background: #1a73e8; color: #fff; }
+    .go { background: #188038; color: #fff; margin-top: 18px; }
+    .go:disabled { background: #999; cursor: not-allowed; }
+    .banner { margin-top: 14px; padding: 10px 12px; border-radius: 4px; background: #e8f0fe; font-size: 14px; }
+    .warn { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #fef7e0; color: #b06000; font-size: 13px; }
+    .err  { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #fce8e6; color: #c5221f; font-size: 14px; }
+    .ok   { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #e6f4ea; color: #188038; font-size: 14px; }
+    .card { border: 1px solid #dadce0; border-radius: 6px; padding: 12px 14px; margin-top: 14px; }
+    .card h3 { margin: 0 0 4px 0; font-size: 15px; }
+    .muted { color: #5f6368; font-size: 12px; font-weight: normal; }
+    .row { display: flex; gap: 12px; }
+    .row > div { flex: 1; }
+    .samples { margin-top: 8px; }
+    .chip { display: inline-block; background: #f1f3f4; border-radius: 12px; padding: 3px 8px; margin: 2px; font-size: 13px; }
+    .chip span { color: #c5221f; cursor: pointer; margin-left: 6px; font-weight: bold; }
+    #sampleInput { width: 140px; }
+    .hidden { display: none; }
+    table.diff { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+    table.diff td { padding: 4px 6px; border-bottom: 1px solid #eee; }
+    .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; }
+    .modal { background: #fff; border-radius: 8px; padding: 20px; max-width: 520px; width: 90%; }
+  </style>
+</head>
+<body>
+  <h1>Échantillonnage — saisie lot</h1>
+
+  <label for="lot">Lot</label>
+  <select id="lot"><option value="">Chargement…</option></select>
+
+  <div id="status"></div>
+  <div id="form"></div>
+
+  <script>
+    let loaded = null;      // last uiLoadLot result
+    let newSamples = [];    // samples staged in the browser, not yet written
+
+    // ---------- helpers ----------
+    function el(id) { return document.getElementById(id); }
+    function esc(s) {
+      return String(s === null || s === undefined ? "" : s)
+        .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    }
+    function setStatus(cls, html) { el('status').innerHTML = html ? '<div class="'+cls+'">'+html+'</div>' : ''; }
+    function num(v) { const n = Number(v); return isFinite(n) ? n : null; }
+
+    // ---------- lot list ----------
+    google.script.run
+      .withSuccessHandler(list => {
+        el('lot').innerHTML = '<option value="">-- choisir un lot --</option>' +
+          list.map(l => '<option value="'+esc(l.fileId)+'">'+esc(l.fileName)+'</option>').join('');
+      })
+      .withFailureHandler(e => setStatus('err', 'Erreur chargement lots : ' + esc(e.message)))
+      .uiGetLotList();
+
+    el('lot').addEventListener('change', function () {
+      const fileId = this.value;
+      el('form').innerHTML = '';
+      newSamples = [];
+      loaded = null;
+      if (!fileId) { setStatus('', ''); return; }
+      setStatus('banner', 'Chargement du lot…');
+      google.script.run
+        .withSuccessHandler(onLotLoaded)
+        .withFailureHandler(e => setStatus('err', 'Erreur : ' + esc(e.message)))
+        .uiLoadLot(fileId);
+    });
+
+    function onLotLoaded(data) {
+      loaded = data;
+      if (data.stage === 'none') { setStatus('err', esc(data.reason)); return; }
+      if (data.stage === 'grossissement') {
+        setStatus('err', "Ce lot est au stade Grossissement — écran pas encore disponible.");
+        return;
+      }
+
+      let banner = '<div class="banner"><b>' + esc(currentLotName()) + '</b> · onglet <b>' +
+        esc(data.tabName) + '</b></div>';
+      if (data.mixedWarning) banner += '<div class="warn">' + esc(data.mixedWarning) + '</div>';
+      el('status').innerHTML = banner;
+
+      el('form').innerHTML = renderForm(data);
+      wireSampleInput();
+    }
+
+    function currentLotName() {
+      const sel = el('lot');
+      return sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
+    }
+
+    // ---------- form rendering ----------
+    function renderForm(d) {
+      const f = d.fields;
+      let html = '';
+
+      if (d.kind === 'early') {
+        if (f.B1 !== undefined) {
+          html += '<div class="card"><h3>Identité du lot</h3>' +
+            field('B1', 'Numéro de lot', f.B1, 'text') +
+            '<div class="row"><div>' + field('B2', 'Bassin', f.B2, 'text') + '</div>' +
+            '<div>' + field('B3', 'Happa', f.B3, 'text') + '</div></div>' +
+            field('B5', 'Date de départ', f.B5, 'date') +
+            '</div>';
+        }
+        html += '<div class="card"><h3>Mesures</h3>' +
+          field('B4', "Température de l'eau (°C)", f.B4, 'number') +
+          field('D11', 'Nombre', f.D11, 'number') +
+          field('G11', 'Commentaires', f.G11, 'text') +
+          '</div>';
+        html += renderSamples(f.samples);
+      }
+
+      else if (d.kind === 's1') {
+        html += '<div class="card"><h3>Mesures</h3>' +
+          field('B4', "Température de l'eau (°C)", f.B4, 'number') +
+          field('H11', 'Commentaires', f.H11, 'text') +
+          '</div>';
+        html += renderSamples(f.samples);
+      }
+
+      else if (d.kind === 's3plus') {
+        html += '<div class="card"><h3>Conditions</h3>' +
+          '<div class="row"><div>' + field('B2', 'Bassin', f.B2, 'text') + '</div>' +
+          '<div>' + field('B3', 'Happa', f.B3, 'text') + '</div>' +
+          '<div>' + field('B4', "Température (°C)", f.B4, 'number') + '</div></div>' +
+          '</div>';
+        html += renderSubLots(f.subLots, 's3plus');
+      }
+
+      else if (d.kind === 's2-tri') {
+        html += '<div class="card"><h3>Tri</h3>' +
+          field('B7', 'Date de tri', f.B7, 'date') +
+          field('B4', "Température de l'eau (°C)", f.B4, 'number') +
+          '<div class="muted" style="margin-top:10px">Bassin / Happa par sous-lot :</div>' +
+          '<div class="row">' +
+            '<div>' + field('B2', 'Bassin 1', f.B2, 'text') + field('B3', 'Happa 1', f.B3, 'text') + '</div>' +
+            '<div>' + field('C2', 'Bassin 2', f.C2, 'text') + field('C3', 'Happa 2', f.C3, 'text') + '</div>' +
+            '<div>' + field('D2', 'Bassin 3', f.D2, 'text') + field('D3', 'Happa 3', f.D3, 'text') + '</div>' +
+          '</div></div>';
+        html += renderSubLots(f.subLots, 's2-tri');
+      }
+
+      html += '<button class="go" id="submitBtn" onclick="doPreview()">Enregistrer</button>';
+      return html;
+    }
+
+    function field(key, label, value, type) {
+      const v = (value === null || value === undefined) ? '' : value;
+      return '<label>' + esc(label) + '</label>' +
+        '<input type="' + type + '" data-field="' + key + '" value="' + esc(v) + '"' +
+        (type === 'number' ? ' step="any"' : '') + '>';
+    }
+
+    /**
+     * Only sub-lots with a real label are shown. Rows 13-16 are usually
+     * blank template rows — rendering six empty cards would be noise.
+     */
+    function renderSubLots(subLots, kind) {
+      const live = (subLots || []).filter(s => String(s.label || '').trim() !== '');
+      if (!live.length) return '<div class="warn">Aucun sous-lot actif sur cet onglet.</div>';
+
+      return live.map(s => {
+        let inner = '';
+        if (kind === 's3plus') {
+          inner =
+            '<div class="row">' +
+              '<div>' + subField(s.row, 'nombre', 'Nombre', s.nombre) + '</div>' +
+              '<div>' + subField(s.row, 'poidsMoyen', 'Poids moyen (g)', s.poidsMoyen) + '</div>' +
+            '</div>' +
+            subField(s.row, 'commentaire', 'Commentaires', s.commentaire, 'text') +
+            '<div class="muted">Biomasse (calculée) : ' + esc(s.biomasse) + '</div>';
+        } else { // s2-tri
+          inner =
+            '<div class="row">' +
+              '<div>' + subField(s.row, 'poidsMoyen', 'Poids moyen (g)', s.poidsMoyen) + '</div>' +
+              '<div>' + subField(s.row, 'biomasse', 'Biomasse', s.biomasse) + '</div>' +
+            '</div>' +
+            subField(s.row, 'commentaire', 'Commentaires', s.commentaire, 'text') +
+            '<div class="muted">Nombre (calculé) : ' + esc(s.nombre) + '</div>';
+        }
+        return '<div class="card"><h3>' + esc(s.label) +
+          ' <span class="muted">ligne ' + s.row + '</span></h3>' + inner + '</div>';
+      }).join('');
+    }
+
+    function subField(row, key, label, value, type) {
+      const v = (value === null || value === undefined) ? '' : value;
+      return '<label>' + esc(label) + '</label>' +
+        '<input type="' + (type || 'number') + '" step="any" data-sub-row="' + row +
+        '" data-sub-key="' + key + '" value="' + esc(v) + '">';
+    }
+
+    /**
+     * Samples are APPEND-ONLY server-side, so existing values are shown
+     * as read-only context and never re-sent. Only newly typed values
+     * are submitted.
+     */
+    function renderSamples(s) {
+      if (!s) return '';
+      if (s.full) {
+        return '<div class="card"><h3>Échantillonnage</h3>' +
+          '<div class="ok">Échantillonnage complet (' + s.used + '/' + s.capacity +
+          ') — terminé pour cette période.</div></div>';
+      }
+      return '<div class="card"><h3>Échantillonnage ' +
+        '<span class="muted">' + s.used + '/' + s.capacity + ' déjà saisis · ' +
+        s.remaining + ' place(s) libre(s)</span></h3>' +
+        '<div class="row" style="align-items:flex-end">' +
+          '<div style="flex:0 0 160px"><label>Poids (g)</label>' +
+          '<input type="number" step="any" id="sampleInput" placeholder="ex: 14.5"></div>' +
+          '<div style="flex:0 0 auto"><button class="primary" onclick="addSample()">Ajouter</button></div>' +
+          '<div id="sampleStats" class="muted"></div>' +
+        '</div>' +
+        '<div class="samples" id="sampleList"></div></div>';
+    }
+
+    // ---------- samples ----------
+    function wireSampleInput() {
+      const inp = el('sampleInput');
+      if (!inp) return;
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addSample(); } });
+      inp.focus();
+      renderSampleList();
+    }
+
+    function addSample() {
+      const inp = el('sampleInput');
+      const v = num(inp.value);
+      if (v === null || v <= 0) { setStatus('err', 'Poids invalide.'); return; }
+
+      const s = loaded.fields.samples;
+      if (newSamples.length >= s.remaining) {
+        setStatus('err', 'Plus de place : ' + s.remaining + ' emplacement(s) libre(s) seulement.');
+        return;
+      }
+      newSamples.push(v);
+      inp.value = '';
+      inp.focus();
+      setStatus('banner', '<b>' + esc(currentLotName()) + '</b> · onglet <b>' + esc(loaded.tabName) + '</b>');
+      renderSampleList();
+    }
+
+    function removeSample(i) { newSamples.splice(i, 1); renderSampleList(); }
+
+    function renderSampleList() {
+      const list = el('sampleList');
+      if (!list) return;
+      list.innerHTML = newSamples.map((v, i) =>
+        '<span class="chip">' + esc(v) + '<span onclick="removeSample(' + i + ')">×</span></span>'
+      ).join('');
+
+      const stats = el('sampleStats');
+      if (stats) {
+        if (!newSamples.length) { stats.textContent = ''; }
+        else {
+          const sum = newSamples.reduce((a, b) => a + b, 0);
+          const avg = sum / newSamples.length;
+          stats.textContent = newSamples.length + ' ajouté(s) · moyenne ' + avg.toFixed(2) + ' g';
+        }
+      }
+    }
+
+    // ---------- submit ----------
+    function collectPayload() {
+      const fields = {};
+      document.querySelectorAll('[data-field]').forEach(inp => {
+        const key = inp.getAttribute('data-field');
+        const raw = inp.value;
+        if (raw === '') return;                       // untouched/blank -> leave cell alone
+        fields[key] = (inp.type === 'number') ? num(raw) : raw;
+      });
+
+      const byRow = {};
+      document.querySelectorAll('[data-sub-row]').forEach(inp => {
+        const row = Number(inp.getAttribute('data-sub-row'));
+        const key = inp.getAttribute('data-sub-key');
+        const raw = inp.value;
+        if (raw === '') return;
+        byRow[row] = byRow[row] || { row: row };
+        byRow[row][key] = (inp.type === 'number') ? num(raw) : raw;
+      });
+      const subLots = Object.keys(byRow).map(r => byRow[r]);
+      if (subLots.length) fields.subLots = subLots;
+
+      if (newSamples.length) fields.samples = newSamples.slice();
+
+      return { fields: fields };
+    }
+
+    function doPreview() {
+      const btn = el('submitBtn');
+      btn.disabled = true;
+      setStatus('banner', 'Vérification…');
+
+      google.script.run
+        .withSuccessHandler(preview => {
+          if (preview.changeCount === 0) {
+            btn.disabled = false;
+            setStatus('warn', 'Aucun changement à enregistrer.');
+            return;
+          }
+          if (preview.needsConfirmation) { showConfirm(preview); btn.disabled = false; }
+          else doSubmit();
+        })
+        .withFailureHandler(e => { btn.disabled = false; setStatus('err', esc(e.message)); })
+        .uiPreviewSubmit(loaded.fileId, collectPayload());
+    }
+
+    function showConfirm(preview) {
+      const rows = preview.overwrites.map(o =>
+        '<tr><td>' + esc(o.note) + '</td><td>' + esc(o.from) + ' → <b>' + esc(o.to) + '</b></td></tr>'
+      ).join('');
+      const extra = preview.additions.length
+        ? '<div class="muted" style="margin-top:8px">+ ' + preview.additions.length + ' nouvelle(s) saisie(s).</div>'
+        : '';
+      const bg = document.createElement('div');
+      bg.className = 'modal-bg';
+      bg.innerHTML = '<div class="modal"><h3>Confirmer le remplacement</h3>' +
+        '<div class="muted">Ces valeurs existent déjà et seront remplacées :</div>' +
+        '<table class="diff">' + rows + '</table>' + extra +
+        '<div style="margin-top:16px;text-align:right">' +
+        '<button onclick="closeConfirm()" style="margin-right:8px">Annuler</button>' +
+        '<button class="go" style="margin:0" onclick="closeConfirm(); doSubmit();">Confirmer</button>' +
+        '</div></div>';
+      bg.id = 'confirmBg';
+      document.body.appendChild(bg);
+    }
+
+    function closeConfirm() {
+      const bg = el('confirmBg');
+      if (bg) bg.remove();
+    }
+
+    function doSubmit() {
+      const btn = el('submitBtn');
+      btn.disabled = true;
+      setStatus('banner', 'Enregistrement…');
+
+      google.script.run
+        .withSuccessHandler(res => {
+          setStatus('ok', res.changeCount + ' cellule(s) enregistrée(s).');
+          newSamples = [];
+          const fileId = loaded.fileId;
+          google.script.run.withSuccessHandler(onLotLoaded).uiLoadLot(fileId); // reload fresh state
+        })
+        .withFailureHandler(e => { btn.disabled = false; setStatus('err', esc(e.message)); })
+        .uiSubmit(loaded.fileId, collectPayload());
+    }
+  </script>
+</body>
+</html>

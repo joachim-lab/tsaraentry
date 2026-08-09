@@ -26,12 +26,6 @@ const CFG = {
   CONSO_PCT_COL: 9         // I = % différence (formula copied from row above)
 };
 
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle('TSARA Entry')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
-}
-
 /** Lot list for the dropdown, from Stock Poisson N3:N50 — same source actionsurstock uses. */
 function getLotList() {
   const ss = SpreadsheetApp.openById(CFG.STOCK_POISSON_SS_ID);
