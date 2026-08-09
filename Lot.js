@@ -166,7 +166,26 @@ function getLotStage(fileId) {
 
   const tabName = findCurrentSTab_(ss);
   if (!tabName) {
-    return { stage: "none", reason: "No S-tab's date range contains today — check manually." };
+    return { stage: "none", reason: "La date introduite n'existe pas pour ce lot" };
   }
   return { stage: "s-tab", tabName: tabName, mixedWarning: null };
+}
+
+/**
+ * RUN FROM EDITOR: manual test for the two functions above.
+ * Logs the full lot file list, then getLotStage() for the first
+ * three lots in that list (enough to see both stage types without
+ * needing to pick a fileId by hand).
+ */
+function testLotStage() {
+  const lots = getLotFileList();
+  Logger.log("Lot file list (" + lots.length + " lots):");
+  Logger.log(JSON.stringify(lots, null, 2));
+
+  const sample = lots.slice(0, 3);
+  sample.forEach(lot => {
+    const result = getLotStage(lot.fileId);
+    Logger.log("--- " + lot.fileName + " (" + lot.fileId + ") ---");
+    Logger.log(JSON.stringify(result, null, 2));
+  });
 }
