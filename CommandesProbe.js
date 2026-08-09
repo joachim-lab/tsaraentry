@@ -63,3 +63,33 @@ function colLetter(n) {
   while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
   return s;
 }
+
+/**
+ * Which columns hold FORMULAS vs typed values? Checks a real data row.
+ * Formula columns must never be written by the app.
+ */
+function probeCommandesFormulas() {
+  const ss = SpreadsheetApp.openById(CMD_PROBE.SS_ID);
+  const sh = ss.getSheetByName(CMD_PROBE.SHEET);
+  const lastCol = sh.getLastColumn();
+
+  // Find the last row that actually has a lot key in column A
+  // (getLastRow overshoots — same trap as Consommation provende).
+  const scan = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getDisplayValues();
+  let lastData = 1;
+  for (let i = 0; i < scan.length; i++) {
+    if (String(scan[i][0] || "").trim() !== "") lastData = i + 2;
+  }
+  Logger.log("Last real data row: " + lastData);
+
+  [2, lastData].forEach(r => {
+    Logger.log("=== ROW " + r + " ===");
+    const formulas = sh.getRange(r, 1, 1, lastCol).getFormulas()[0];
+    const values = sh.getRange(r, 1, 1, lastCol).getDisplayValues()[0];
+    for (let c = 0; c < lastCol; c++) {
+      const L = colLetter(c + 1);
+      if (formulas[c]) Logger.log("  " + L + " FORMULA: " + formulas[c]);
+      else if (values[c]) Logger.log("  " + L + " typed  : " + values[c]);
+    }
+  });
+}
