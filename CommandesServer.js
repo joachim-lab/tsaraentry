@@ -88,72 +88,102 @@ function cmdGetOptions() {
 }
 
 /**
- * MODE A — create an order. Writes only typed columns, then asks
- * automatismescommande to generate the order number for that row.
- * Returns { row, orderNumber }.
+ * MODE A — create an order, possibly spanning SEVERAL lots.
+ *
+ * A commercial order can cover more than one lot: the rows sit
+ * consecutively, the FIRST carries the type (AL or GR) and the rest
+ * carry "commande groupée", which automatismescommande resolves by
+ * copying the order number from the row above. Live example: rows
+ * 179-180 both show AL-26-163 for lots 24-4-C and 24-4-A.
+ *
+ * The type also decides the kind: AL = alevins, GR = poisson. Mixing
+ * both in one order would contradict the number prefix, so every line
+ * uses the block matching the type.
+ *
+ * payload = {
+ *   type, dateCommande, facture, bl, client, contact, remarques,
+ *   lines: [ { lot, ...quantities } ]
+ * }
+ * Returns { firstRow, lastRow, orderNumber, rowCount }.
  */
 function cmdCreateOrder(payload) {
   const f = payload || {};
-  if (!f.lot) throw new Error("Le lot est obligatoire.");
+  const lines = f.lines || [];
+
   if (!f.type) throw new Error("Le type de commande est obligatoire.");
   if (!f.client) throw new Error("Le client est obligatoire.");
+  if (!lines.length) throw new Error("Ajouter au moins un lot à la commande.");
 
-  const hasAlevins = f.alevinsNb !== undefined && f.alevinsNb !== null && f.alevinsNb !== "";
-  const hasPoisson = f.poissonKg !== undefined && f.poissonKg !== null && f.poissonKg !== "";
-  if (!hasAlevins && !hasPoisson) {
-    throw new Error("Renseigner soit une commande d'alevins, soit une commande de poisson.");
-  }
-  if (hasAlevins && hasPoisson) {
-    throw new Error("Une commande porte sur des alevins OU du poisson, pas les deux.");
-  }
+  const isAlevins = String(f.type).toUpperCase().indexOf("AL") === 0;
+
+  lines.forEach((ln, i) => {
+    if (!ln.lot) throw new Error("Ligne " + (i + 1) + " : le lot est obligatoire.");
+    if (isAlevins) {
+      if (ln.alevinsNb === undefined || ln.alevinsNb === null || ln.alevinsNb === "") {
+        throw new Error("Ligne " + (i + 1) + " : nombre d'alevins obligatoire.");
+      }
+    } else {
+      if (ln.poissonKg === undefined || ln.poissonKg === null || ln.poissonKg === "") {
+        throw new Error("Ligne " + (i + 1) + " : quantité de poisson (kg) obligatoire.");
+      }
+    }
+  });
 
   const sh = cmdSheet();
-  const row = findNextCommandeRow(sh);
+  const firstRow = findNextCommandeRow(sh);
   const C = CMD_CFG.COL;
 
-  function put(col, value) {
-    if (value === undefined || value === null || value === "") return;
-    sh.getRange(row, col).setValue(value);
-  }
+  lines.forEach((ln, i) => {
+    const row = firstRow + i;
 
-  put(C.LOT, f.lot);
-  put(C.ORDER_NO, f.type);              // AL / GR / commande groupée -> converted below
-  put(C.FACTURE, f.facture);
-  put(C.BL, f.bl);
-  put(C.DATE_CMD, f.dateCommande ? new Date(f.dateCommande) : undefined);
+    function put(col, value) {
+      if (value === undefined || value === null || value === "") return;
+      sh.getRange(row, col).setValue(value);
+    }
 
-  if (hasAlevins) {
-    put(C.ALEVINS_NB, Number(f.alevinsNb));
-    put(C.ALEVINS_PM, f.alevinsPm === "" ? undefined : Number(f.alevinsPm));
-    put(C.ALEVINS_LIVRER, f.alevinsLivrer === "" ? undefined : Number(f.alevinsLivrer));
-    put(C.ALEVINS_PRIX, f.alevinsPrix === "" ? undefined : Number(f.alevinsPrix));
-    put(C.TRANSPORT, f.transport === "" ? undefined : Number(f.transport));
-  } else {
-    put(C.POISSON_KG, Number(f.poissonKg));
-    put(C.POISSON_PM, f.poissonPm === "" ? undefined : Number(f.poissonPm));
-    put(C.PRIX_KG, f.prixKg === "" ? undefined : Number(f.prixKg));
-    put(C.FRAIS, f.frais === "" ? undefined : Number(f.frais));
-  }
+    put(C.LOT, ln.lot);
+    // First row carries the real type; the rest group onto it.
+    put(C.ORDER_NO, i === 0 ? f.type : "commande groupée");
+    put(C.FACTURE, f.facture);
+    put(C.BL, f.bl);
+    put(C.DATE_CMD, f.dateCommande ? new Date(f.dateCommande) : undefined);
 
-  put(C.CLIENT, f.client);
-  put(C.REMARQUES, f.remarques);
-  put(C.CONTACT, f.contact);
+    if (isAlevins) {
+      put(C.ALEVINS_NB, Number(ln.alevinsNb));
+      put(C.ALEVINS_PM, ln.alevinsPm === "" ? undefined : Number(ln.alevinsPm));
+      put(C.ALEVINS_LIVRER, ln.alevinsLivrer === "" ? undefined : Number(ln.alevinsLivrer));
+      put(C.ALEVINS_PRIX, ln.alevinsPrix === "" ? undefined : Number(ln.alevinsPrix));
+      put(C.TRANSPORT, ln.transport === "" ? undefined : Number(ln.transport));
+    } else {
+      put(C.POISSON_KG, Number(ln.poissonKg));
+      put(C.POISSON_PM, ln.poissonPm === "" ? undefined : Number(ln.poissonPm));
+      put(C.PRIX_KG, ln.prixKg === "" ? undefined : Number(ln.prixKg));
+      put(C.FRAIS, ln.frais === "" ? undefined : Number(ln.frais));
+    }
 
+    // Client/contact/remarks repeat on every row, as in existing data.
+    put(C.CLIENT, f.client);
+    put(C.REMARQUES, f.remarques);
+    put(C.CONTACT, f.contact);
+  });
+
+  const lastRow = firstRow + lines.length - 1;
   SpreadsheetApp.flush();
 
   // Order number: edit triggers never fire on programmatic writes.
+  // Sweep the whole range so "commande groupée" rows resolve against
+  // the first row's freshly generated number.
   let orderNumber = "";
   try {
-    AutoCommandes.generateOrderNumbersForRows(row, row);
+    AutoCommandes.generateOrderNumbersForRows(firstRow, lastRow);
     SpreadsheetApp.flush();
-    orderNumber = sh.getRange(row, C.ORDER_NO).getDisplayValue();
+    orderNumber = sh.getRange(firstRow, C.ORDER_NO).getDisplayValue();
   } catch (err) {
-    throw new Error("La commande a été enregistrée (ligne " + row +
-      ") mais le numéro de commande n'a pas pu être généré : " + err +
-      ". Prévenir Kim.");
+    throw new Error("La commande a été enregistrée (lignes " + firstRow + "-" + lastRow +
+      ") mais le numéro de commande n'a pas pu être généré : " + err + ". Prévenir Kim.");
   }
 
-  return { row: row, orderNumber: orderNumber };
+  return { firstRow: firstRow, lastRow: lastRow, orderNumber: orderNumber, rowCount: lines.length };
 }
 
 /**
