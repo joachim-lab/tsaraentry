@@ -80,20 +80,25 @@ function scanGrossissement_(sh) {
 }
 
 /**
- * Does any S-tab have an active sub-lot (A11:A16 non-blank)?
- * Used only for the mixed-lot warning — does not change which
- * stage the app targets.
+ * Is THIS WEEK'S S-tab (by date, not history) showing an active
+ * sub-lot? Used only for the mixed-lot warning.
+ *
+ * NOTE: A11:A16 on an S-tab stays non-blank forever once a sub-lot
+ * has ever passed through it — B1 feeds from '1-5'!$B$1, the lot's
+ * own number, set once at creation and never cleared. Every lot has
+ * this kind of history on its early tabs; that is normal, not a
+ * mixed-lot situation. The only meaningful check is whether the
+ * CURRENT-by-date tab still has something live on it — so this
+ * reuses findCurrentSTab_ rather than scanning all 24 tabs.
  */
 function scanActiveSSheets_(ss) {
-  const active = [];
-  LOT_CFG.S_SHEET_ORDER.forEach(name => {
-    const sh = ss.getSheetByName(name);
-    if (!sh) return;
-    const labels = sh.getRange("A11:A16").getDisplayValues();
-    const ids = labels.map(r => String(r[0] || "").trim()).filter(v => v !== "");
-    if (ids.length) active.push({ sheet: name, subLots: ids });
-  });
-  return active;
+  const tabName = findCurrentSTab_(ss);
+  if (!tabName) return [];
+
+  const sh = ss.getSheetByName(tabName);
+  const labels = sh.getRange("A11:A16").getDisplayValues();
+  const ids = labels.map(r => String(r[0] || "").trim()).filter(v => v !== "");
+  return ids.length ? [{ sheet: tabName, subLots: ids }] : [];
 }
 
 /**
