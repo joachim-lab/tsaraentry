@@ -210,3 +210,9 @@ function testReadFields(fileId) {
   const values = getLotFieldValues(fileId, stageResult);
   Logger.log("Values: " + JSON.stringify(values, null, 2));
 }
+
+/** RUN FROM EDITOR: convenience wrapper — tests one Grossissement lot and one S-tab lot. */
+function runReadTest() {
+  testReadFields('1A0Cz7M3m3cRdadfcmwUGam-IPdTLn8hPFwMmbXU0DcQ'); // Lot-21, grossissement
+  testReadFields('1_qwbM0Hma6cVWJ3lr7jtVtcgId7hUC71kCFjYg_nCmE');  // Lot-24, s-tab
+}
