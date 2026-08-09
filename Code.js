@@ -3,9 +3,11 @@
  * Screen 1: Nourrissage (feed quantity entry)
  *
  * Writes rows to the Nourrissage file's "Consommation provende"
- * sheet (columns C:F + formula in I), then calls the
- * controleconsoprovende library (bound at HEAD) to fill column H —
- * the exact same fill logic the manual-edit trigger uses.
+ * sheet (columns C:F), copies the % formula in I from the row
+ * above (PASTE_FORMULA — the sheet's own formula stays the single
+ * source of truth), then calls the controleconsoprovende library
+ * (bound at HEAD) to fill column H — the exact same fill logic
+ * the manual-edit trigger uses.
  ***************************************************************/
 
 const CFG = {
@@ -20,7 +22,8 @@ const CFG = {
   CONSO_START_ROW: 2,
   CONSO_KEY_COL: 3,        // C = lot key (write block C:F starts here)
   CONSO_TYPE_COL: 5,       // E = type provende (for reading the dropdown list)
-  CONSO_PCT_COL: 9         // I = % différence (formula =IFERROR(F/H,""))
+  CONSO_F_COL: 6,          // F = qty given
+  CONSO_PCT_COL: 9         // I = % différence (formula copied from row above)
 };
 
 function doGet() {
@@ -51,11 +54,36 @@ function getFeedTypes() {
 }
 
 /**
+ * First row after the last real entry, scanning columns C (lot key)
+ * and F (qty). getLastRow() is unusable here: column G holds
+ * pre-inserted checkboxes far below the data, so it reports the
+ * bottom of the sheet, not the last entry.
+ */
+function findNextConsoRow(sh) {
+  const lastPhysical = sh.getLastRow();
+  const n = lastPhysical - CFG.CONSO_START_ROW + 1;
+  if (n < 1) return CFG.CONSO_START_ROW;
+
+  const cVals = sh.getRange(CFG.CONSO_START_ROW, CFG.CONSO_KEY_COL, n, 1).getValues();
+  const fVals = sh.getRange(CFG.CONSO_START_ROW, CFG.CONSO_F_COL, n, 1).getValues();
+
+  let lastData = CFG.CONSO_START_ROW - 1;
+  for (let i = 0; i < n; i++) {
+    const c = cVals[i][0];
+    const f = fVals[i][0];
+    if ((c !== "" && c !== null) || (f !== "" && f !== null)) {
+      lastData = CFG.CONSO_START_ROW + i;
+    }
+  }
+  return lastData + 1;
+}
+
+/**
  * Append one or more feed entries:
- *  1) values into C:F,
- *  2) the % différence formula into I (same formula as existing rows),
- *  3) fill column H via the controleconsoprovende library — same code
- *     path as manual edits.
+ *  1) values into C:F at the first row after the last real entry,
+ *  2) column I formula copied from the row above (PASTE_FORMULA),
+ *  3) fill column H via the controleconsoprovende library — same
+ *     code path as manual edits.
  *
  * entries: [{ lot, date, type, qty }], date is "yyyy-MM-dd" from the browser.
  * Returns { written, startRow, endRow }.
@@ -80,15 +108,17 @@ function submitNourrissage(entries) {
     return [en.lot, new Date(en.date), en.type, qty];
   });
 
-  const startRow = sh.getLastRow() + 1;
+  const startRow = findNextConsoRow(sh);
   sh.getRange(startRow, CFG.CONSO_KEY_COL, rows.length, 4).setValues(rows); // C:F
-
-  // Column I: same formula as existing rows, in R1C1 so it adapts per row.
-  // I = F / H  ->  RC[-3] / RC[-1]
-  sh.getRange(startRow, CFG.CONSO_PCT_COL, rows.length, 1)
-    .setFormulaR1C1('=IFERROR(RC[-3]/RC[-1],"")');
-
   const endRow = startRow + rows.length - 1;
+
+  // Column I: copy the formula from the row above so the sheet's own
+  // formula (locale, exact form) remains the single source of truth.
+  if (startRow > CFG.CONSO_START_ROW) {
+    const src = sh.getRange(startRow - 1, CFG.CONSO_PCT_COL);
+    const dst = sh.getRange(startRow, CFG.CONSO_PCT_COL, rows.length, 1);
+    src.copyTo(dst, SpreadsheetApp.CopyPasteType.PASTE_FORMULA, false);
+  }
 
   try {
     ConsoProvende.fillHForRows(startRow, endRow);
