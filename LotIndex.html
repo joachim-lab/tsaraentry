@@ -90,13 +90,10 @@
     function onLotLoaded(data) {
       loaded = data;
       if (data.stage === 'none') { setStatus('err', esc(data.reason)); return; }
-      if (data.stage === 'grossissement') {
-        setStatus('err', "Ce lot est au stade Grossissement — écran pas encore disponible.");
-        return;
-      }
-
-      let banner = '<div class="banner"><b>' + esc(currentLotName()) + '</b> · onglet <b>' +
-        esc(data.tabName) + '</b></div>';
+      const where = (data.stage === 'grossissement')
+        ? 'Grossissement · bloc du <b>' + esc(data.fields.date || '(date à saisir)') + '</b>'
+        : 'onglet <b>' + esc(data.tabName) + '</b>';
+      let banner = '<div class="banner"><b>' + esc(currentLotName()) + '</b> · ' + where + '</div>';
       if (data.mixedWarning) banner += '<div class="warn">' + esc(data.mixedWarning) + '</div>';
       el('status').innerHTML = banner;
 
@@ -161,6 +158,15 @@
         html += renderSubLots(f.subLots, 's2-tri');
       }
 
+      else if (d.kind === 'grossissement') {
+        html += '<div class="card"><h3>Bloc de pesée</h3>' +
+          field('date', 'Date de la pesée', f.date, 'date') +
+          field('temperature', "Température de l'eau (°C)", f.temperature, 'number') +
+          '<div class="muted">Ces deux valeurs s\'appliquent à tout le bloc.</div>' +
+          '</div>';
+        html += renderGrossSubLots(f.subLots);
+      }
+
       html += '<button class="go" id="submitBtn" onclick="doPreview()">Enregistrer</button>';
       return html;
     }
@@ -211,6 +217,37 @@
       return '<label>' + esc(label) + '</label>' +
         '<input type="' + (type || 'number') + '" step="any" data-sub-row="' + row +
         '" data-sub-key="' + key + '" value="' + esc(v) + '">';
+    }
+
+    /**
+     * Grossissement: up to 4 sub-lots per block, one per COLUMN (not
+     * row). All four are shown — unlike S-tabs, the target block is
+     * empty by design, so there are no labels to filter on. Staff fill
+     * as many as the lot actually has.
+     */
+    function renderGrossSubLots(subLots) {
+      return (subLots || []).map((s, i) =>
+        '<div class="card"><h3>Sous-lot ' + (i + 1) +
+          ' <span class="muted">colonne ' + s.col + '</span></h3>' +
+          '<div class="row">' +
+            '<div>' + grossField(s.col, 'bassin', 'Bassin/Cage', s.bassin, 'text') + '</div>' +
+            '<div>' + grossField(s.col, 'happa', 'Happa/Carré/Rond', s.happa, 'text') + '</div>' +
+          '</div>' +
+          '<div class="row">' +
+            '<div>' + grossField(s.col, 'nombre', 'Nombre', s.nombre) + '</div>' +
+            '<div>' + grossField(s.col, 'poidsMoyen', 'Poids moyen (g)', s.poidsMoyen) + '</div>' +
+          '</div>' +
+        '</div>'
+      ).join('');
+    }
+
+    function grossField(col, key, label, value, type) {
+      let v = (value === null || value === undefined) ? '' : value;
+      const t = type || 'number';
+      if (t === 'number' && v !== '') { const p = num(v); if (p !== null) v = p; }
+      return '<label>' + esc(label) + '</label>' +
+        '<input type="' + t + '"' + (t === 'number' ? ' step="any"' : '') +
+        ' data-gross-col="' + col + '" data-gross-key="' + key + '" value="' + esc(v) + '">';
     }
 
     /**
@@ -304,6 +341,18 @@
       });
       const subLots = Object.keys(byRow).map(r => byRow[r]);
       if (subLots.length) fields.subLots = subLots;
+
+      const byCol = {};
+      document.querySelectorAll('[data-gross-col]').forEach(inp => {
+        const col = Number(inp.getAttribute('data-gross-col'));
+        const key = inp.getAttribute('data-gross-key');
+        const raw = inp.value;
+        if (raw === '') return;
+        byCol[col] = byCol[col] || { col: col };
+        byCol[col][key] = (inp.type === 'number') ? num(raw) : raw;
+      });
+      const grossSubLots = Object.keys(byCol).map(k => byCol[k]);
+      if (grossSubLots.length) fields.subLots = grossSubLots;
 
       if (newSamples.length) fields.samples = newSamples.slice();
 
