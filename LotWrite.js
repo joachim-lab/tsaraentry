@@ -15,6 +15,10 @@
  *   - Row 8 / row 5 date chains, EXCEPT the explicit anchors a user
  *     may set: 1-5!B5, S2-Tri!B7, Grossissement block date (row 5).
  *
+ * SAMPLES ARE APPEND-ONLY: existing sample values are never cleared
+ * or overwritten. Corrections to saved samples are made manually in
+ * the sheet. See planSamples.
+ *
  * Field list is Kim's confirmed live list (2026-08-09).
  ***************************************************************/
 
@@ -175,24 +179,42 @@ function planGrossissement(ss, targetGroupStartCol, payload, plan) {
 }
 
 /**
- * Samples (individual weights). The submitted list is the COMPLETE
- * intended list for this tab — the form was pre-filled with whatever
- * was already there — so any remaining cells in the range are cleared.
- * That keeps one correct state rather than merging old and new.
+ * Samples (individual weights) — APPEND ONLY (Kim's decision,
+ * 2026-08-09). New samples are written after the last non-empty cell
+ * in the range; existing samples are NEVER cleared or overwritten.
+ *
+ * Consequence: the form must NOT pre-fill the sample list, or
+ * submitting would append the existing values a second time. It shows
+ * the existing count as read-only context instead. Corrections to
+ * already-saved samples are done manually in the sheet.
  */
 function planSamples(sh, tabName, samples, plan) {
-  if (samples === undefined) return;
+  if (samples === undefined || !samples.length) return;
   const r = WRITE_CFG.SAMPLE_RANGES[tabName];
   if (!r) throw new Error("No sample range configured for tab: " + tabName);
 
+  // Find the first free row: scan the whole range, remember the last
+  // non-empty, start after it. (Not "first blank" — a stray gap in the
+  // middle must not cause new samples to overwrite later entries.)
   const capacity = r.end - r.start + 1;
-  if (samples.length > capacity) {
-    throw new Error("Trop d'échantillons: " + samples.length + " (maximum " + capacity + ")");
+  const existing = sh.getRange(r.start, r.col, capacity, 1).getValues();
+  let lastUsed = -1;
+  for (let i = 0; i < capacity; i++) {
+    const v = existing[i][0];
+    if (v !== "" && v !== null) lastUsed = i;
+  }
+  const firstFree = lastUsed + 1;
+
+  const remaining = capacity - firstFree;
+  if (samples.length > remaining) {
+    throw new Error("Plus assez de place: " + samples.length +
+      " échantillon(s) à ajouter, mais seulement " + remaining +
+      " emplacement(s) libre(s) sur " + tabName + ".");
   }
 
-  for (let i = 0; i < capacity; i++) {
-    const value = (i < samples.length) ? samples[i] : null;
-    addChange(sh, r.start + i, r.col, value, "Échantillon " + (i + 1), plan);
+  for (let i = 0; i < samples.length; i++) {
+    addChange(sh, r.start + firstFree + i, r.col, samples[i],
+      "Échantillon (ajout " + (i + 1) + "/" + samples.length + ")", plan);
   }
 }
 
@@ -252,6 +274,32 @@ function testWriteDryRun() {
     }
   };
 
+  const result = submitLotEntry(fileId, stageResult, payload);
+  Logger.log("DRY RUN — nothing written.");
+  Logger.log(result.rendered);
+}
+
+/**
+ * RUN FROM EDITOR: dry-run test of the APPEND-ONLY sample path on
+ * Lot-31, which is on tab 11-15 (an early tab with a J sample column).
+ * Writes NOTHING. Confirms new samples land AFTER existing ones.
+ */
+function testWriteSamplesDryRun() {
+  const fileId = '1DdQxI1mRzGbI_PHdrUMAjGk6l4ptyL31MaCo3il9X38'; // Lot-31
+  const stageResult = getLotStage(fileId);
+  Logger.log("Stage: " + JSON.stringify(stageResult));
+
+  if (stageResult.stage !== "s-tab") {
+    Logger.log("Expected an s-tab stage for this test; got: " + stageResult.stage);
+    return;
+  }
+
+  // Show what's already there, so the append position can be checked.
+  const current = getLotFieldValues(fileId, stageResult);
+  const existing = current.fields.samples || [];
+  Logger.log("Échantillons déjà saisis: " + existing.length);
+
+  const payload = { fields: { samples: [1.11, 2.22, 3.33] } };
   const result = submitLotEntry(fileId, stageResult, payload);
   Logger.log("DRY RUN — nothing written.");
   Logger.log(result.rendered);
