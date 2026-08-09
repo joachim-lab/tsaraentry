@@ -123,9 +123,9 @@ function findCurrentSTab_(ss) {
       : (name.match(/^S\d+$|^S2-Tri$/)) ? 8         // B..H
       : 6;                                           // 1-5/6-10/11-15: B..F
 
-    const rowVals = sh.getRange(8, 2, 1, lastCol - 1).getDisplayValues()[0];
+    const rowVals = sh.getRange(8, 2, 1, lastCol - 1).getValues()[0];
     const dates = rowVals
-      .map(v => (v && v !== "-") ? new Date(v) : null)
+      .map(v => (v instanceof Date) ? v : null)
       .filter(d => d && !isNaN(d.getTime()));
 
     if (!dates.length) continue;
