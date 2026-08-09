@@ -3,9 +3,9 @@
  * Screen 1: Nourrissage (feed quantity entry)
  *
  * Writes rows to the Nourrissage file's "Consommation provende"
- * sheet (columns C:F), then calls the controleconsoprovende
- * library (bound at HEAD) to fill column H — the exact same fill
- * logic the manual-edit trigger uses. See handover 2026-08-09.
+ * sheet (columns C:F + formula in I), then calls the
+ * controleconsoprovende library (bound at HEAD) to fill column H —
+ * the exact same fill logic the manual-edit trigger uses.
  ***************************************************************/
 
 const CFG = {
@@ -18,8 +18,9 @@ const CFG = {
   NOURRISSAGE_SS_ID: "1JBoH5c7BqZc2V5czcDAnEt-2hvkNKlJAxuDSupttTfs",
   CONSO_SHEET: "Consommation provende",
   CONSO_START_ROW: 2,
-  CONSO_KEY_COL: 3,        // C = lot key (write block starts here)
-  CONSO_TYPE_COL: 5        // E = type provende (for reading the dropdown list)
+  CONSO_KEY_COL: 3,        // C = lot key (write block C:F starts here)
+  CONSO_TYPE_COL: 5,       // E = type provende (for reading the dropdown list)
+  CONSO_PCT_COL: 9         // I = % différence (formula =IFERROR(F/H,""))
 };
 
 function doGet() {
@@ -50,8 +51,11 @@ function getFeedTypes() {
 }
 
 /**
- * Append one or more feed entries, then fill column H via the
- * controleconsoprovende library (same code path as manual edits).
+ * Append one or more feed entries:
+ *  1) values into C:F,
+ *  2) the % différence formula into I (same formula as existing rows),
+ *  3) fill column H via the controleconsoprovende library — same code
+ *     path as manual edits.
  *
  * entries: [{ lot, date, type, qty }], date is "yyyy-MM-dd" from the browser.
  * Returns { written, startRow, endRow }.
@@ -78,6 +82,12 @@ function submitNourrissage(entries) {
 
   const startRow = sh.getLastRow() + 1;
   sh.getRange(startRow, CFG.CONSO_KEY_COL, rows.length, 4).setValues(rows); // C:F
+
+  // Column I: same formula as existing rows, in R1C1 so it adapts per row.
+  // I = F / H  ->  RC[-3] / RC[-1]
+  sh.getRange(startRow, CFG.CONSO_PCT_COL, rows.length, 1)
+    .setFormulaR1C1('=IFERROR(RC[-3]/RC[-1],"")');
+
   const endRow = startRow + rows.length - 1;
 
   try {
@@ -90,4 +100,15 @@ function submitNourrissage(entries) {
   }
 
   return { written: rows.length, startRow: startRow, endRow: endRow };
+}
+
+/**
+ * RUN FROM EDITOR once after first push: verifies the library binding
+ * resolves and is callable. Calls fillHForRows with an empty range
+ * (endRow < startRow) so it processes 0 rows and writes nothing.
+ */
+function testLibraryBinding() {
+  const result = ConsoProvende.fillHForRows(2, 1);
+  Logger.log("Library OK, fillHForRows returned: " + result);
+  return "Library OK (processed " + result + " rows, as expected 0)";
 }
