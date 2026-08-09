@@ -355,3 +355,64 @@ function reportSampleCapacity() {
   Logger.log("");
   Logger.log("Lots avec de la place libre: " + candidates);
 }
+
+/**
+ * RUN FROM EDITOR — PERFORMS A REAL WRITE, on the disposable test
+ * copy ONLY (fileId hardcoded below, NOT a real lot). Do not repurpose
+ * this function against a live fileId.
+ *
+ * Round-trip: read baseline -> dry run -> REAL write -> re-read ->
+ * verify the 3 new samples landed in exactly the right cells and
+ * nothing else moved.
+ */
+function testWriteSamplesLive_TESTCOPY_ONLY() {
+  const TEST_FILE_ID = '1CvVR75ZeE6KqigEMMc-oFX6HtpYi8_YGFBhXlN-4lJQ'; // ZZTEST-Lot-31 copy
+
+  const stageResult = getLotStage(TEST_FILE_ID);
+  Logger.log("Stage: " + JSON.stringify(stageResult));
+  if (stageResult.stage !== "s-tab" || stageResult.tabName !== "11-15") {
+    Logger.log("ABORT: expected tab 11-15, got " + JSON.stringify(stageResult) +
+      " — test copy may not be set up as expected.");
+    return;
+  }
+
+  const before = getLotFieldValues(TEST_FILE_ID, stageResult).fields.samples;
+  Logger.log("AVANT — échantillons: " + before.used + "/" + before.capacity +
+    " (libres: " + before.remaining + ")");
+
+  const testSamples = [99.1, 99.2, 99.3];
+  const payload = { fields: { samples: testSamples } };
+
+  // 1. Dry run
+  const dry = submitLotEntry(TEST_FILE_ID, stageResult, payload);
+  Logger.log("--- DRY RUN ---");
+  Logger.log(dry.rendered);
+
+  // 2. REAL write
+  const live = submitLotEntry(TEST_FILE_ID, stageResult, payload, { dryRun: false });
+  Logger.log("--- ECRITURE REELLE EFFECTUEE (" + live.changeCount + " cellule(s)) ---");
+
+  // 3. Re-read and verify
+  const stageAfter = getLotStage(TEST_FILE_ID);
+  const after = getLotFieldValues(TEST_FILE_ID, stageAfter).fields.samples;
+  Logger.log("APRES — échantillons: " + after.used + "/" + after.capacity +
+    " (libres: " + after.remaining + ")");
+
+  const expectUsed = before.used + testSamples.length;
+  const ok1 = after.used === expectUsed;
+  Logger.log((ok1 ? "OK" : "ECHEC") + " — used attendu " + expectUsed + ", obtenu " + after.used);
+
+  // Verify exact cell placement: last 3 values in the array should be
+  // our test values, in order, and nothing before them should have moved.
+  const tail = after.values.slice(-3);
+  const ok2 = JSON.stringify(tail) === JSON.stringify(testSamples);
+  Logger.log((ok2 ? "OK" : "ECHEC") + " — 3 dernières valeurs = " + JSON.stringify(tail) +
+    " (attendu " + JSON.stringify(testSamples) + ")");
+
+  const untouched = after.values.slice(0, before.used);
+  const beforeUntouched = before.values.slice(0, before.used);
+  const ok3 = JSON.stringify(untouched) === JSON.stringify(beforeUntouched);
+  Logger.log((ok3 ? "OK" : "ECHEC") + " — les " + before.used + " échantillons existants n'ont pas bougé");
+
+  Logger.log(ok1 && ok2 && ok3 ? "=== TEST REUSSI ===" : "=== TEST ECHOUE — voir ci-dessus ===");
+}
