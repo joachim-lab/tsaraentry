@@ -11,8 +11,8 @@
     ]
   },
   "webapp": {
-    "access": "DOMAIN",
-    "executeAs": "USER_DEPLOYING"
+    "executeAs": "USER_DEPLOYING",
+    "access": "DOMAIN"
   },
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8"
