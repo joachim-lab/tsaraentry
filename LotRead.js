@@ -22,7 +22,7 @@ function getLotFieldValues(fileId, stageResult) {
   const ss = SpreadsheetApp.openById(fileId);
 
   if (stageResult.stage === "grossissement") {
-    return readGrossissementFields_(ss, stageResult.targetGroupStart);
+    return readGrossissementFields_(ss, stageResult.targetGroupStartCol);
   }
   if (stageResult.stage === "s-tab") {
     return readSTabFields_(ss, stageResult.tabName);
@@ -155,28 +155,28 @@ function readS3Plus_(sh, tabName) {
 }
 
 /**
- * Grossissement — reads the target block only (targetGroupStart from
+ * Grossissement — reads the target block only (targetGroupStartCol from
  * getLotStage: the next empty block, or a partially-filled one if
  * staff already started today). date/temp are the block's shared
  * first column; bassin/happa/nombre/PM are per column (up to 4
  * sub-lots per block). Biomasse (row 12) is derived, display only.
  */
-function readGrossissementFields_(ss, targetGroupStart) {
+function readGrossissementFields_(ss, targetGroupStartCol) {
   const gross = ss.getSheetByName(LOT_CFG.GROSS_SHEET);
   const g = LOT_CFG.GROSS_GROUP_SIZE;
 
-  const date = gross.getRange(LOT_CFG.GROSS_ROW_DATE, targetGroupStart).getValue();
-  const temp = gross.getRange(LOT_CFG.GROSS_ROW_TEMP, targetGroupStart).getValue();
+  const date = gross.getRange(LOT_CFG.GROSS_ROW_DATE, targetGroupStartCol).getValue();
+  const temp = gross.getRange(LOT_CFG.GROSS_ROW_TEMP, targetGroupStartCol).getValue();
 
-  const bassinRow  = gross.getRange(LOT_CFG.GROSS_ROW_BASSIN, targetGroupStart, 1, g).getValues()[0];
-  const happaRow   = gross.getRange(LOT_CFG.GROSS_ROW_HAPPA, targetGroupStart, 1, g).getValues()[0];
-  const nombreRow  = gross.getRange(LOT_CFG.GROSS_ROW_NOMBRE, targetGroupStart, 1, g).getValues()[0];
-  const pmRow      = gross.getRange(LOT_CFG.GROSS_ROW_PM, targetGroupStart, 1, g).getValues()[0];
+  const bassinRow  = gross.getRange(LOT_CFG.GROSS_ROW_BASSIN, targetGroupStartCol, 1, g).getValues()[0];
+  const happaRow   = gross.getRange(LOT_CFG.GROSS_ROW_HAPPA, targetGroupStartCol, 1, g).getValues()[0];
+  const nombreRow  = gross.getRange(LOT_CFG.GROSS_ROW_NOMBRE, targetGroupStartCol, 1, g).getValues()[0];
+  const pmRow      = gross.getRange(LOT_CFG.GROSS_ROW_PM, targetGroupStartCol, 1, g).getValues()[0];
 
   const subLots = [];
   for (let i = 0; i < g; i++) {
     subLots.push({
-      col: targetGroupStart + i,
+      col: targetGroupStartCol + i,
       bassin: bassinRow[i],
       happa: happaRow[i],
       nombre: nombreRow[i],
@@ -186,7 +186,7 @@ function readGrossissementFields_(ss, targetGroupStart) {
 
   return {
     stage: "grossissement",
-    targetGroupStart: targetGroupStart,
+    targetGroupStartCol: targetGroupStartCol,
     fields: { date: date, temperature: temp, subLots: subLots }
   };
 }

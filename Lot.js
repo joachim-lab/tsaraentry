@@ -72,11 +72,13 @@ function scanGrossissement_(sh) {
 
   for (let i = numCols - 1; i >= 0; i--) {
     if (String(row7[i] || "").trim() !== "") {
-      const groupStart = Math.floor(i / LOT_CFG.GROSS_GROUP_SIZE) * LOT_CFG.GROSS_GROUP_SIZE;
-      return { found: true, lastFilledGroupStart: groupStart };
+      // i is a 0-based offset into row7; convert to an ABSOLUTE sheet
+      // column so callers never have to remember which unit this is.
+      const groupStartOffset = Math.floor(i / LOT_CFG.GROSS_GROUP_SIZE) * LOT_CFG.GROSS_GROUP_SIZE;
+      return { found: true, lastFilledGroupStartCol: LOT_CFG.GROSS_START_COL + groupStartOffset };
     }
   }
-  return { found: false, lastFilledGroupStart: -1 };
+  return { found: false, lastFilledGroupStartCol: -1 };
 }
 
 /**
@@ -145,7 +147,7 @@ function findCurrentSTab_(ss) {
 /**
  * Main entry point: given a lot's fileId, determine what to show.
  * Returns:
- *   { stage: "grossissement", targetGroupStart, mixedWarning }
+ *   { stage: "grossissement", targetGroupStartCol, mixedWarning }
  *   { stage: "s-tab", tabName, mixedWarning: null }
  *   { stage: "none", reason }
  */
@@ -158,9 +160,15 @@ function getLotStage(fileId) {
 
   if (grossScan.found) {
     const activeS = scanActiveSSheets_(ss);
+    const targetCol = grossScan.lastFilledGroupStartCol + LOT_CFG.GROSS_GROUP_SIZE;
+
+    if (targetCol > LOT_CFG.GROSS_END_COL) {
+      return { stage: "none", reason: "Grossissement est plein — plus de bloc disponible pour ce lot" };
+    }
+
     return {
       stage: "grossissement",
-      targetGroupStart: grossScan.lastFilledGroupStart + LOT_CFG.GROSS_GROUP_SIZE,
+      targetGroupStartCol: targetCol,
       mixedWarning: activeS.length
         ? "This lot also has active sub-lot(s) on S-tab(s): " +
           activeS.map(a => a.sheet + " (" + a.subLots.join(", ") + ")").join("; ") +
