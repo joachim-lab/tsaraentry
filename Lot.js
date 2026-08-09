@@ -194,3 +194,43 @@ function testLotStage() {
     Logger.log(JSON.stringify(result, null, 2));
   });
 }
+
+/** RUN FROM EDITOR: one-line stage summary for every lot in the folder. */
+function testAllLotStages() {
+  const lots = getLotFileList();
+  lots.forEach(lot => {
+    const result = getLotStage(lot.fileId);
+    Logger.log(lot.fileName + ": " + result.stage +
+      (result.stage === "s-tab" ? " (" + result.tabName + ")" : "") +
+      (result.stage === "none" ? " — " + result.reason : ""));
+  });
+}
+
+/**
+ * DIAGNOSTIC — run for a lot that returned "none" from getLotStage.
+ * Dumps raw Grossissement row-7 values and, for every S-tab, the
+ * raw row-8 date values, so we can see WHY neither scan matched.
+ */
+function debugLotRaw(fileId) {
+  const ss = SpreadsheetApp.openById(fileId);
+  Logger.log("=== " + ss.getName() + " ===");
+
+  const gross = ss.getSheetByName(LOT_CFG.GROSS_SHEET);
+  if (gross) {
+    const numCols = LOT_CFG.GROSS_END_COL - LOT_CFG.GROSS_START_COL + 1;
+    const row7 = gross.getRange(LOT_CFG.GROSS_ROW_BASSIN, LOT_CFG.GROSS_START_COL, 1, numCols)
+      .getDisplayValues()[0];
+    const nonBlank = row7.map((v, i) => v ? (i + LOT_CFG.GROSS_START_COL) + "=" + v : null).filter(Boolean);
+    Logger.log("Grossissement row7 non-blank cols (1-indexed): " + JSON.stringify(nonBlank));
+  } else {
+    Logger.log("No Grossissement sheet found.");
+  }
+
+  LOT_CFG.S_SHEET_ORDER.forEach(name => {
+    const sh = ss.getSheetByName(name);
+    if (!sh) { Logger.log(name + ": sheet not found"); return; }
+    const lastCol = (name === "16-21") ? 7 : (name.match(/^S\d+$|^S2-Tri$/)) ? 8 : 6;
+    const row8 = sh.getRange(8, 2, 1, lastCol - 1).getDisplayValues()[0];
+    Logger.log(name + " row8: " + JSON.stringify(row8));
+  });
+}
