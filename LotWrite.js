@@ -206,6 +206,11 @@ function planSamples(sh, tabName, samples, plan) {
   const firstFree = lastUsed + 1;
 
   const remaining = capacity - firstFree;
+  if (remaining <= 0) {
+    throw new Error("L'échantillonnage de l'onglet " + tabName +
+      " est déjà complet (" + capacity + "/" + capacity +
+      "). Aucun échantillon supplémentaire n'est possible pour cette période.");
+  }
   if (samples.length > remaining) {
     throw new Error("Plus assez de place: " + samples.length +
       " échantillon(s) à ajouter, mais seulement " + remaining +
@@ -296,8 +301,16 @@ function testWriteSamplesDryRun() {
 
   // Show what's already there, so the append position can be checked.
   const current = getLotFieldValues(fileId, stageResult);
-  const existing = current.fields.samples || [];
-  Logger.log("Échantillons déjà saisis: " + existing.length);
+  const existing = current.fields.samples || { used: 0, capacity: 0, full: false };
+  Logger.log("Échantillons: " + existing.used + "/" + existing.capacity +
+    " (libres: " + existing.remaining + ")");
+
+  if (existing.full) {
+    Logger.log("Colonne d'échantillons complète (" + existing.used + "/" +
+      existing.capacity + ") — l'échantillonnage de cette période est terminé. " +
+      "Test d'ajout ignoré (comportement attendu, pas une erreur).");
+    return;
+  }
 
   const payload = { fields: { samples: [1.11, 2.22, 3.33] } };
   const result = submitLotEntry(fileId, stageResult, payload);

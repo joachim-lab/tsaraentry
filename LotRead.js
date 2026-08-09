@@ -192,15 +192,39 @@ function readGrossissementFields_(ss, targetGroupStartCol) {
 }
 
 /**
- * Reads a sample column (individual weights) between two rows.
- * Returns only non-blank values, in order — trailing blanks in the
- * template range are not meaningful data and are dropped here.
+ * Reads a sample column (individual weights) between two rows and
+ * reports its capacity.
+ *
+ * Samples are APPEND-ONLY (see LotWrite.js), so the UI needs to know
+ * at load time whether there is room left — a full column means the
+ * échantillonnage for this period is complete and the entry box
+ * should be hidden, rather than failing at submit time.
+ *
+ * `used` counts up to the LAST non-empty cell (not the number of
+ * non-blank values), because that is where appending actually starts;
+ * a stray gap mid-column must not be reported as free space.
+ *
+ * Returns { values, used, capacity, remaining, full }.
  */
 function readSampleColumn_(sh, colLetter, startRow, endRow) {
-  const n = endRow - startRow + 1;
+  const capacity = endRow - startRow + 1;
   const col = sh.getRange(colLetter + startRow + ":" + colLetter + endRow).getColumn();
-  const vals = sh.getRange(startRow, col, n, 1).getValues();
-  return vals.map(r => r[0]).filter(v => v !== "" && v !== null);
+  const raw = sh.getRange(startRow, col, capacity, 1).getValues();
+
+  let lastUsed = -1;
+  for (let i = 0; i < capacity; i++) {
+    const v = raw[i][0];
+    if (v !== "" && v !== null) lastUsed = i;
+  }
+  const used = lastUsed + 1;
+
+  return {
+    values: raw.map(r => r[0]).filter(v => v !== "" && v !== null),
+    used: used,
+    capacity: capacity,
+    remaining: capacity - used,
+    full: used >= capacity
+  };
 }
 
 /** RUN FROM EDITOR: manual test — reads fields for one lot at whatever stage it's at. */
