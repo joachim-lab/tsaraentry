@@ -52,7 +52,18 @@
         .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
     }
     function setStatus(cls, html) { el('status').innerHTML = html ? '<div class="'+cls+'">'+html+'</div>' : ''; }
-    function num(v) { const n = Number(v); return isFinite(n) ? n : null; }
+    /**
+     * Parse a number accepting BOTH decimal comma and decimal point.
+     * The sheet is French-locale, so values arrive as "0,45"; plain
+     * Number("0,45") is NaN, which would silently drop the value.
+     */
+    function num(v) {
+      if (v === null || v === undefined) return null;
+      const s = String(v).trim().replace(',', '.');
+      if (s === '') return null;
+      const n = Number(s);
+      return isFinite(n) ? n : null;
+    }
 
     // ---------- lot list ----------
     google.script.run
@@ -155,7 +166,8 @@
     }
 
     function field(key, label, value, type) {
-      const v = (value === null || value === undefined) ? '' : value;
+      let v = (value === null || value === undefined) ? '' : value;
+      if (type === 'number' && v !== '') { const p = num(v); if (p !== null) v = p; }
       return '<label>' + esc(label) + '</label>' +
         '<input type="' + type + '" data-field="' + key + '" value="' + esc(v) + '"' +
         (type === 'number' ? ' step="any"' : '') + '>';
@@ -194,7 +206,8 @@
     }
 
     function subField(row, key, label, value, type) {
-      const v = (value === null || value === undefined) ? '' : value;
+      let v = (value === null || value === undefined) ? '' : value;
+      if ((type || 'number') === 'number' && v !== '') { const p = num(v); if (p !== null) v = p; }
       return '<label>' + esc(label) + '</label>' +
         '<input type="' + (type || 'number') + '" step="any" data-sub-row="' + row +
         '" data-sub-key="' + key + '" value="' + esc(v) + '">';
