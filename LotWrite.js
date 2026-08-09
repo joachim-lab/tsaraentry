@@ -62,13 +62,29 @@ function buildLotWritePlan(fileId, stageResult, payload) {
   return plan;
 }
 
+/**
+ * Normalise a value for comparison only (never for writing).
+ * Dates must be compared as yyyy-MM-dd: the sheet holds a Date object
+ * while the browser sends the string "2026-08-09", and String(Date)
+ * gives "Sat Aug 09 2026..." — so a naive compare reports a change
+ * on every submission and would overwrite a live date formula with
+ * static text.
+ */
+function normaliseForCompare(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  if (v === null || v === undefined) return "";
+  return String(v).trim();
+}
+
 /** Add one intended change, recording the current value for the dry run. */
 function addChange(sh, row, col, value, note, plan) {
   if (value === undefined) return;             // field not supplied -> leave alone
   const cell = sh.getRange(row, col);
   const from = cell.getValue();
   const to = (value === null) ? "" : value;
-  if (String(from) === String(to)) return;     // no-op, don't clutter the plan
+  if (normaliseForCompare(from) === normaliseForCompare(to)) return; // no-op
   plan.push({
     sheet: sh.getName(),
     row: row, col: col,

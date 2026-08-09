@@ -44,6 +44,8 @@
   <script>
     let loaded = null;      // last uiLoadLot result
     let newSamples = [];    // samples staged in the browser, not yet written
+    let grossAll = [];      // all 4 grossissement sub-lot slots for the target block
+    let grossVisible = 1;   // how many of them are currently shown
 
     // ---------- helpers ----------
     function el(id) { return document.getElementById(id); }
@@ -99,6 +101,7 @@
 
       el('form').innerHTML = renderForm(data);
       wireSampleInput();
+      if (data.kind === 'grossissement') renderGrossAddButton();
     }
 
     function currentLotName() {
@@ -226,7 +229,21 @@
      * as many as the lot actually has.
      */
     function renderGrossSubLots(subLots) {
-      return (subLots || []).map((s, i) =>
+      const all = subLots || [];
+      // Show a card for each sub-lot that already has data, but at
+      // least one. The rest are added on demand — most lots have a
+      // single sub-lot and four empty cards invite mis-keying.
+      const withData = all.filter(s =>
+        String(s.bassin || '') !== '' || String(s.happa || '') !== '' ||
+        String(s.nombre || '') !== '' || String(s.poidsMoyen || '') !== '');
+      grossVisible = Math.max(1, withData.length);
+      grossAll = all;
+      return '<div id="grossCards">' + grossCardsHtml() + '</div>' +
+             '<div id="grossAddWrap"></div>';
+    }
+
+    function grossCardsHtml() {
+      return grossAll.slice(0, grossVisible).map((s, i) =>
         '<div class="card"><h3>Sous-lot ' + (i + 1) +
           ' <span class="muted">colonne ' + s.col + '</span></h3>' +
           '<div class="row">' +
@@ -239,6 +256,33 @@
           '</div>' +
         '</div>'
       ).join('');
+    }
+
+    /**
+     * Re-render adds a card without losing what is already typed, by
+     * saving current input values first and restoring them after.
+     */
+    function addGrossSubLot() {
+      if (grossVisible >= grossAll.length) return;
+      const saved = {};
+      document.querySelectorAll('[data-gross-col]').forEach(inp => {
+        saved[inp.getAttribute('data-gross-col') + '|' + inp.getAttribute('data-gross-key')] = inp.value;
+      });
+      grossVisible++;
+      document.getElementById('grossCards').innerHTML = grossCardsHtml();
+      document.querySelectorAll('[data-gross-col]').forEach(inp => {
+        const k = inp.getAttribute('data-gross-col') + '|' + inp.getAttribute('data-gross-key');
+        if (saved[k] !== undefined) inp.value = saved[k];
+      });
+      renderGrossAddButton();
+    }
+
+    function renderGrossAddButton() {
+      const wrap = document.getElementById('grossAddWrap');
+      if (!wrap) return;
+      wrap.innerHTML = (grossVisible < grossAll.length)
+        ? '<button class="primary" style="margin-top:12px" onclick="addGrossSubLot()">+ Ajouter un sous-lot</button>'
+        : '<div class="muted" style="margin-top:12px">Maximum de ' + grossAll.length + ' sous-lots atteint.</div>';
     }
 
     function grossField(col, key, label, value, type) {
