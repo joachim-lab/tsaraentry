@@ -187,9 +187,18 @@ function cmdCreateOrder(payload) {
 }
 
 /**
- * MODE B — find orders. Returns the most recent matching orders,
- * newest first. `query` matches order number, client or lot
- * (case-insensitive substring). Unfulfilled = no payment date yet.
+ * MODE B — find orders, GROUPED by order number.
+ *
+ * A commercial order can span several consecutive rows (one per lot,
+ * sharing one number via "commande groupée"), and fulfilment applies
+ * to the whole order — rows 179/180 carry the same payment date. So
+ * this returns one entry per order, listing its rows.
+ *
+ * Rows with a blank order number can't be grouped safely, so each is
+ * returned on its own, keyed by row.
+ *
+ * `query` matches order number, client or lot (case-insensitive).
+ * onlyUnfulfilled = no payment date recorded on any of its rows.
  */
 function cmdFindOrders(query, onlyUnfulfilled) {
   const sh = cmdSheet();
@@ -201,78 +210,98 @@ function cmdFindOrders(query, onlyUnfulfilled) {
   const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.ANNULE).getDisplayValues();
   const q = String(query || "").trim().toLowerCase();
 
-  const out = [];
-  for (let i = n - 1; i >= 0; i--) {         // newest first
+  const groups = {};
+  const order = [];
+
+  for (let i = 0; i < n; i++) {
     const r = vals[i];
     const rowNum = CMD_CFG.START_ROW + i;
+    if (String(r[C.ANNULE - 1] || "").trim()) continue;      // annulé
 
-    const orderNo = r[C.ORDER_NO - 1];
-    const client  = r[C.CLIENT - 1];
-    const lot     = r[C.LOT - 1];
-    const annule  = String(r[C.ANNULE - 1] || "").trim();
-    if (annule) continue;
+    const orderNo = String(r[C.ORDER_NO - 1] || "").trim();
+    const key = orderNo || ("__row" + rowNum);
 
-    if (q) {
-      const hay = (orderNo + " " + client + " " + lot).toLowerCase();
-      if (hay.indexOf(q) === -1) continue;
+    if (!groups[key]) {
+      groups[key] = {
+        orderNumber: orderNo,
+        key: key,
+        rows: [],
+        lots: [],
+        client: r[C.CLIENT - 1],
+        contact: r[C.CONTACT - 1],
+        dateCommande: r[C.DATE_CMD - 1],
+        paiement: r[C.PAIEMENT - 1],
+        dateLivraison: r[C.DATE_LIVRAISON - 1],
+        moyenPaiement: r[C.MOYEN_PAIEMENT - 1],
+        livre: r[C.LIVRE - 1],
+        alevinsNb: [],
+        poissonKg: []
+      };
+      order.push(key);
     }
 
-    const paiement = r[C.PAIEMENT - 1];
-    if (onlyUnfulfilled && String(paiement || "").trim() !== "") continue;
+    const g = groups[key];
+    g.rows.push(rowNum);
+    if (r[C.LOT - 1]) g.lots.push(r[C.LOT - 1]);
+    if (r[C.ALEVINS_NB - 1]) g.alevinsNb.push(r[C.ALEVINS_NB - 1]);
+    if (r[C.POISSON_KG - 1]) g.poissonKg.push(r[C.POISSON_KG - 1]);
+    // Any row carrying fulfilment data represents the order's state.
+    if (!g.paiement && r[C.PAIEMENT - 1]) g.paiement = r[C.PAIEMENT - 1];
+    if (!g.dateLivraison && r[C.DATE_LIVRAISON - 1]) g.dateLivraison = r[C.DATE_LIVRAISON - 1];
+    if (!g.moyenPaiement && r[C.MOYEN_PAIEMENT - 1]) g.moyenPaiement = r[C.MOYEN_PAIEMENT - 1];
+  }
 
-    out.push({
-      row: rowNum,
-      orderNumber: orderNo,
-      lot: lot,
-      client: client,
-      dateCommande: r[C.DATE_CMD - 1],
-      alevinsNb: r[C.ALEVINS_NB - 1],
-      poissonKg: r[C.POISSON_KG - 1],
-      argentAlevins: r[C.ARGENT_ALEVINS - 1],
-      argentPoisson: r[C.ARGENT_POISSON - 1],
-      paiement: paiement,
-      dateLivraison: r[C.DATE_LIVRAISON - 1],
-      livre: r[C.LIVRE - 1],
-      moyenPaiement: r[C.MOYEN_PAIEMENT - 1]
-    });
+  const out = [];
+  for (let i = order.length - 1; i >= 0; i--) {              // newest first
+    const g = groups[order[i]];
 
+    if (q) {
+      const hay = (g.orderNumber + " " + g.client + " " + g.lots.join(" ")).toLowerCase();
+      if (hay.indexOf(q) === -1) continue;
+    }
+    if (onlyUnfulfilled && String(g.paiement || "").trim() !== "") continue;
+
+    out.push(g);
     if (out.length >= 25) break;
   }
   return out;
 }
 
 /**
- * MODE B — record fulfilment on an existing order row.
- * Only U / V / X are written. W (livré) is a formula driven by V.
- * Returns { row, changed: [...] }.
+ * MODE B — record fulfilment across EVERY row of one order.
+ * Only U / V / X are written; W (livré) is a formula driven by V.
+ * `rows` comes from cmdFindOrders, so the caller never guesses.
+ * Returns { rows, changed: [...] }.
  */
-function cmdRecordFulfilment(row, payload) {
+function cmdRecordFulfilment(rows, payload) {
   const sh = cmdSheet();
   const C = CMD_CFG.COL;
-  const r = Number(row);
-
   const lastRow = findNextCommandeRow(sh) - 1;
-  if (!isFinite(r) || r < CMD_CFG.START_ROW || r > lastRow) {
-    throw new Error("Ligne de commande invalide: " + row);
-  }
+
+  const targets = (rows || []).map(Number).filter(r =>
+    isFinite(r) && r >= CMD_CFG.START_ROW && r <= lastRow);
+  if (!targets.length) throw new Error("Aucune ligne de commande valide à mettre à jour.");
 
   const f = payload || {};
   const changed = [];
 
-  function put(col, value, label) {
-    if (value === undefined || value === null || value === "") return;
-    const cell = sh.getRange(r, col);
-    const before = cell.getDisplayValue();
-    cell.setValue(value);
-    changed.push(label + ": " + (before || "(vide)") + " -> " + cell.getDisplayValue());
-  }
+  targets.forEach(r => {
+    function put(col, value, label) {
+      if (value === undefined || value === null || value === "") return;
+      const cell = sh.getRange(r, col);
+      const before = cell.getDisplayValue();
+      cell.setValue(value);
+      const after = cell.getDisplayValue();
+      if (before !== after) changed.push("L" + r + " " + label + ": " + (before || "(vide)") + " -> " + after);
+    }
 
-  put(C.PAIEMENT, f.paiement ? new Date(f.paiement) : undefined, "Paiement reçu");
-  put(C.DATE_LIVRAISON, f.dateLivraison ? new Date(f.dateLivraison) : undefined, "Date livraison");
-  put(C.MOYEN_PAIEMENT, f.moyenPaiement, "Moyen paiement");
+    put(C.PAIEMENT, f.paiement ? new Date(f.paiement) : undefined, "Paiement reçu");
+    put(C.DATE_LIVRAISON, f.dateLivraison ? new Date(f.dateLivraison) : undefined, "Date livraison");
+    put(C.MOYEN_PAIEMENT, f.moyenPaiement, "Moyen paiement");
+  });
 
   SpreadsheetApp.flush();
-  return { row: r, changed: changed };
+  return { rows: targets, changed: changed };
 }
 
 /** RUN FROM EDITOR: read-only checks of the screen-3 server side. */
@@ -284,12 +313,15 @@ function testCommandesServer() {
   Logger.log("Lots (" + opts.lots.length + "): " + opts.lots.slice(0, 8).join(" | "));
   Logger.log("Types: " + opts.types.join(" | "));
 
-  Logger.log("--- 3 dernières commandes ---");
-  cmdFindOrders("", false).slice(0, 3).forEach(o => Logger.log(JSON.stringify(o)));
+  Logger.log("--- 3 dernières commandes (groupées) ---");
+  cmdFindOrders("", false).slice(0, 3).forEach(o =>
+    Logger.log(o.orderNumber + " | " + o.client + " | lots: " + o.lots.join(", ") +
+      " | lignes: " + o.rows.join(",") + " | payé: " + (o.paiement || "non")));
 
   Logger.log("--- commandes non soldées (max 3) ---");
   cmdFindOrders("", true).slice(0, 3).forEach(o =>
-    Logger.log(o.orderNumber + " / " + o.client + " / " + o.lot));
+    Logger.log(o.orderNumber + " / " + o.client + " / lots: " + o.lots.join(", ") +
+      " / lignes: " + o.rows.join(",")));
 
   Logger.log("--- test binding AutoCommandes (plage vide, n'écrit rien) ---");
   Logger.log(AutoCommandes.generateOrderNumbersForRows(3, 2));
