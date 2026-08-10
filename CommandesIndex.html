@@ -135,7 +135,7 @@
     const wrap = el('linesWrap');
     if (!wrap) return;
     const t = (el('fType') && el('fType').value) || '';
-    if (!t) { wrap.innerHTML = '<div class="warn">Choisir d\\'abord le type de commande.</div>'; return; }
+    if (!t) { wrap.innerHTML = '<div class="warn">Choisir le type de commande en premier.</div>'; return; }
 
     const lotOpts = OPTS.lots.map(l => '<option value="'+esc(l)+'">'+esc(l)+'</option>').join('');
     const al = isAlevins();
@@ -285,13 +285,18 @@
         setStatus('', '');
         el('hits').innerHTML = res.length
           ? res.map(o =>
-              '<div class="hit" id="hit_'+esc(o.key)+'" onclick="selectHit(\\''+esc(o.key)+'\\')">' +
+              '<div class="hit" id="hit_'+esc(o.key)+'" data-key="'+esc(o.key)+'">' +
                 '<b>' + esc(o.orderNumber || '(sans numéro)') + '</b> · ' + esc(o.client) +
                 '<div class="muted">' + esc(o.dateCommande) + ' · lots : ' + esc(o.lots.join(', ') || '—') +
                 ' · ligne(s) ' + o.rows.join(',') +
                 (o.paiement ? ' · payé le ' + esc(o.paiement) : ' · non soldée') + '</div>' +
               '</div>').join('')
           : '<div class="warn">Aucune commande trouvée.</div>';
+        // Handlers attached here rather than inline onclick, to avoid
+        // nested-quote escaping inside a generated HTML string.
+        document.querySelectorAll('#hits .hit').forEach(function (n) {
+          n.addEventListener('click', function () { selectHit(n.getAttribute('data-key')); });
+        });
       })
       .withFailureHandler(e => setStatus('err', esc(e.message)))
       .cmdFindOrders(el('ficherche').value, el('fOnlyUnpaid').checked);
