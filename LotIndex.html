@@ -30,9 +30,13 @@
     table.diff td { padding: 4px 6px; border-bottom: 1px solid #eee; }
     .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; }
     .modal { background: #fff; border-radius: 8px; padding: 20px; max-width: 520px; width: 90%; }
+    .backlink { display:inline-block; margin-bottom:10px; font-size:14px; color:#1a73e8;
+                text-decoration:none; }
+    .backlink:hover { text-decoration:underline; }
   </style>
 </head>
 <body>
+  <a class="backlink" id="backLink" href="#">&larr; Menu</a>
   <h1>Échantillonnage — saisie lot</h1>
 
   <label for="lot">Lot</label>
@@ -42,6 +46,12 @@
   <div id="form"></div>
 
   <script>
+
+  // Back link -> menu (same web app URL, no ?screen parameter)
+  google.script.run.withSuccessHandler(function (u) {
+    var b = document.getElementById('backLink');
+    if (b) b.href = u;
+  }).getWebAppUrl();
     let loaded = null;      // last uiLoadLot result
     let newSamples = [];    // samples staged in the browser, not yet written
     let grossAll = [];      // all 4 grossissement sub-lot slots for the target block

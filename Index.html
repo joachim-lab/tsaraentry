@@ -18,9 +18,12 @@
     #msg.ok { background: #e6f4ea; color: #188038; display: block; }
     #msg.err { background: #fce8e6; color: #c5221f; display: block; }
     #loading { display: none; color: #666; margin-top: 8px; }
+    .backlink { display:inline-block; margin-bottom:10px; font-size:14px; color:#1a73e8; text-decoration:none; }
+    .backlink:hover { text-decoration:underline; }
   </style>
 </head>
 <body>
+  <a class="backlink" id="backLink" href="#">&larr; Menu</a>
   <h1>Nourrissage — quantité donnée</h1>
 
   <label for="lot">Lot</label>
@@ -47,6 +50,11 @@
   <div id="msg"></div>
 
   <script>
+
+  google.script.run.withSuccessHandler(function (u) {
+    var b = document.getElementById('backLink');
+    if (b) b.href = u;
+  }).getWebAppUrl();
     let pending = [];
 
     function todayISO() {

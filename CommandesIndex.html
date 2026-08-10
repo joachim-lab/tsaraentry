@@ -31,9 +31,13 @@
     .hit:hover { background: #f8f9fa; }
     .hit.sel { border-color: #1a73e8; background: #e8f0fe; }
     .hit b { font-size: 14px; }
+    .backlink { display:inline-block; margin-bottom:10px; font-size:14px; color:#1a73e8;
+                text-decoration:none; }
+    .backlink:hover { text-decoration:underline; }
   </style>
 </head>
 <body>
+  <a class="backlink" id="backLink" href="#">&larr; Menu</a>
   <h1>Commandes</h1>
 
   <div class="tabs">
@@ -46,6 +50,12 @@
   <div id="paneFul" style="display:none"></div>
 
 <script>
+
+  // Back link -> menu (same web app URL, no ?screen parameter)
+  google.script.run.withSuccessHandler(function (u) {
+    var b = document.getElementById('backLink');
+    if (b) b.href = u;
+  }).getWebAppUrl();
   let OPTS = { lots: [], types: [] };
   let lines = [{}];            // create mode: one line per lot
   let mode = 'new';
