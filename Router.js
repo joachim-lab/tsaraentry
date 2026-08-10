@@ -2,14 +2,10 @@
  * Router.js — TSARA Entry web app
  * Serves the right screen based on ?screen= in the URL.
  *
- * Replaces the doGet that used to live in Code.js (which always
- * served the Nourrissage screen). Code.js's own doGet must be
- * removed when this file is added — two doGet functions in one
- * project is a conflict.
- *
- *   ?screen=nourrissage  -> Index.html    (screen 1)
- *   ?screen=lot          -> LotIndex.html (screen 2)
- *   no parameter         -> Menu.html     (chooser)
+ *   ?screen=nourrissage  -> Index.html           (screen 1)
+ *   ?screen=lot          -> LotIndex.html        (screen 2)
+ *   ?screen=commandes    -> CommandesIndex.html  (screen 3)
+ *   no parameter         -> Menu.html            (chooser)
  ***************************************************************/
 
 function doGet(e) {
@@ -18,6 +14,7 @@ function doGet(e) {
   let file;
   if (screen === "nourrissage") file = "Index";
   else if (screen === "lot") file = "LotIndex";
+  else if (screen === "commandes") file = "CommandesIndex";
   else file = "Menu";
 
   return HtmlService.createHtmlOutputFromFile(file)

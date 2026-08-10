@@ -10,7 +10,6 @@
     a.tile:hover { background: #f8f9fa; }
     a.tile h2 { margin: 0 0 4px 0; font-size: 17px; color: #1a73e8; }
     a.tile p { margin: 0; font-size: 13px; color: #5f6368; }
-    .soon { opacity: .5; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -24,7 +23,8 @@
           '<h2>Nourrissage</h2><p>Saisie des quantités de provende distribuées</p></a>' +
         '<a class="tile" href="' + url + '?screen=lot">' +
           '<h2>Échantillonnage lot</h2><p>Pesées, température, commentaires par sous-lot</p></a>' +
-        '<div class="tile soon"><h2>Commandes</h2><p>Bientôt disponible</p></div>';
+        '<a class="tile" href="' + url + '?screen=commandes">' +
+          '<h2>Commandes</h2><p>Nouvelle commande · paiement &amp; livraison</p></a>';
     }).getWebAppUrl();
   </script>
 </body>
