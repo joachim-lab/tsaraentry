@@ -166,8 +166,9 @@
       '<div class="card"><div class="lineHead"><h3>Lot ' + (i+1) + '</h3>' +
         (lines.length > 1 ? '<span class="del" onclick="removeLine('+i+')">Retirer</span>' : '') +
       '</div>' +
-      '<label>Lot</label><select data-l="'+i+'" data-k="lot">' +
+      '<label>Lot</label><select data-l="'+i+'" data-k="lot" onchange="onLotChange(this)">' +
         '<option value="">-- choisir --</option>' + lotOpts + '</select>' +
+      '<div class="muted" id="avail'+i+'"></div>' +
       (al
         ? '<div class="row">' +
             '<div><label>Nombre alevins commandés</label>' +
@@ -234,6 +235,59 @@
     if (e.target && e.target.id && e.target.id.indexOf('livrer') === 0) e.target.dataset.touched = '1';
   });
 
+  // ---------- Item 3 : stock check ----------
+
+  /**
+   * The number of fish the engine will actually subtract for this line.
+   * AL -> column H (alevins a livrer). GR -> column N, a sheet formula
+   * =IFERROR((L*1000)/M;0), so PM is not advisory: it is the divisor
+   * that decides how many fish leave the cage. Blank or zero PM makes N
+   * zero, cmdDeduction returns null, and the engine skips the row with
+   * no message at all. Returns null when it does not resolve.
+   */
+  function lineQty(ln, al) {
+    if (al) return num(ln.alevinsLivrer);
+    const kg = num(ln.poissonKg);
+    const pm = num(ln.poissonPm);
+    if (kg === null || pm === null || pm <= 0) return null;
+    return kg * 1000 / pm;
+  }
+
+  function linePm(ln, al) { return al ? num(ln.alevinsPm) : num(ln.poissonPm); }
+
+  /** 16788 -> "16 788" ; 0.73 -> "0,73". */
+  function fmtNum(n) {
+    if (n === null || n === undefined || !isFinite(n)) return '\u2014';
+    const parts = String(Math.round(n * 100) / 100).split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    return parts.join(',');
+  }
+
+  /**
+   * Selection-time lookup. Information only - no verdict, no blocking,
+   * so staff can quote a customer before writing the order. The save
+   * path re-checks against fresh numbers and is the only thing that
+   * blocks.
+   */
+  function onLotChange(sel) {
+    const i = Number(sel.getAttribute('data-l'));
+    const box = el('avail' + i);
+    if (!box) return;
+    const key = sel.value;
+    if (!key) { box.innerHTML = ''; return; }
+    box.innerHTML = 'recherche du stock\u2026';
+    google.script.run
+      .withSuccessHandler(a => {
+        if (sel.value !== key) return;          // user changed lot meanwhile
+        if (a.reservedAll) { box.innerHTML = '<b>lot r\u00e9serv\u00e9 (TOUT)</b>'; return; }
+        if (!a.found) { box.innerHTML = 'lot introuvable dans le fichier lot'; return; }
+        box.innerHTML = 'disponible : <b>' + fmtNum(a.available) +
+                        '</b> \u00b7 PM : <b>' + fmtNum(a.pm) + ' g</b>';
+      })
+      .withFailureHandler(e => { box.innerHTML = 'stock indisponible : ' + esc(e.message); })
+      .cmdGetLotAvailability(key);
+  }
+
   function doCreate() {
     stashLines();
     const btn = el('btnCreate');
@@ -267,12 +321,56 @@
       })
     };
 
+    // ---- Item 3 : check stock before writing anything ----
+    // A quantity that does not resolve to a positive number still gets
+    // written to the sheet, but cmdDeduction returns null and the engine
+    // skips the row in silence - no error, no message in column Z. The
+    // server cannot see this (cmdToNum turns Infinity into null, so the
+    // line simply counts as zero), so the warning is raised here.
+    const localWarn = [];
+    const vLines = lines.map((ln, i) => {
+      const q = lineQty(ln, al);
+      if (q === null || !(q > 0)) {
+        localWarn.push('Lot ' + (i + 1) + ' (' + esc(ln.lot || '?') + ') : quantité non calculable' +
+          (al ? '' : ' — PM manquant ou nul') +
+          ' — le stock ne sera PAS déduit cette nuit.');
+      }
+      return { lot: ln.lot || '', qty: q, pm: linePm(ln, al) };
+    });
+
+    setStatus('banner', 'Vérification du stock…');
+    google.script.run
+      .withSuccessHandler(v => {
+        if (v.blocks && v.blocks.length) {
+          btn.disabled = false;
+          setStatusAndScroll('err', 'Commande NON enregistrée :<ul><li>' +
+            v.blocks.map(esc).join('</li><li>') + '</li></ul>');
+          return;
+        }
+        saveOrder(payload, (v.warnings || []).map(esc).concat(localWarn), btn);
+      })
+      .withFailureHandler(e => {
+        btn.disabled = false;
+        setStatusAndScroll('err', 'Vérification du stock impossible : ' + esc(e.message));
+      })
+      .cmdValidateOrderLines(vLines);
+  }
+
+  /** Write the order, then show any warnings next to the confirmation. */
+  function saveOrder(payload, warns, btn) {
+    setStatus('banner', 'Enregistrement…');
     google.script.run
       .withSuccessHandler(res => {
         lines = [{}];
         renderNew();
-        setStatusAndScroll('ok', 'Commande <b>' + esc(res.orderNumber) + '</b> enregistrée — ' +
-          res.rowCount + ' ligne(s), à partir de la ligne ' + res.firstRow + '.');
+        const msg = 'Commande <b>' + esc(res.orderNumber) + '</b> enregistrée — ' +
+          res.rowCount + ' ligne(s), à partir de la ligne ' + res.firstRow + '.';
+        setStatus('ok', msg);
+        if (warns.length) {
+          el('status').innerHTML += '<div class="warn">Attention :<ul><li>' +
+            warns.join('</li><li>') + '</li></ul></div>';
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       })
       .withFailureHandler(e => { btn.disabled = false; setStatusAndScroll('err', esc(e.message)); })
       .cmdCreateOrder(payload);
