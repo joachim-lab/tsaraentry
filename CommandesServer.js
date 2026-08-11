@@ -165,17 +165,23 @@ function cmdCreateOrder(payload) {
     put(C.BL, f.bl);
     put(C.DATE_CMD, cmdParseDate(f.dateCommande));
 
+    // ln.* values arrive already parsed to a number-or-null by the
+    // browser's num() (see CommandesIndex.html). Re-wrapping them in
+    // Number(...) here was the bug: Number(null) is 0, not "no value",
+    // and 0 is not undefined/null/"" so put() wrote it as real data
+    // (PM alevins / prix showed 0 when the fields were left blank).
+    // put() already skips undefined/null/"" — pass values through as-is.
     if (isAlevins) {
-      put(C.ALEVINS_NB, Number(ln.alevinsNb));
-      put(C.ALEVINS_PM, ln.alevinsPm === "" ? undefined : Number(ln.alevinsPm));
-      put(C.ALEVINS_LIVRER, ln.alevinsLivrer === "" ? undefined : Number(ln.alevinsLivrer));
-      put(C.ALEVINS_PRIX, ln.alevinsPrix === "" ? undefined : Number(ln.alevinsPrix));
-      put(C.TRANSPORT, ln.transport === "" ? undefined : Number(ln.transport));
+      put(C.ALEVINS_NB, ln.alevinsNb);
+      put(C.ALEVINS_PM, ln.alevinsPm);
+      put(C.ALEVINS_LIVRER, ln.alevinsLivrer);
+      put(C.ALEVINS_PRIX, ln.alevinsPrix);
+      put(C.TRANSPORT, ln.transport);
     } else {
-      put(C.POISSON_KG, Number(ln.poissonKg));
-      put(C.POISSON_PM, ln.poissonPm === "" ? undefined : Number(ln.poissonPm));
-      put(C.PRIX_KG, ln.prixKg === "" ? undefined : Number(ln.prixKg));
-      put(C.FRAIS, ln.frais === "" ? undefined : Number(ln.frais));
+      put(C.POISSON_KG, ln.poissonKg);
+      put(C.POISSON_PM, ln.poissonPm);
+      put(C.PRIX_KG, ln.prixKg);
+      put(C.FRAIS, ln.frais);
     }
 
     // Client/contact/remarks repeat on every row, as in existing data.
