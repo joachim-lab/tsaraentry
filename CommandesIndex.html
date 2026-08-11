@@ -283,9 +283,30 @@
         if (!a.found) { box.innerHTML = 'lot introuvable dans le fichier lot'; return; }
         box.innerHTML = 'disponible : <b>' + fmtNum(a.available) +
                         '</b> \u00b7 PM : <b>' + fmtNum(a.pm) + ' g</b>';
+        prefillPm(i, a.pm);
       })
       .withFailureHandler(e => { box.innerHTML = 'stock indisponible : ' + esc(e.message); })
       .cmdGetLotAvailability(key);
+  }
+
+  /**
+   * Put the lot's PM into this line's PM field - but ONLY when the user
+   * has left it empty. Never overwrite a typed value.
+   *
+   * Deliberately done here and not on the server. For grossis, column M
+   * is the divisor in =IFERROR((L*1000)/M;0), so it decides how many
+   * fish leave the cage. Substituting it server-side would put a number
+   * in the sheet that nobody typed and nobody saw. Filling the visible
+   * field keeps one rule: what is saved is what is on screen.
+   */
+  function prefillPm(i, pm) {
+    if (pm === null || pm === undefined || !isFinite(pm) || pm <= 0) return;
+    const k = isAlevins() ? 'alevinsPm' : 'poissonPm';
+    const inp = document.querySelector('[data-l="' + i + '"][data-k="' + k + '"]');
+    if (!inp || String(inp.value).trim() !== '') return;
+    inp.value = String(Math.round(pm * 100) / 100).replace('.', ',');
+    lines[i] = lines[i] || {};
+    lines[i][k] = inp.value;
   }
 
   function doCreate() {
@@ -365,11 +386,12 @@
         renderNew();
         const msg = 'Commande <b>' + esc(res.orderNumber) + '</b> enregistrée — ' +
           res.rowCount + ' ligne(s), à partir de la ligne ' + res.firstRow + '.';
-        setStatus('ok', msg);
-        if (warns.length) {
-          el('status').innerHTML += '<div class="warn">Attention :<ul><li>' +
-            warns.join('</li><li>') + '</li></ul></div>';
-        }
+        el('status').innerHTML =
+          '<div class="ok">' + msg + '</div>' +
+          (warns.length
+            ? '<div class="warn">Attention :<ul><li>' +
+              warns.join('</li><li>') + '</li></ul></div>'
+            : '');
         window.scrollTo({ top: 0, behavior: 'smooth' });
       })
       .withFailureHandler(e => { btn.disabled = false; setStatusAndScroll('err', esc(e.message)); })

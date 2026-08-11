@@ -580,7 +580,7 @@ function cmdValidateOrderLines(lines) {
     // strict > : ordering exactly down to the reservation floor is legal,
     // because the engine blocks on next < reserved, not next <= reserved.
     if (wanted[k] > a.available) {
-      blocks.push(k + " : stock insuffisant — demandé " + wanted[k] +
+      blocks.push(k + " : stock insuffisant — demandé " + Math.round(wanted[k]) +
                       ", disponible " + a.available +
                       " (stock " + a.count +
                       (a.reserved ? ", réservé " + a.reserved : "") +
