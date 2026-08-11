@@ -149,30 +149,30 @@
       (al
         ? '<div class="row">' +
             '<div><label>Nombre alevins commandés</label>' +
-              '<input type="number" step="any" data-l="'+i+'" data-k="alevinsNb" oninput="syncLivrer('+i+')"></div>' +
+              '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="alevinsNb" oninput="syncLivrer('+i+')"></div>' +
             '<div><label>PM alevins (g)</label>' +
-              '<input type="number" step="any" data-l="'+i+'" data-k="alevinsPm"></div>' +
+              '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="alevinsPm"></div>' +
           '</div>' +
           '<div class="row">' +
             '<div><label>Alevins à livrer (+5%)</label>' +
-              '<input type="number" step="any" data-l="'+i+'" data-k="alevinsLivrer" id="livrer'+i+'">' +
+              '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="alevinsLivrer" id="livrer'+i+'">' +
               '<div class="muted">Pré-calculé à +5%, modifiable.</div></div>' +
             '<div><label>Prix alevin</label>' +
-              '<input type="number" step="any" data-l="'+i+'" data-k="alevinsPrix"></div>' +
+              '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="alevinsPrix"></div>' +
           '</div>' +
           '<label>Prix transport</label>' +
-          '<input type="number" step="any" data-l="'+i+'" data-k="transport">'
+          '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="transport">'
         : '<div class="row">' +
             '<div><label>Kg poisson commandé</label>' +
-              '<input type="number" step="any" data-l="'+i+'" data-k="poissonKg"></div>' +
+              '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="poissonKg"></div>' +
             '<div><label>PM poisson (g)</label>' +
-              '<input type="number" step="any" data-l="'+i+'" data-k="poissonPm"></div>' +
+              '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="poissonPm"></div>' +
           '</div>' +
           '<div class="row">' +
             '<div><label>Prix / kg</label>' +
-              '<input type="number" step="any" data-l="'+i+'" data-k="prixKg"></div>' +
+              '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="prixKg"></div>' +
             '<div><label>Frais additionnels</label>' +
-              '<input type="number" step="any" data-l="'+i+'" data-k="frais"></div>' +
+              '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="frais"></div>' +
           '</div>') +
       '</div>'
     ).join('');
@@ -272,6 +272,16 @@
       '<div id="fulForm"></div>' +
       '<div id="hits"></div>';
     el('ficherche').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
+
+    // One delegated listener on the container: survives every re-render
+    // of the results list, so nothing has to be re-attached.
+    el('hits').addEventListener('click', function (ev) {
+      const card = ev.target.closest ? ev.target.closest('.hit') : null;
+      if (!card) return;
+      const key = card.getAttribute('data-key');
+      if (key) selectHit(key);
+    });
+
     doSearch();
   }
 
@@ -292,11 +302,6 @@
                 (o.paiement ? ' · payé le ' + esc(o.paiement) : ' · non soldée') + '</div>' +
               '</div>').join('')
           : '<div class="warn">Aucune commande trouvée.</div>';
-        // Handlers attached here rather than inline onclick, to avoid
-        // nested-quote escaping inside a generated HTML string.
-        document.querySelectorAll('#hits .hit').forEach(function (n) {
-          n.addEventListener('click', function () { selectHit(n.getAttribute('data-key')); });
-        });
       })
       .withFailureHandler(e => setStatus('err', esc(e.message)))
       .cmdFindOrders(el('ficherche').value, el('fOnlyUnpaid').checked);
@@ -320,6 +325,10 @@
           '<div><label>Date livraison</label><input type="date" id="uLivraison" value="'+esc(toISO(o.dateLivraison))+'"></div>' +
         '</div>' +
         '<label>Moyen de paiement</label><input type="text" id="uMoyen" value="'+esc(o.moyenPaiement || '')+'">' +
+        '<div class="row">' +
+          '<div><label>N° facture</label><input type="text" id="uFacture" value="'+esc(o.facture || '')+'"></div>' +
+          '<div><label>Bon de livraison externe</label><input type="text" id="uBl" value="'+esc(o.bl || '')+'"></div>' +
+        '</div>' +
         '<button class="go" id="btnFul" onclick="doFulfil()">Enregistrer</button>' +
       '</div>';
 
@@ -353,7 +362,9 @@
       .cmdRecordFulfilment(o.rows, {
         paiement: el('uPaiement').value,
         dateLivraison: el('uLivraison').value,
-        moyenPaiement: el('uMoyen').value
+        moyenPaiement: el('uMoyen').value,
+        facture: el('uFacture').value,
+        bl: el('uBl').value
       });
   }
 </script>
