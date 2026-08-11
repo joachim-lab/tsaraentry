@@ -593,15 +593,3 @@ function cmdValidateOrderLines(lines) {
 
   return { ok: blocks.length === 0, blocks: blocks, warnings: warnings, detail: detail };
 }
-
-/** READ ONLY probe. Delete once Item 3 is live. */
-function probeItem3Availability() {
-  ["24-4-B", "14-C4"].forEach(function (k) {
-    Logger.log(k + " -> " + JSON.stringify(cmdGetLotAvailability(k)));
-  });
-  Logger.log("--- submission test: same lot twice ---");
-  Logger.log(JSON.stringify(cmdValidateOrderLines([
-    { lot: "14-C4", qty: 5000, pm: 142.19 },
-    { lot: "14-C4", qty: 5000, pm: 142.19 }
-  ]), null, 2));
-}
