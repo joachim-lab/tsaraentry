@@ -159,8 +159,8 @@ function cmdCreateOrder(payload) {
     }
 
     put(C.LOT, ln.lot);
-    // First row carries the real type; the rest group onto it.
-    put(C.ORDER_NO, i === 0 ? f.type : "commande groupée");
+    // Column B (order number) is written later, row by row — see the
+    // sequential generation block below.
     put(C.FACTURE, f.facture);
     put(C.BL, f.bl);
     put(C.DATE_CMD, cmdParseDate(f.dateCommande));
@@ -191,15 +191,36 @@ function cmdCreateOrder(payload) {
   });
 
   const lastRow = firstRow + lines.length - 1;
+
+  // NOTE: the app does NOT copy formulas into new rows. Columns K, N,
+  // Q and W are already pre-filled with formulas far below the last
+  // data row (this is why getLastRow reports ~2051 while real orders
+  // end around row 180), so new rows inherit them automatically.
+  // An earlier version copied them from the row above; that was
+  // removed because it would propagate a gap if the preceding row ever
+  // had its formulas cleared by hand.
+
   SpreadsheetApp.flush();
 
-  // Order number: edit triggers never fire on programmatic writes.
-  // Sweep the whole range so "commande groupée" rows resolve against
-  // the first row's freshly generated number.
+  // Order numbers: edit triggers never fire on programmatic writes.
+  //
+  // Generate ROW BY ROW, not as one range. ac_enforceOrderRange_
+  // resolves "commande groupée" by reading the cell ABOVE as it goes,
+  // before generation happens later in the same pass — so sweeping the
+  // whole block at once makes row 2 see a literal "AL" above it, treat
+  // it as a prefix, and mint its own number (AL-26-164 / AL-26-165
+  // instead of both being 164). Going one row at a time reproduces
+  // exactly what sequential manual typing does: row 1 is generated
+  // first, then each grouped row copies an already-generated number.
   let orderNumber = "";
   try {
-    AutoCommandes.generateOrderNumbersForRows(firstRow, lastRow);
-    SpreadsheetApp.flush();
+    for (let i = 0; i < lines.length; i++) {
+      const row = firstRow + i;
+      sh.getRange(row, C.ORDER_NO).setValue(i === 0 ? f.type : "commande groupée");
+      SpreadsheetApp.flush();
+      AutoCommandes.generateOrderNumbersForRows(row, row);
+      SpreadsheetApp.flush();
+    }
     orderNumber = sh.getRange(firstRow, C.ORDER_NO).getDisplayValue();
   } catch (err) {
     throw new Error("La commande a été enregistrée (lignes " + firstRow + "-" + lastRow +
@@ -257,6 +278,8 @@ function cmdFindOrders(query, onlyUnfulfilled) {
         dateLivraison: r[C.DATE_LIVRAISON - 1],
         moyenPaiement: r[C.MOYEN_PAIEMENT - 1],
         livre: r[C.LIVRE - 1],
+        facture: r[C.FACTURE - 1],
+        bl: r[C.BL - 1],
         alevinsNb: [],
         poissonKg: []
       };
@@ -272,6 +295,8 @@ function cmdFindOrders(query, onlyUnfulfilled) {
     if (!g.paiement && r[C.PAIEMENT - 1]) g.paiement = r[C.PAIEMENT - 1];
     if (!g.dateLivraison && r[C.DATE_LIVRAISON - 1]) g.dateLivraison = r[C.DATE_LIVRAISON - 1];
     if (!g.moyenPaiement && r[C.MOYEN_PAIEMENT - 1]) g.moyenPaiement = r[C.MOYEN_PAIEMENT - 1];
+    if (!g.facture && r[C.FACTURE - 1]) g.facture = r[C.FACTURE - 1];
+    if (!g.bl && r[C.BL - 1]) g.bl = r[C.BL - 1];
   }
 
   const out = [];
@@ -321,6 +346,10 @@ function cmdRecordFulfilment(rows, payload) {
     put(C.PAIEMENT, cmdParseDate(f.paiement), "Paiement reçu");
     put(C.DATE_LIVRAISON, cmdParseDate(f.dateLivraison), "Date livraison");
     put(C.MOYEN_PAIEMENT, f.moyenPaiement, "Moyen paiement");
+    // Invoice / delivery-note numbers usually arrive after the order is
+    // placed, and apply to the whole order (Kim, 2026-08-11).
+    put(C.FACTURE, f.facture, "N° facture");
+    put(C.BL, f.bl, "Bon de livraison");
   });
 
   SpreadsheetApp.flush();
