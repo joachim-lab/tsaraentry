@@ -242,3 +242,192 @@ function debugLotRaw(fileId) {
     Logger.log(name + " row8: " + JSON.stringify(row8));
   });
 }
+
+/* =============================================================
+ * ITEM 3 — entry-time stock validation support (2026-08-11)
+ * Added for Screen 3 (Commandes). Screen 2 does not call these.
+ * ============================================================= */
+
+/**
+ * Engine's left-hand bound for the Grossissement scan: 0-based 14,
+ * i.e. column O (1-based 15). engine_core.js declares this inline as
+ * MIN_COL_INDEX at three separate places, all = 14.
+ */
+const GROSS_ENGINE_MIN_COL_INDEX = 14;
+
+/**
+ * Canonical lot key. VERBATIM copy of tt_canonKey_ from engine_core.js
+ * (live-verified 2026-08-11). Uppercase, strip everything that is not
+ * A-Z/0-9/hyphen, strip trailing hyphens.
+ *
+ * Trailing hyphens matter: Grossissement row 17 is
+ * =CONCATENATE($O$2;"-";O7;"-";O8), so an empty Happa yields "15-C6-"
+ * while Commandes carries the clean "15-C6". Both sides go through
+ * this function, so the stripping is symmetric.
+ *
+ * DO NOT paraphrase this. If the engine's version changes, change this
+ * one to match, character for character.
+ */
+function cmdCanonKey(v) {
+  return String(v == null ? "" : v)
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9\-]/g, "")
+    .replace(/-+$/, "");
+}
+
+/**
+ * Find the stock cell the ENGINE would deduct for a given order key.
+ *
+ * This mirrors engine_core.js tt_processCommandesWorker_ literally:
+ *   PRIORITY 1 — Grossissement row 17 (hidden join key), canonicalised,
+ *                scanned RIGHT -> LEFT from getLastColumn()-1 down to
+ *                0-based 14 (col O). First EXACT equality wins, and the
+ *                EXACT column is used.
+ *   PRIORITY 2 — S-tabs in LOT_CFG.S_SHEET_ORDER order, keys A11:A16,
+ *                count B11:B16, PM C11:C16. First hit wins.
+ *
+ * NOT the same question as scanGrossissement_, which matches row 7
+ * (Bassin) and snaps to the group start. A weekly group can hold several
+ * live sub-lots (confirmed live, Lot-14 week 10/05/2026: col Y = bassin
+ * C4 6923 fish @ 22.03g AND col Z = bassin 3 471 fish @ 5.00g). Group
+ * snapping returns the wrong sub-lot. Do not merge these two functions.
+ *
+ * Uses getLastColumn(), NOT LOT_CFG.GROSS_END_COL. The engine has no
+ * fixed right-hand bound; matching its bound is the point of this
+ * function.
+ *
+ * @param {Spreadsheet} lotSS  an opened lot file
+ * @param {string} orderCanon  already through cmdCanonKey
+ * @return {Object} { found, source, col|row, count, pm }
+ */
+function findSubLotColumnByOrderKey(lotSS, orderCanon) {
+  if (!orderCanon) return { found: false, reason: "empty key" };
+
+  // ---- PRIORITY 1: Grossissement ----
+  const shGross = lotSS.getSheetByName(LOT_CFG.GROSS_SHEET);
+  if (shGross) {
+    const lastCol = shGross.getLastColumn();
+    if (lastCol > GROSS_ENGINE_MIN_COL_INDEX) {
+      const row17 = shGross.getRange(17, 1, 1, lastCol).getValues()[0];
+      const row17Canon = row17.map(function (k) { return cmdCanonKey(k); });
+
+      // rows 10 and 11 in a single read
+      const rows1011 = shGross
+        .getRange(LOT_CFG.GROSS_ROW_NOMBRE, 1, 2, lastCol)
+        .getValues();
+      const row10 = rows1011[0];
+      const row11 = rows1011[1];
+
+      for (var c = lastCol - 1; c >= GROSS_ENGINE_MIN_COL_INDEX; c--) {
+        if (row17Canon[c] && row17Canon[c] === orderCanon) {
+          return {
+            found: true,
+            source: "GROSS",
+            col: c + 1,                        // 1-based, for humans
+            count: Number(row10[c]) || 0,       // engine: Number(...) || 0
+            pm: row11[c] === "" || row11[c] == null ? null : Number(row11[c])
+          };
+        }
+      }
+    }
+  }
+
+  // ---- PRIORITY 2: S-tabs ----
+  for (var i = 0; i < LOT_CFG.S_SHEET_ORDER.length; i++) {
+    const name = LOT_CFG.S_SHEET_ORDER[i];
+    const sh = lotSS.getSheetByName(name);
+    if (!sh) continue;
+
+    const keys = sh.getRange("A11:A16").getValues();
+    for (var r = 0; r < keys.length; r++) {
+      if (cmdCanonKey(keys[r][0]) !== orderCanon) continue;
+
+      // B = count, C = PM. Read only — the fry tabs (1-5 .. S1) hold a
+      // formula in C and must never be written by this app.
+      const bc = sh.getRange(11 + r, 2, 1, 2).getValues()[0];
+      return {
+        found: true,
+        source: name,
+        row: 11 + r,
+        count: Number(bc[0]) || 0,
+        pm: bc[1] === "" || bc[1] == null ? null : Number(bc[1])
+      };
+    }
+  }
+
+  return { found: false, reason: "no match in Grossissement or S-tabs" };
+}
+
+/**
+ * ITEM 3 PROBE — READ ONLY. Writes nothing anywhere.
+ * Reports, for one order key, everything the validator will depend on.
+ * Delete once Item 3 is live.
+ */
+function probeItem3(orderKey) {
+  const key = cmdCanonKey(orderKey || "24-4-B");
+  Logger.log("=== probeItem3: " + orderKey + " -> canon " + key + " ===");
+
+  // 1. which lot file
+  const lotNum = key.split("-")[0];
+  const list = getLotFileList();
+  const hit = list.filter(function (l) { return cmdCanonKey(l.lotNumber) === lotNum; });
+  if (!hit.length) {
+    Logger.log("NO LOT FILE for lot number " + lotNum);
+    Logger.log("available: " + JSON.stringify(list.map(function (l) { return l.lotNumber; })));
+    return;
+  }
+  Logger.log("lot file: " + hit[0].fileName + " (" + hit[0].fileId + ")");
+
+  // 2. the matched cell
+  const lotSS = SpreadsheetApp.openById(hit[0].fileId);
+  const m = findSubLotColumnByOrderKey(lotSS, key);
+  Logger.log("match: " + JSON.stringify(m));
+
+  // 3. reservation
+  const cmdSS = SpreadsheetApp.openById(CMD_CFG.SS_ID);
+  const shRes = cmdSS.getSheetByName("Réservations");
+  var reserved = 0;
+  if (shRes && shRes.getLastRow() >= 2) {
+    const rv = shRes.getRange(2, 1, shRes.getLastRow() - 1, 3).getValues();
+    rv.forEach(function (row) {
+      if (cmdCanonKey(row[0]) !== key) return;
+      const type = String(row[1] || "").trim().toUpperCase();
+      if (type === "TOUT") { reserved = Infinity; return; }
+      if (type === "NOMBRE") {
+        const n = Number(String(row[2]).replace(",", "."));
+        if (isFinite(n) && n > 0) reserved = n;
+      }
+    });
+  }
+  Logger.log("reserved: " + reserved);
+
+  // 4. pending (Y, Z, AA all empty AND H-or-N resolves)
+  const sh = cmdSheet();
+  const lastRow = sh.getLastRow();
+  var pending = 0;
+  var pendingRows = [];
+  if (lastRow >= CMD_CFG.START_ROW) {
+    const data = sh.getRange(CMD_CFG.START_ROW, 1, lastRow - CMD_CFG.START_ROW + 1, 27).getValues();
+    data.forEach(function (r, i) {
+      if (cmdCanonKey(r[CMD_CFG.COL.LOT - 1]) !== key) return;
+      if (String(r[CMD_CFG.COL.LOG - 1] || "").trim() !== "") return;
+      if (String(r[CMD_CFG.COL.ERROR - 1] || "").trim() !== "") return;
+      if (String(r[CMD_CFG.COL.ANNULE - 1] || "").trim() !== "") return;
+      const h = Number(String(r[CMD_CFG.COL.ALEVINS_LIVRER - 1]).replace(",", "."));
+      const n = Number(String(r[CMD_CFG.COL.POISSON_NB - 1]).replace(",", "."));
+      const ded = (isFinite(h) && h > 0) ? h : ((isFinite(n) && n > 0) ? n : null);
+      if (ded == null) return;
+      pending += ded;
+      pendingRows.push({ row: i + CMD_CFG.START_ROW, qty: ded });
+    });
+  }
+  Logger.log("pending: " + pending + " " + JSON.stringify(pendingRows));
+
+  // 5. the number the UI would show
+  if (m.found) {
+    Logger.log("AVAILABLE = " + (m.count - reserved - pending) +
+               "  (count " + m.count + " - reserved " + reserved + " - pending " + pending + ")");
+    Logger.log("PM on file: " + m.pm);
+  }
+}
