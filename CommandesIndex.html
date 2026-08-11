@@ -285,14 +285,20 @@
     doSearch();
   }
 
-  function doSearch() {
+  /**
+   * keepMsg: {cls, html} to restore once the refreshed list has
+   * rendered. Without it, a save confirmation set just before calling
+   * doSearch() is wiped by this function's own status updates before
+   * the user can read it.
+   */
+  function doSearch(keepMsg) {
     setStatus('banner', 'Recherche…');
     el('fulForm').innerHTML = '';
     selectedKey = null;
     google.script.run
       .withSuccessHandler(res => {
         hits = res;
-        setStatus('', '');
+        if (keepMsg) setStatus(keepMsg.cls, keepMsg.html); else setStatus('', '');
         el('hits').innerHTML = res.length
           ? res.map(o =>
               '<div class="hit" id="hit_'+esc(o.key)+'" data-key="'+esc(o.key)+'">' +
@@ -353,10 +359,12 @@
 
     google.script.run
       .withSuccessHandler(res => {
-        setStatus('ok', res.changed.length
-          ? res.changed.length + ' modification(s) enregistrée(s) sur ' + res.rows.length + ' ligne(s).'
-          : 'Aucun changement.');
-        doSearch();
+        doSearch({
+          cls: 'ok',
+          html: res.changed.length
+            ? res.changed.length + ' modification(s) enregistrée(s) sur ' + res.rows.length + ' ligne(s).'
+            : 'Aucun changement.'
+        });
       })
       .withFailureHandler(e => { btn.disabled = false; setStatus('err', esc(e.message)); })
       .cmdRecordFulfilment(o.rows, {
