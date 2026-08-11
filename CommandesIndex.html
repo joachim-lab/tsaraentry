@@ -68,6 +68,16 @@
       .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
   function setStatus(cls, html) { el('status').innerHTML = html ? '<div class="'+cls+'">'+html+'</div>' : ''; }
+
+  /**
+   * Show a status message AND bring it into view. The Commandes form
+   * is long enough that a confirmation set while the user is at the
+   * bottom of the page is never seen.
+   */
+  function setStatusAndScroll(cls, html) {
+    setStatus(cls, html);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
   function num(v) {
     if (v === null || v === undefined) return null;
     const s = String(v).trim().replace(',', '.');
@@ -98,16 +108,20 @@
 
   // ---------- MODE A: new order ----------
   function renderNew() {
+    // Display friendly labels but keep the RAW value: column B is
+    // matched by automatismescommande against O.PREFIXES ("AL"/"GR"),
+    // and anything else is cleared by ac_enforceOrderRange_. So the
+    // label is cosmetic only — the option value must stay untouched.
     const typeOpts = OPTS.types
       .filter(t => String(t).toLowerCase().indexOf('group') === -1)   // groupée is automatic
-      .map(t => '<option value="'+esc(t)+'">'+esc(t)+'</option>').join('');
+      .map(t => '<option value="'+esc(t)+'">'+esc(typeLabel(t))+'</option>').join('');
 
     el('paneNew').innerHTML =
       '<div class="card"><h3>Commande</h3>' +
         '<div class="row">' +
           '<div><label>Type</label><select id="fType" onchange="renderLines()">' +
             '<option value="">-- choisir --</option>' + typeOpts + '</select>' +
-            '<div class="muted">AL = alevins · GR = poisson</div></div>' +
+            '<div class="muted">Alevins = jeunes poissons · Grossis = poissons de taille marchande</div></div>' +
           '<div><label>Date commande</label><input type="date" id="fDate" value="'+todayISO()+'"></div>' +
         '</div>' +
         '<div class="row">' +
@@ -124,6 +138,14 @@
       '<button class="primary" style="margin-top:12px" onclick="addLine()">+ Ajouter un lot</button>' +
       '<button class="go" id="btnCreate" onclick="doCreate()">Enregistrer la commande</button>';
     renderLines();
+  }
+
+  /** Cosmetic label for a raw order-type code. Unknown codes pass through. */
+  function typeLabel(t) {
+    const k = String(t).trim().toUpperCase();
+    if (k === 'AL') return 'Alevins';
+    if (k === 'GR') return 'Grossis';
+    return t;
   }
 
   function isAlevins() {
@@ -247,12 +269,12 @@
 
     google.script.run
       .withSuccessHandler(res => {
-        setStatus('ok', 'Commande <b>' + esc(res.orderNumber) + '</b> enregistrée — ' +
-          res.rowCount + ' ligne(s), à partir de la ligne ' + res.firstRow + '.');
         lines = [{}];
         renderNew();
+        setStatusAndScroll('ok', 'Commande <b>' + esc(res.orderNumber) + '</b> enregistrée — ' +
+          res.rowCount + ' ligne(s), à partir de la ligne ' + res.firstRow + '.');
       })
-      .withFailureHandler(e => { btn.disabled = false; setStatus('err', esc(e.message)); })
+      .withFailureHandler(e => { btn.disabled = false; setStatusAndScroll('err', esc(e.message)); })
       .cmdCreateOrder(payload);
   }
 
@@ -298,7 +320,7 @@
     google.script.run
       .withSuccessHandler(res => {
         hits = res;
-        if (keepMsg) setStatus(keepMsg.cls, keepMsg.html); else setStatus('', '');
+        if (keepMsg) setStatusAndScroll(keepMsg.cls, keepMsg.html); else setStatus('', '');
         el('hits').innerHTML = res.length
           ? res.map(o =>
               '<div class="hit" id="hit_'+esc(o.key)+'" data-key="'+esc(o.key)+'">' +
@@ -366,7 +388,7 @@
             : 'Aucun changement.'
         });
       })
-      .withFailureHandler(e => { btn.disabled = false; setStatus('err', esc(e.message)); })
+      .withFailureHandler(e => { btn.disabled = false; setStatusAndScroll('err', esc(e.message)); })
       .cmdRecordFulfilment(o.rows, {
         paiement: el('uPaiement').value,
         dateLivraison: el('uLivraison').value,
