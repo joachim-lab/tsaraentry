@@ -269,8 +269,8 @@
         '<label style="font-weight:normal"><input type="checkbox" id="fOnlyUnpaid" checked style="width:auto"> ' +
           'Seulement les commandes non soldées</label>' +
       '</div>' +
-      '<div id="hits"></div>' +
-      '<div id="fulForm"></div>';
+      '<div id="fulForm"></div>' +
+      '<div id="hits"></div>';
     el('ficherche').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
     doSearch();
   }
@@ -322,6 +322,10 @@
         '<label>Moyen de paiement</label><input type="text" id="uMoyen" value="'+esc(o.moyenPaiement || '')+'">' +
         '<button class="go" id="btnFul" onclick="doFulfil()">Enregistrer</button>' +
       '</div>';
+
+    // The results list can be long; make sure the form is actually seen.
+    const node = el('fulForm');
+    if (node && node.scrollIntoView) node.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   /** Sheet shows dd/MM/yyyy; date inputs need yyyy-MM-dd. */
