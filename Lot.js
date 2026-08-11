@@ -431,3 +431,30 @@ function probeItem3(orderKey) {
     Logger.log("PM on file: " + m.pm);
   }
 }
+
+/** Wrapper: probe a Grossissement-stage lot. Change the key here and re-push. */
+function probeItem3Gross() {
+  probeItem3("14-C4");
+}
+
+/**
+ * READ ONLY. Distinct order keys currently in Commandes column A, with a row
+ * count each. Opens no lot files, so it is fast. Use it to pick a key for
+ * probeItem3 if the one above does not resolve.
+ */
+function probeItem3ListKeys() {
+  const sh = cmdSheet();
+  const lastRow = sh.getLastRow();
+  if (lastRow < CMD_CFG.START_ROW) { Logger.log("no rows"); return; }
+  const col = sh.getRange(CMD_CFG.START_ROW, CMD_CFG.COL.LOT,
+                          lastRow - CMD_CFG.START_ROW + 1, 1).getValues();
+  const counts = {};
+  col.forEach(function (r) {
+    const k = cmdCanonKey(r[0]);
+    if (!k) return;
+    counts[k] = (counts[k] || 0) + 1;
+  });
+  const keys = Object.keys(counts).sort();
+  Logger.log("distinct keys (" + keys.length + "):");
+  keys.forEach(function (k) { Logger.log("  " + k + "  x" + counts[k]); });
+}
