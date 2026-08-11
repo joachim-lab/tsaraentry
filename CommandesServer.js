@@ -52,6 +52,23 @@ function cmdSheet() {
 }
 
 /**
+ * Parse a "yyyy-MM-dd" string from a browser date input into a
+ * midnight LOCAL date (script timezone), never new Date(str) directly.
+ * new Date("2026-08-11") parses as UTC midnight, which becomes
+ * 03:00:00 once Sheets displays it in Africa/Nairobi (UTC+3) — a
+ * timestamp on a cell every other writer in this system leaves as a
+ * plain date. If anything ever compares payment/delivery dates by
+ * equality, a value carrying a time component could silently fail
+ * to match a date-only value written elsewhere.
+ */
+function cmdParseDate(isoStr) {
+  if (!isoStr) return undefined;
+  const m = String(isoStr).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return undefined;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+/**
  * First row after the last real order. Scans column A — getLastRow()
  * overshoots badly here (reports 2051 when real data ends at 180).
  */
@@ -146,7 +163,7 @@ function cmdCreateOrder(payload) {
     put(C.ORDER_NO, i === 0 ? f.type : "commande groupée");
     put(C.FACTURE, f.facture);
     put(C.BL, f.bl);
-    put(C.DATE_CMD, f.dateCommande ? new Date(f.dateCommande) : undefined);
+    put(C.DATE_CMD, cmdParseDate(f.dateCommande));
 
     if (isAlevins) {
       put(C.ALEVINS_NB, Number(ln.alevinsNb));
@@ -295,8 +312,8 @@ function cmdRecordFulfilment(rows, payload) {
       if (before !== after) changed.push("L" + r + " " + label + ": " + (before || "(vide)") + " -> " + after);
     }
 
-    put(C.PAIEMENT, f.paiement ? new Date(f.paiement) : undefined, "Paiement reçu");
-    put(C.DATE_LIVRAISON, f.dateLivraison ? new Date(f.dateLivraison) : undefined, "Date livraison");
+    put(C.PAIEMENT, cmdParseDate(f.paiement), "Paiement reçu");
+    put(C.DATE_LIVRAISON, cmdParseDate(f.dateLivraison), "Date livraison");
     put(C.MOYEN_PAIEMENT, f.moyenPaiement, "Moyen paiement");
   });
 
