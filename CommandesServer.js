@@ -378,3 +378,230 @@ function testCommandesServer() {
   Logger.log("--- test binding AutoCommandes (plage vide, n'écrit rien) ---");
   Logger.log(AutoCommandes.generateOrderNumbersForRows(3, 2));
 }
+
+/* =============================================================
+ * ITEM 3 — entry-time stock validation (2026-08-11)
+ *
+ * Mirrors the nightly engine's deduction logic so an order that would
+ * fail overnight is caught at the counter instead.
+ *
+ * Rule set (agreed with Kim 2026-08-11, each grounded in live code):
+ *   TOUT reservation   -> BLOCK   (engine: reserved = Infinity)
+ *   qty > available    -> BLOCK   (engine: next < 0, or next < reserved)
+ *   PM mismatch        -> WARN    (advisory only, engine ignores PM)
+ *   key not found      -> WARN    (engine writes "NOT FOUND ON ")
+ *
+ * Why "not found" only warns: the Commandes lot dropdown is built by
+ * tt_applyCommandesDropdown_ from Stock Poisson "lot"!N3:N50, while this
+ * function reads the LOT FILE. Two different sources, so they can drift
+ * apart legitimately. Blocking on a disagreement we cannot adjudicate
+ * would stop a real sale being recorded. Quantity is different: that
+ * number comes from the very cell the engine deducts, so it is certain
+ * and safe to block on.
+ * ============================================================= */
+
+/**
+ * Stock picture for one order key, as the engine would see it.
+ *
+ * @param {string} orderKey  raw lot key, e.g. "24-4-B"
+ * @return {Object} {
+ *   key, found, source, col|row, count, pm,
+ *   reserved,            // number, or the string "TOUT"
+ *   pending,             // already-entered rows not yet deducted
+ *   available,           // count - reserved - pending (null if TOUT)
+ *   reservedAll          // true => block outright
+ * }
+ */
+function cmdGetLotAvailability(orderKey) {
+  const key = cmdCanonKey(orderKey);
+  const out = {
+    key: key, found: false, source: null, count: null, pm: null,
+    reserved: 0, pending: 0, available: null, reservedAll: false
+  };
+  if (!key) return out;
+
+  // ---- reservation first: TOUT short-circuits everything ----
+  // Must come before the arithmetic, otherwise available goes -Infinity
+  // and that value could reach the UI.
+  const res = cmdGetReservation(key);
+  if (res === "TOUT") {
+    out.reserved = "TOUT";
+    out.reservedAll = true;
+    return out;
+  }
+  out.reserved = res;
+
+  // ---- locate the lot file ----
+  const lotNum = key.split("-")[0];
+  const list = getLotFileList();
+  var fileId = null;
+  for (var i = 0; i < list.length; i++) {
+    if (cmdCanonKey(list[i].lotNumber) === lotNum) { fileId = list[i].fileId; break; }
+  }
+  if (!fileId) return out;   // found stays false -> caller warns
+
+  // ---- the cell the engine would deduct ----
+  const m = findSubLotColumnByOrderKey(SpreadsheetApp.openById(fileId), key);
+  if (!m.found) return out;
+
+  out.found = true;
+  out.source = m.source;
+  if (m.col) out.col = m.col;
+  if (m.row) out.row = m.row;
+  out.count = m.count;
+  out.pm = m.pm;
+
+  out.pending = cmdGetPendingQty(key);
+  out.available = out.count - out.reserved - out.pending;
+  return out;
+}
+
+/**
+ * Reservation for one canon key. Mirrors tt_loadReservations.
+ * Returns the string "TOUT", or a positive number, or 0.
+ */
+function cmdGetReservation(canonKey) {
+  const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
+  const sh = ss.getSheetByName("Réservations");
+  if (!sh) return 0;                    // missing tab = no reservations
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return 0;
+
+  const vals = sh.getRange(2, 1, lastRow - 1, 3).getValues();
+  var qty = 0;
+  for (var i = 0; i < vals.length; i++) {
+    if (cmdCanonKey(vals[i][0]) !== canonKey) continue;
+    const type = String(vals[i][1] || "").trim().toUpperCase();
+    if (type === "TOUT") return "TOUT";
+    if (type === "NOMBRE") {
+      const n = cmdToNum(vals[i][2]);
+      if (n != null && n > 0) qty = n;
+    }
+  }
+  return qty;
+}
+
+/**
+ * Sum of orders already in the sheet for this key that have NOT yet been
+ * deducted. Mirrors tt_commandeIsEligible_: Y, Z and AA all empty, and
+ * H-or-N resolves to a positive number.
+ *
+ * Z MATTERS. A row blocked on a previous night has Z filled and is never
+ * retried by the engine, so it will never deduct. Counting it as pending
+ * would understate availability and block good orders. Confirmed live
+ * 2026-08-11 on 24-4-B: two LOT RÉSERVÉ rows, pending correctly 0.
+ *
+ * NOTE: this term has NO counterpart in engine_core.js. The engine
+ * deducts every eligible row in one pass against a shrinking in-memory
+ * row10, so it never needs it. This function validates BEFORE any
+ * deduction has happened, so it does. Deliberate divergence — do not
+ * "correct" it to match the engine.
+ */
+function cmdGetPendingQty(canonKey) {
+  const sh = cmdSheet();
+  const lastRow = sh.getLastRow();
+  if (lastRow < CMD_CFG.START_ROW) return 0;
+
+  const data = sh.getRange(CMD_CFG.START_ROW, 1,
+                           lastRow - CMD_CFG.START_ROW + 1, 27).getValues();
+  var total = 0;
+  for (var i = 0; i < data.length; i++) {
+    const r = data[i];
+    if (cmdCanonKey(r[CMD_CFG.COL.LOT - 1]) !== canonKey) continue;
+    if (String(r[CMD_CFG.COL.LOG - 1]    || "").trim() !== "") continue;  // Y
+    if (String(r[CMD_CFG.COL.ERROR - 1]  || "").trim() !== "") continue;  // Z
+    if (String(r[CMD_CFG.COL.ANNULE - 1] || "").trim() !== "") continue;  // AA
+    const ded = cmdDeduction(r[CMD_CFG.COL.ALEVINS_LIVRER - 1],
+                             r[CMD_CFG.COL.POISSON_NB - 1]);
+    if (ded == null) continue;
+    total += ded;
+  }
+  return total;
+}
+
+/** H wins over N. Mirrors tt_commandeDeduction_. */
+function cmdDeduction(valH, valN) {
+  const h = cmdToNum(valH);
+  const n = cmdToNum(valN);
+  if (h != null && h > 0) return h;
+  if (n != null && n > 0) return n;
+  return null;
+}
+
+/** Mirrors tt_toNum_ : NBSP-tolerant, comma decimal. */
+function cmdToNum(v) {
+  if (v === "" || v == null) return null;
+  const s = String(v).replace(/\u00A0/g, " ").replace(/\s+/g, "").replace(",", ".");
+  const n = Number(s);
+  return isFinite(n) ? n : null;
+}
+
+/**
+ * Validate a whole submission before saving.
+ *
+ * Lines are summed BY CANON KEY, not checked one at a time: a single
+ * order can list the same lot on two rows, and those rows are not yet in
+ * the sheet so cmdGetPendingQty cannot see them. Checking row by row
+ * would let 3000 + 3000 through against a stock of 5000.
+ *
+ * @param {Array} lines  [{ lot, qty, pm }]  qty already H-or-N resolved
+ * @return {Object} { ok, blocks: [msg], warnings: [msg], detail: {key: avail} }
+ */
+function cmdValidateOrderLines(lines) {
+  const blocks = [];
+  const warnings = [];
+  const detail = {};
+  if (!lines || !lines.length) return { ok: true, blocks: blocks, warnings: warnings, detail: detail };
+
+  // sum this submission by canon key
+  const wanted = {};
+  const pmSeen = {};
+  lines.forEach(function (ln) {
+    const k = cmdCanonKey(ln.lot);
+    if (!k) return;
+    const q = cmdToNum(ln.qty);
+    wanted[k] = (wanted[k] || 0) + (q != null && q > 0 ? q : 0);
+    if (ln.pm != null && ln.pm !== "") pmSeen[k] = cmdToNum(ln.pm);
+  });
+
+  Object.keys(wanted).forEach(function (k) {
+    const a = cmdGetLotAvailability(k);
+    detail[k] = a;
+
+    if (a.reservedAll) {
+      blocks.push(k + " : ce lot est réservé, choisissez un autre lot");
+      return;
+    }
+    if (!a.found) {
+      warnings.push(k + " : ce lot n'est pas trouvé dans le fichier lot ; " +
+                        "la déduction échouera cette nuit");
+      return;
+    }
+    // strict > : ordering exactly down to the reservation floor is legal,
+    // because the engine blocks on next < reserved, not next <= reserved.
+    if (wanted[k] > a.available) {
+      blocks.push(k + " : stock insuffisant — demandé " + wanted[k] +
+                      ", disponible " + a.available +
+                      " (stock " + a.count +
+                      (a.reserved ? ", réservé " + a.reserved : "") +
+                      (a.pending ? ", en attente " + a.pending : "") + ")");
+    }
+    if (pmSeen[k] != null && a.pm != null && pmSeen[k] !== a.pm) {
+      warnings.push(k + " : PM saisi " + pmSeen[k] + " ≠ PM du lot " + a.pm);
+    }
+  });
+
+  return { ok: blocks.length === 0, blocks: blocks, warnings: warnings, detail: detail };
+}
+
+/** READ ONLY probe. Delete once Item 3 is live. */
+function probeItem3Availability() {
+  ["24-4-B", "14-C4"].forEach(function (k) {
+    Logger.log(k + " -> " + JSON.stringify(cmdGetLotAvailability(k)));
+  });
+  Logger.log("--- submission test: same lot twice ---");
+  Logger.log(JSON.stringify(cmdValidateOrderLines([
+    { lot: "14-C4", qty: 5000, pm: 142.19 },
+    { lot: "14-C4", qty: 5000, pm: 142.19 }
+  ]), null, 2));
+}
