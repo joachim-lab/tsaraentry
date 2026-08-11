@@ -43,8 +43,42 @@ const LOT_CFG = {
   ]
 };
 
-/** List available lot files: [{ lotNumber, fileId, fileName }]. */
+const LOT_FILE_LIST_CACHE_KEY = "lotFileList_v1";
+const LOT_FILE_LIST_CACHE_SECONDS = 300;
+
+/**
+ * List available lot files: [{ lotNumber, fileId, fileName }].
+ *
+ * Cached for 5 minutes. The Drive enumeration cost ~465 ms and ran on
+ * every lot lookup, for a list that only changes when a new lot file is
+ * created - a few times a year.
+ *
+ * CONSEQUENCE, deliberate: a brand-new lot can stay invisible to this
+ * app for up to 5 minutes. It would not appear in the Commandes lot
+ * dropdown that fast either, since that is rebuilt by the nightly
+ * engine. Run clearLotFileListCache() to force a refresh sooner.
+ *
+ * This affects screens 1 and 2 as well - they call the same function.
+ * For them it is a straight speed-up on the same 5-minute terms.
+ */
 function getLotFileList() {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get(LOT_FILE_LIST_CACHE_KEY);
+  if (hit) return JSON.parse(hit);
+
+  const out = buildLotFileList();
+  cache.put(LOT_FILE_LIST_CACHE_KEY, JSON.stringify(out), LOT_FILE_LIST_CACHE_SECONDS);
+  return out;
+}
+
+/** Drop the cached list. Run after creating a lot file to see it now. */
+function clearLotFileListCache() {
+  CacheService.getScriptCache().remove(LOT_FILE_LIST_CACHE_KEY);
+  Logger.log("lot file list cache cleared");
+}
+
+/** The real enumeration. Always hits Drive - call getLotFileList instead. */
+function buildLotFileList() {
   const folder = DriveApp.getFolderById(LOT_CFG.LOTS_FOLDER_ID);
   const files = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
   const out = [];

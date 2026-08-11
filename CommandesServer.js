@@ -499,7 +499,12 @@ function cmdGetReservation(canonKey) {
  */
 function cmdGetPendingQty(canonKey) {
   const sh = cmdSheet();
-  const lastRow = sh.getLastRow();
+  // NOT getLastRow(): it reports ~2041 here against ~180 real orders,
+  // because K, N, Q and W carry formulas far below the data. Reading to
+  // it costs ~55 000 mostly-empty cells to sum about a dozen values.
+  // findNextCommandeRow scans column A for the real end - the same
+  // workaround cmdCreateOrder already depends on.
+  const lastRow = findNextCommandeRow(sh) - 1;
   if (lastRow < CMD_CFG.START_ROW) return 0;
 
   const data = sh.getRange(CMD_CFG.START_ROW, 1,
