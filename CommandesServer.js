@@ -649,12 +649,43 @@ function buildLotPmMap() {
 }
 
 /**
+ * Every TOUT reservation, in one read: { canonKey: true }.
+ *
+ * Only TOUT is returned. A NOMBRE reservation does not make a lot
+ * unorderable - it lowers the available count, which the per-lot
+ * readout already shows and cmdValidateOrderLines already enforces.
+ * Greying those out would refuse sales the farm can legitimately make.
+ *
+ * NOT cached. The Réservations tab is a handful of rows, and a stale
+ * reservation is the one kind of staleness that could let a blocked
+ * order be typed. Read fresh, once per page load.
+ */
+function buildReservedAllMap() {
+  const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
+  const sh = ss.getSheetByName("Réservations");
+  const out = {};
+  if (!sh) return out;
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return out;
+
+  const vals = sh.getRange(2, 1, lastRow - 1, 3).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    const key = cmdCanonKey(vals[i][0]);
+    if (!key) continue;
+    if (String(vals[i][1] || "").trim().toUpperCase() === "TOUT") out[key] = true;
+  }
+  return out;
+}
+
+/**
  * Everything the Commandes screen needs to gate its lot dropdown:
- * the PM map plus the boundaries, so the client never hardcodes them.
+ * the PM map, the TOUT reservations, and the boundaries - so the
+ * client never hardcodes any of them.
  */
 function cmdGetLotGateData() {
   return {
     pm: cmdGetLotPmMap(),
+    reservedAll: buildReservedAllMap(),
     fryMax: cmdFryMaxPm(),
     grBlock: CMD_GR_BLOCK_PM,
     grWarn: CMD_GR_WARN_PM
@@ -665,11 +696,14 @@ function cmdGetLotGateData() {
 function testLotGate() {
   const d = cmdGetLotGateData();
   Logger.log("fryMax=" + d.fryMax + "  grBlock=" + d.grBlock + "  grWarn=" + d.grWarn);
+  const res = Object.keys(d.reservedAll);
+  Logger.log("réservés TOUT (" + res.length + ") : " + (res.join(", ") || "aucun"));
   Object.keys(d.pm).sort().forEach(function (k) {
     const pm = d.pm[k];
     const al = cmdLotTypeVerdict(true, pm, d.fryMax).level;
     const gr = cmdLotTypeVerdict(false, pm, d.fryMax).level;
-    Logger.log(k + "  PM=" + pm + "   AL:" + al + "   GR:" + gr);
+    Logger.log(k + "  PM=" + pm + "   AL:" + al + "   GR:" + gr +
+               (d.reservedAll[k] ? "   [RÉSERVÉ]" : ""));
   });
 }
 

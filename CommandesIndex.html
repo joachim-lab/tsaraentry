@@ -213,7 +213,17 @@
     // per-lot check: a gap in one sheet must not make a real lot vanish.
     const alSel = isAlevins();
     const lotOpts = OPTS.lots.map(l => {
-      const pm = (GATE && GATE.pm) ? GATE.pm[canonKey(l)] : undefined;
+      const key = canonKey(l);
+      // A TOUT reservation blocks regardless of PM or type, so it is
+      // tested first and its label wins - "incompatible" would send
+      // someone looking at the wrong problem.
+      const isReserved = !!(GATE && GATE.reservedAll && GATE.reservedAll[key]);
+      const pm = (GATE && GATE.pm) ? GATE.pm[key] : undefined;
+      if (isReserved) {
+        return '<option value="'+esc(l)+'" disabled>' + esc(l) +
+               (pm === undefined ? '' : ' \u00b7 ' + fmtNum(pm) + ' g') +
+               ' \u2014 r\u00e9serv\u00e9</option>';
+      }
       if (pm === undefined) return '<option value="'+esc(l)+'">'+esc(l)+'</option>';
       const v = lotTypeVerdict(alSel, pm);
       const tag = ' \u00b7 ' + fmtNum(pm) + ' g' +
