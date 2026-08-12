@@ -67,6 +67,7 @@
   }).getWebAppUrl();
   let OPTS = { lots: [], types: [] };
   let TARIFS = null;           // { bands:[...], fish:{detail,gros} } - loaded once at boot
+  let GATE = null;             // { pm:{key:PM}, fryMax, grBlock, grWarn } - lot/type gate
   let lines = [{}];            // create mode: one line per lot
   let mode = 'new';
   let hits = [];               // fulfilment search results
@@ -112,6 +113,14 @@
     .withSuccessHandler(t => { TARIFS = t; recomputeAllPrices(); })
     .withFailureHandler(e => setStatus('warn', 'Tarifs indisponibles : ' + esc(e.message)))
     .cmdGetTarifs();
+
+  // Lot/type gate data: one read of Stock Poisson, all lots at once.
+  // If it fails the dropdown simply stays unfiltered - the per-lot check
+  // at selection and the server check at save both still run.
+  google.script.run
+    .withSuccessHandler(g => { GATE = g; if (el('linesWrap')) renderLines(); })
+    .withFailureHandler(() => { GATE = null; })
+    .cmdGetLotGateData();
 
   function switchMode(m) {
     mode = m;
@@ -162,7 +171,7 @@
               '<option value="gros">Gros</option>' +
             '</select></div>' +
         '</div>' +
-        '<div class="row">' +
+        '<div class="row" id="livRow">' +
           '<div><label>Livraison</label>' +
             '<select id="fLivraison" onchange="onLivraisonChange()">' +
               '<option value="enlevement">Enl\u00e8vement \u00e0 la ferme</option>' +
@@ -198,10 +207,26 @@
     const t = (el('fType') && el('fType').value) || '';
     if (!t) { wrap.innerHTML = '<div class="warn">Choisir le type de commande en premier.</div>'; return; }
 
-    const lotOpts = OPTS.lots.map(l => '<option value="'+esc(l)+'">'+esc(l)+'</option>').join('');
+    // Lots incompatible with the chosen type are shown but DISABLED -
+    // visible and greyed, never hidden. A lot missing from Stock Poisson
+    // has no PM, so it stays selectable and falls through to the normal
+    // per-lot check: a gap in one sheet must not make a real lot vanish.
+    const alSel = isAlevins();
+    const lotOpts = OPTS.lots.map(l => {
+      const pm = (GATE && GATE.pm) ? GATE.pm[canonKey(l)] : undefined;
+      if (pm === undefined) return '<option value="'+esc(l)+'">'+esc(l)+'</option>';
+      const v = lotTypeVerdict(alSel, pm);
+      const tag = ' \u00b7 ' + fmtNum(pm) + ' g' +
+        (v.level === 'block' ? ' \u2014 incompatible' : (v.level === 'warn' ? ' \u2014 \u00e0 confirmer' : ''));
+      return '<option value="'+esc(l)+'"' + (v.level === 'block' ? ' disabled' : '') + '>' +
+             esc(l) + tag + '</option>';
+    }).join('');
     const al = isAlevins();
     if (el('provendeWrap')) el('provendeWrap').style.display = al ? '' : 'none';
     if (el('qualiteWrap'))  el('qualiteWrap').style.display  = al ? 'none' : '';
+    // GR has no livraison logic at all: flat Detail/Gros price, frais
+    // additionnels typed by hand (Kim 2026-08-12). Hide the whole row.
+    if (el('livRow')) el('livRow').style.display = al ? '' : 'none';
 
     wrap.innerHTML = lines.map((ln, i) =>
       '<div class="card"><div class="lineHead"><h3>Lot ' + (i+1) + '</h3>' +
@@ -272,6 +297,10 @@
     const n = num(nbInp.value);
     if (n === null) return;
     if (!lvInp.dataset.touched) lvInp.value = Math.round(n * 1.05);
+    // H decides the <=5000 / >5000 price tier, so a qty change can
+    // change the price - and this programmatic write fires no input
+    // event, so recompute explicitly.
+    recomputeLinePrice(i);
   }
   document.addEventListener('input', e => {
     if (e.target && e.target.id && e.target.id.indexOf('livrer') === 0) e.target.dataset.touched = '1';
@@ -336,8 +365,23 @@
                           'la d\u00e9duction \u00e9chouera cette nuit.';
           return;
         }
-        box.className = 'muted';
-        box.innerHTML = 'disponible : <b>' + fmtNum(a.available) +
+        // ---- lot/type gate (Kim 2026-08-12) ----
+        // A fry order against a lot of harvest-size fish (or a fish
+        // order against a fry lot) is always a mistake. Red-block here,
+        // clear any auto-filled PM/price from a previous selection, and
+        // the server blocks it again at save (cmdValidateOrderLines).
+        const alSel2 = isAlevins();
+        const verdict = lotTypeVerdict(alSel2, a.pm);
+        if (verdict.level === 'block') {
+          box.className = 'availBlock';
+          box.innerHTML = '\u26d4 ' + verdict.msg + ' La commande sera refus\u00e9e.';
+          setAuto(i, alSel2 ? 'alevinsPm' : 'poissonPm', null);
+          if (alSel2) setAuto(i, 'alevinsPrix', null);
+          return;
+        }
+        box.className = (verdict.level === 'warn') ? 'availWarn' : 'muted';
+        box.innerHTML = (verdict.level === 'warn' ? '\u26a0 ' + verdict.msg + '<br>' : '') +
+                        'disponible : <b>' + fmtNum(a.available) +
                         '</b> \u00b7 PM : <b>' + fmtNum(a.pm) + ' g</b>';
         prefillPm(i, a.pm);
         recomputeLinePrice(i);
@@ -350,32 +394,97 @@
   }
 
   /**
-   * Put the lot's PM into this line's PM field - but ONLY when the user
-   * has left it empty. Never overwrite a typed value.
+   * OWNERSHIP MODEL for pre-filled fields (2026-08-12, replaces
+   * "fill only when blank").
    *
-   * Deliberately done here and not on the server. For grossis, column M
-   * is the divisor in =IFERROR((L*1000)/M;0), so it decides how many
-   * fish leave the cage. Substituting it server-side would put a number
-   * in the sheet that nobody typed and nobody saw. Filling the visible
-   * field keeps one rule: what is saved is what is on screen.
+   * "Fill only when blank" froze the form: the first keystroke of a km
+   * value wrote 3km worth of transport, the field was no longer blank,
+   * and every later change (provende, livraison, Gros, the rest of the
+   * km) was refused. One cause, five observed bugs.
+   *
+   * Rule now: every managed field is either
+   *   AUTO  - the app wrote it; the app may rewrite or clear it when
+   *           inputs change,
+   *   USER  - a human typed in it; the app never touches it again.
+   * Typing in a field makes it USER. Clearing it hands it back to AUTO
+   * on the next recompute. Flags live in lines[i].__auto so they follow
+   * their line through add/remove splices.
+   *
+   * "What is saved is what is on screen" still holds: the app only ever
+   * writes into the visible fields, never behind them.
    */
-  function prefillPm(i, pm) {
-    if (pm === null || pm === undefined || !isFinite(pm) || pm <= 0) return;
-    const k = isAlevins() ? 'alevinsPm' : 'poissonPm';
-    const inp = document.querySelector('[data-l="' + i + '"][data-k="' + k + '"]');
-    if (!inp || String(inp.value).trim() !== '') return;
-    inp.value = String(Math.round(pm * 100) / 100).replace('.', ',');
+  const MANAGED_KEYS = { alevinsPm:1, alevinsPrix:1, transport:1, poissonPm:1, prixKg:1 };
+
+  document.addEventListener('input', e => {
+    const t = e.target;
+    if (!t || !t.getAttribute) return;
+    const k = t.getAttribute('data-k');
+    const l = t.getAttribute('data-l');
+    if (k && l !== null && MANAGED_KEYS[k]) {
+      const i = Number(l);
+      if (lines[i] && lines[i].__auto) delete lines[i].__auto[k];
+    }
+  });
+
+  /**
+   * Write `value` into line i's field IF the field is auto-owned or
+   * blank. value === null means "no longer applicable": clear the field
+   * only if the app owns it.
+   */
+  function setAuto(i, key, value) {
+    const inp = document.querySelector('[data-l="'+i+'"][data-k="'+key+'"]');
+    if (!inp) return;
     lines[i] = lines[i] || {};
-    lines[i][k] = inp.value;
+    lines[i].__auto = lines[i].__auto || {};
+    const isAuto = !!lines[i].__auto[key];
+    const isBlank = String(inp.value).trim() === '';
+    if (!isAuto && !isBlank) return;                 // USER-owned: never touch
+    if (value === null || value === undefined || !isFinite(value) || value === 0) {
+      if (isAuto) { inp.value = ''; delete lines[i].__auto[key]; lines[i][key] = ''; }
+      return;
+    }
+    inp.value = String(Math.round(value * 100) / 100).replace('.', ',');
+    lines[i].__auto[key] = true;
+    lines[i][key] = inp.value;
   }
 
-  // ---------- Tarifs : price + transport pre-fill (2026-08-12) ----------
-  //
-  // TARIFS is fetched once at boot (see boot section). Every lookup below
-  // runs in the browser - no per-line server round trip. Same "fill only
-  // when blank" rule as prefillPm: what is saved is what is on screen.
+  /** Lot PM -> this line's PM field, through the same ownership rules. */
+  function prefillPm(i, pm) {
+    if (pm === null || pm === undefined || !isFinite(pm) || pm <= 0) return;
+    setAuto(i, isAlevins() ? 'alevinsPm' : 'poissonPm', pm);
+  }
 
-  /** First band whose max covers this PM. Null above 20g (off the grid). */
+  // ---------- Tarifs : dynamic price + transport (2026-08-12 v2) ----------
+
+  /**
+   * Client mirror of cmdLotTypeVerdict. Boundaries come from GATE, which
+   * comes from the server - never hardcoded here, so the two copies
+   * cannot drift apart. Returns 'ok' when GATE has not loaded.
+   */
+  function lotTypeVerdict(isAl, pm) {
+    if (!GATE || pm === null || pm === undefined || !isFinite(pm)) return { level: 'ok', msg: '' };
+    if (isAl) {
+      if (pm > GATE.fryMax) return { level: 'block',
+        msg: 'PM du lot ' + fmtNum(pm) + ' g > ' + fmtNum(GATE.fryMax) +
+             ' g \u2014 ce n\u2019est pas un lot alevins.' };
+      return { level: 'ok', msg: '' };
+    }
+    if (pm < GATE.grBlock) return { level: 'block',
+      msg: 'PM du lot ' + fmtNum(pm) + ' g < ' + fmtNum(GATE.grBlock) +
+           ' g \u2014 trop petit pour \u00eatre vendu en grossis.' };
+    if (pm < GATE.grWarn) return { level: 'warn',
+      msg: 'PM du lot ' + fmtNum(pm) + ' g \u2014 en dessous de ' + fmtNum(GATE.grWarn) +
+           ' g ; vente possible mais \u00e0 confirmer.' };
+    return { level: 'ok', msg: '' };
+  }
+
+  /** Canon key, mirroring cmdCanonKey: trim, upper, collapse spaces. */
+  function canonKey(s) {
+    return String(s === null || s === undefined ? '' : s)
+      .replace(/\u00A0/g, ' ').trim().toUpperCase().replace(/\s+/g, '');
+  }
+
+  /** First band whose max covers this PM. Null above the grid. */
   function tarifBandForPm(pm) {
     if (!TARIFS || pm === null || !isFinite(pm) || pm <= 0) return null;
     for (let i = 0; i < TARIFS.bands.length; i++) {
@@ -388,31 +497,24 @@
   function tarifColumnKey(livraison, tier) {
     if (livraison === 'enlevement') return 'enlevement';
     if (livraison === 'environs') return tier === 'le' ? 'environsLe' : 'environsGt';
-    if (livraison === 'ambohim') return tier === 'le' ? 'ambohimLe' : 'ambohimGt';
+    if (livraison === 'ambohim')  return tier === 'le' ? 'ambohimLe'  : 'ambohimGt';
     return null;
   }
 
-  /** km x rate/km x 2 (aller-retour). <=50km : 860 ; >50km : 950. */
+  /** km x rate/km x 2 (aller-retour). <=50 km : 860 ; >50 km : 950. */
   function transportAmount(km) {
     if (km === null || !isFinite(km) || km <= 0) return null;
-    const rate = km <= 50 ? 860 : 950;
-    return km * rate * 2;
-  }
-
-  /** Fill a per-line field ONLY if it is currently blank. */
-  function fillIfBlank(i, key, value) {
-    if (value === null || value === undefined || !isFinite(value) || value === 0) return;
-    const inp = document.querySelector('[data-l="'+i+'"][data-k="'+key+'"]');
-    if (!inp || String(inp.value).trim() !== '') return;
-    inp.value = String(value).replace('.', ',');
-    lines[i] = lines[i] || {};
-    lines[i][key] = inp.value;
+    return km * (km <= 50 ? 860 : 950) * 2;
   }
 
   /**
-   * Prix alevin (AL) : band from this line's PM x client type x
-   * livraison x this line's own H-quantity tier (<=5000 / >5000).
-   * Prix / kg (GR) : flat Detail/Gros, no per-line dependency.
+   * One line's price, recomputed from CURRENT inputs, written through
+   * setAuto - so it tracks every change and clears when off the grid.
+   *
+   * AL : band(PM) x provende x livraison x tier(H<=5000).
+   *      H unknown -> 'gt' tier: the cheaper <=5000 price is only
+   *      granted once the quantity is known to qualify.
+   * GR : flat Detail/Gros. No livraison, no bands.
    */
   function recomputeLinePrice(i) {
     if (!TARIFS) return;
@@ -421,21 +523,22 @@
       const hInp = el('livrer'+i);
       if (!pmInp || !hInp) return;
       const band = tarifBandForPm(num(pmInp.value));
-      if (!band) return;
-      const provende = (el('fProvende') || {}).value || 'avec';
-      const livraison = (el('fLivraison') || {}).value || 'enlevement';
-      const h = num(hInp.value);
-      const tier = (h !== null && h <= 5000) ? 'le' : 'gt';
-      const colKey = tarifColumnKey(livraison, tier);
-      if (!colKey) return;
-      fillIfBlank(i, 'alevinsPrix', band[provende][colKey]);
+      let price = null;
+      if (band) {
+        const provende = (el('fProvende') || {}).value || 'avec';
+        const livraison = (el('fLivraison') || {}).value || 'enlevement';
+        const h = num(hInp.value);
+        const tier = (h !== null && h <= 5000) ? 'le' : 'gt';
+        price = band[provende][tarifColumnKey(livraison, tier)] || null;
+      }
+      setAuto(i, 'alevinsPrix', price);
     } else {
       const qualite = (el('fQualite') || {}).value || 'detail';
-      fillIfBlank(i, 'prixKg', TARIFS.fish[qualite]);
+      setAuto(i, 'prixKg', TARIFS.fish[qualite] || null);
     }
   }
 
-  /** All visible lines. Called after render, and on any order-level change. */
+  /** All lines + transport. Called after render and on any order-level change. */
   function recomputeAllPrices() {
     if (!TARIFS) return;
     lines.forEach((ln, i) => recomputeLinePrice(i));
@@ -443,18 +546,18 @@
   }
 
   /**
-   * Transport applies to ONE delivery per order, so it is written on
-   * line 1 only - matching how a single BL covers the whole order.
-   * AL writes to 'transport' (J) ; GR writes to 'frais' (P), the only
-   * field on that side the sheet's Q formula actually includes.
+   * Transport: AL orders only, Ambohimangakely only, line 1 only (one
+   * delivery per order). Any other state CLEARS an auto-filled amount -
+   * switching back to Enlevement must not leave a stale charge behind.
+   * GR : frais additionnels is typed by hand, never auto.
    */
   function recomputeTransport() {
-    if (!TARIFS) return;
+    if (!isAlevins()) return;
     const liv = (el('fLivraison') || {}).value;
-    if (liv !== 'ambohim') return;
-    const amt = transportAmount(num((el('fKm') || {}).value));
-    if (amt === null) return;
-    fillIfBlank(0, isAlevins() ? 'transport' : 'frais', amt);
+    const amt = (liv === 'ambohim')
+      ? transportAmount(num((el('fKm') || {}).value))
+      : null;
+    setAuto(0, 'transport', amt);
   }
 
   function onLivraisonChange() {
@@ -529,7 +632,7 @@
         btn.disabled = false;
         setStatusAndScroll('err', 'Vérification du stock impossible : ' + esc(e.message));
       })
-      .cmdValidateOrderLines(vLines);
+      .cmdValidateOrderLines(vLines, el('fType').value);
   }
 
   /** Write the order, then show any warnings next to the confirmation. */
