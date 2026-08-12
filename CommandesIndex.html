@@ -57,6 +57,7 @@
     if (b) b.href = u;
   }).getWebAppUrl();
   let OPTS = { lots: [], types: [] };
+  let TARIFS = null;           // { bands:[...], fish:{detail,gros} } - loaded once at boot
   let lines = [{}];            // create mode: one line per lot
   let mode = 'new';
   let hits = [];               // fulfilment search results
@@ -96,6 +97,13 @@
     .withFailureHandler(e => setStatus('err', 'Erreur chargement : ' + esc(e.message)))
     .cmdGetOptions();
 
+  // Tarifs load independently of OPTS - price pre-fill is a nice-to-have,
+  // never blocks the form. recomputeAllPrices() no-ops while TARIFS is null.
+  google.script.run
+    .withSuccessHandler(t => { TARIFS = t; recomputeAllPrices(); })
+    .withFailureHandler(e => setStatus('warn', 'Tarifs indisponibles : ' + esc(e.message)))
+    .cmdGetTarifs();
+
   function switchMode(m) {
     mode = m;
     el('tabNew').className = 'tab' + (m === 'new' ? ' active' : '');
@@ -133,6 +141,28 @@
           '<div><label>Bon de livraison externe</label><input type="text" id="fBl"></div>' +
         '</div>' +
         '<label>Remarques / destination</label><input type="text" id="fRemarques">' +
+        '<div class="row">' +
+          '<div id="provendeWrap"><label>Type de client</label>' +
+            '<select id="fProvende" onchange="recomputeAllPrices()">' +
+              '<option value="avec">Client provende</option>' +
+              '<option value="sans">Pas client provende</option>' +
+            '</select></div>' +
+          '<div id="qualiteWrap" style="display:none"><label>Qualit\u00e9</label>' +
+            '<select id="fQualite" onchange="recomputeAllPrices()">' +
+              '<option value="detail">D\u00e9tail</option>' +
+              '<option value="gros">Gros</option>' +
+            '</select></div>' +
+        '</div>' +
+        '<div class="row">' +
+          '<div><label>Livraison</label>' +
+            '<select id="fLivraison" onchange="onLivraisonChange()">' +
+              '<option value="enlevement">Enl\u00e8vement \u00e0 la ferme</option>' +
+              '<option value="environs">Livraison environs de la ferme</option>' +
+              '<option value="ambohim">Livraison Ambohimangakely</option>' +
+            '</select></div>' +
+          '<div id="kmWrap" style="display:none"><label>Km depuis Ambohimangakely</label>' +
+            '<input type="text" inputmode="decimal" id="fKm" oninput="recomputeTransport()"></div>' +
+        '</div>' +
       '</div>' +
       '<div id="linesWrap"></div>' +
       '<button class="primary" style="margin-top:12px" onclick="addLine()">+ Ajouter un lot</button>' +
@@ -161,6 +191,8 @@
 
     const lotOpts = OPTS.lots.map(l => '<option value="'+esc(l)+'">'+esc(l)+'</option>').join('');
     const al = isAlevins();
+    if (el('provendeWrap')) el('provendeWrap').style.display = al ? '' : 'none';
+    if (el('qualiteWrap'))  el('qualiteWrap').style.display  = al ? 'none' : '';
 
     wrap.innerHTML = lines.map((ln, i) =>
       '<div class="card"><div class="lineHead"><h3>Lot ' + (i+1) + '</h3>' +
@@ -174,11 +206,11 @@
             '<div><label>Nombre alevins commandés</label>' +
               '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="alevinsNb" oninput="syncLivrer('+i+')"></div>' +
             '<div><label>PM alevins (g)</label>' +
-              '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="alevinsPm"></div>' +
+              '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="alevinsPm" oninput="recomputeLinePrice('+i+')"></div>' +
           '</div>' +
           '<div class="row">' +
             '<div><label>Alevins à livrer (+5%)</label>' +
-              '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="alevinsLivrer" id="livrer'+i+'">' +
+              '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="alevinsLivrer" id="livrer'+i+'" oninput="recomputeLinePrice('+i+')">' +
               '<div class="muted">Pré-calculé à +5%, modifiable.</div></div>' +
             '<div><label>Prix alevin</label>' +
               '<input type="text" inputmode="decimal" data-l="'+i+'" data-k="alevinsPrix"></div>' +
@@ -200,6 +232,7 @@
       '</div>'
     ).join('');
     restoreLines();
+    recomputeAllPrices();
   }
 
   /** Keep typed values across re-renders. */
@@ -284,6 +317,7 @@
         box.innerHTML = 'disponible : <b>' + fmtNum(a.available) +
                         '</b> \u00b7 PM : <b>' + fmtNum(a.pm) + ' g</b>';
         prefillPm(i, a.pm);
+        recomputeLinePrice(i);
       })
       .withFailureHandler(e => { box.innerHTML = 'stock indisponible : ' + esc(e.message); })
       .cmdGetLotAvailability(key);
@@ -307,6 +341,101 @@
     inp.value = String(Math.round(pm * 100) / 100).replace('.', ',');
     lines[i] = lines[i] || {};
     lines[i][k] = inp.value;
+  }
+
+  // ---------- Tarifs : price + transport pre-fill (2026-08-12) ----------
+  //
+  // TARIFS is fetched once at boot (see boot section). Every lookup below
+  // runs in the browser - no per-line server round trip. Same "fill only
+  // when blank" rule as prefillPm: what is saved is what is on screen.
+
+  /** First band whose max covers this PM. Null above 20g (off the grid). */
+  function tarifBandForPm(pm) {
+    if (!TARIFS || pm === null || !isFinite(pm) || pm <= 0) return null;
+    for (let i = 0; i < TARIFS.bands.length; i++) {
+      if (pm <= TARIFS.bands[i].max) return TARIFS.bands[i];
+    }
+    return null;
+  }
+
+  /** Delivery + quantity tier -> which column of a band to use. */
+  function tarifColumnKey(livraison, tier) {
+    if (livraison === 'enlevement') return 'enlevement';
+    if (livraison === 'environs') return tier === 'le' ? 'environsLe' : 'environsGt';
+    if (livraison === 'ambohim') return tier === 'le' ? 'ambohimLe' : 'ambohimGt';
+    return null;
+  }
+
+  /** km x rate/km x 2 (aller-retour). <=50km : 860 ; >50km : 950. */
+  function transportAmount(km) {
+    if (km === null || !isFinite(km) || km <= 0) return null;
+    const rate = km <= 50 ? 860 : 950;
+    return km * rate * 2;
+  }
+
+  /** Fill a per-line field ONLY if it is currently blank. */
+  function fillIfBlank(i, key, value) {
+    if (value === null || value === undefined || !isFinite(value) || value === 0) return;
+    const inp = document.querySelector('[data-l="'+i+'"][data-k="'+key+'"]');
+    if (!inp || String(inp.value).trim() !== '') return;
+    inp.value = String(value).replace('.', ',');
+    lines[i] = lines[i] || {};
+    lines[i][key] = inp.value;
+  }
+
+  /**
+   * Prix alevin (AL) : band from this line's PM x client type x
+   * livraison x this line's own H-quantity tier (<=5000 / >5000).
+   * Prix / kg (GR) : flat Detail/Gros, no per-line dependency.
+   */
+  function recomputeLinePrice(i) {
+    if (!TARIFS) return;
+    if (isAlevins()) {
+      const pmInp = document.querySelector('[data-l="'+i+'"][data-k="alevinsPm"]');
+      const hInp = el('livrer'+i);
+      if (!pmInp || !hInp) return;
+      const band = tarifBandForPm(num(pmInp.value));
+      if (!band) return;
+      const provende = (el('fProvende') || {}).value || 'avec';
+      const livraison = (el('fLivraison') || {}).value || 'enlevement';
+      const h = num(hInp.value);
+      const tier = (h !== null && h <= 5000) ? 'le' : 'gt';
+      const colKey = tarifColumnKey(livraison, tier);
+      if (!colKey) return;
+      fillIfBlank(i, 'alevinsPrix', band[provende][colKey]);
+    } else {
+      const qualite = (el('fQualite') || {}).value || 'detail';
+      fillIfBlank(i, 'prixKg', TARIFS.fish[qualite]);
+    }
+  }
+
+  /** All visible lines. Called after render, and on any order-level change. */
+  function recomputeAllPrices() {
+    if (!TARIFS) return;
+    lines.forEach((ln, i) => recomputeLinePrice(i));
+    recomputeTransport();
+  }
+
+  /**
+   * Transport applies to ONE delivery per order, so it is written on
+   * line 1 only - matching how a single BL covers the whole order.
+   * AL writes to 'transport' (J) ; GR writes to 'frais' (P), the only
+   * field on that side the sheet's Q formula actually includes.
+   */
+  function recomputeTransport() {
+    if (!TARIFS) return;
+    const liv = (el('fLivraison') || {}).value;
+    if (liv !== 'ambohim') return;
+    const amt = transportAmount(num((el('fKm') || {}).value));
+    if (amt === null) return;
+    fillIfBlank(0, isAlevins() ? 'transport' : 'frais', amt);
+  }
+
+  function onLivraisonChange() {
+    const liv = (el('fLivraison') || {}).value;
+    const kmWrap = el('kmWrap');
+    if (kmWrap) kmWrap.style.display = (liv === 'ambohim') ? '' : 'none';
+    recomputeAllPrices();
   }
 
   function doCreate() {
