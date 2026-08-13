@@ -5,6 +5,7 @@
  *   ?screen=nourrissage  -> Index.html           (screen 1)
  *   ?screen=lot          -> LotIndex.html        (screen 2)
  *   ?screen=commandes    -> CommandesIndex.html  (screen 3)
+ *   ?screen=morts        -> MortsIndex.html      (screen 4)
  *   no parameter         -> Menu.html            (chooser)
  ***************************************************************/
 
@@ -15,6 +16,7 @@ function doGet(e) {
   if (screen === "nourrissage") file = "Index";
   else if (screen === "lot") file = "LotIndex";
   else if (screen === "commandes") file = "CommandesIndex";
+  else if (screen === "morts") file = "MortsIndex";
   else file = "Menu";
 
   return HtmlService.createHtmlOutputFromFile(file)
