@@ -22,7 +22,9 @@ function doGet(e) {
   if (screen === "tracform") {
     const p = (e && e.parameter) || {};
     if (!p.lot || !p.op) throw new Error("Paramètres manquants (lot, op).");
-    const html = LigneeUI.lu_dialogHtmlForLot(p.lot, p.op, tracOperatorEmail(p.who));
+    const html = LigneeUI.lu_dialogHtmlForLot(
+      p.lot, p.op, tracOperatorEmail(p.who),
+      getWebAppUrl() + "?screen=tracabilite");
     return HtmlService.createHtmlOutput(html)
       .setTitle("TSARA Entry")
       .addMetaTag("viewport", "width=device-width, initial-scale=1")
