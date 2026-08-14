@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; color: #202124; }
+    h1 { font-size: 20px; }
+    label { display: block; margin-top: 12px; font-weight: bold; font-size: 14px; }
+    select { width: 100%; padding: 8px; font-size: 16px; margin-top: 4px; box-sizing: border-box; }
+    button { margin-top: 20px; padding: 10px 16px; font-size: 15px; cursor: pointer; border: none; border-radius: 4px;
+             background: #188038; color: white; }
+    button:disabled { background: #999; cursor: not-allowed; }
+    #msg { margin-top: 16px; padding: 10px; border-radius: 4px; display: none; }
+    #msg.err { background: #fce8e6; color: #c5221f; display: block; }
+    .backlink { display:inline-block; margin-bottom:10px; font-size:14px; color:#1a73e8; text-decoration:none; }
+    .backlink:hover { text-decoration:underline; }
+    .hint { margin-top: 6px; font-size: 13px; color: #5f6368; }
+  </style>
+</head>
+<body>
+  <a class="backlink" id="backLink" href="#">&larr; Menu</a>
+  <h1>Traçabilité</h1>
+  <p class="hint">Choisir l'opérateur, le lot et l'opération, puis ouvrir le formulaire.</p>
+
+  <label for="who">Opérateur</label>
+  <select id="who" onchange="refresh()"><option value="">Chargement...</option></select>
+
+  <label for="lot">Lot</label>
+  <select id="lot" onchange="refresh()"><option value="">Chargement...</option></select>
+
+  <label for="op">Opération</label>
+  <select id="op" onchange="refresh()"><option value="">Chargement...</option></select>
+
+  <button id="goBtn" onclick="openForm()" disabled>Ouvrir le formulaire</button>
+  <div id="msg"></div>
+
+  <script>
+    var BASE = '';
+
+    function esc(s) {
+      return String(s === null || s === undefined ? '' : s)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    google.script.run.withSuccessHandler(function (u) {
+      BASE = u;
+      var b = document.getElementById('backLink');
+      if (b) b.href = u;
+      refresh();
+    }).getWebAppUrl();
+
+    google.script.run
+      .withSuccessHandler(function (o) {
+        fill('who', o.operators.map(function (x) { return { v: x.idx, t: x.name }; }));
+        fill('lot', o.lots.map(function (x) { return { v: x.fileId, t: 'Lot-' + x.lotNumber }; }));
+        fill('op',  o.ops.map(function (x) { return { v: x.key, t: x.label }; }));
+        refresh();
+      })
+      .withFailureHandler(function (e) {
+        showErr('Erreur de chargement : ' + esc(e.message));
+      })
+      .tracGetOptions();
+
+    function fill(id, items) {
+      document.getElementById(id).innerHTML =
+        '<option value="">-- choisir --</option>' +
+        items.map(function (i) {
+          return '<option value="' + esc(i.v) + '">' + esc(i.t) + '</option>';
+        }).join('');
+    }
+
+    /* The button stays disabled until all three are chosen AND the web
+       app URL has arrived. Without BASE there is nowhere to navigate,
+       and a click would silently do nothing. */
+    function refresh() {
+      var ready = BASE &&
+        document.getElementById('who').value &&
+        document.getElementById('lot').value &&
+        document.getElementById('op').value;
+      document.getElementById('goBtn').disabled = !ready;
+    }
+
+    /* Navigate rather than inject. The form is a complete HTML document
+       with its own script; HTML inserted into a live page does not run
+       its scripts, so an injected form would render but be dead. Served
+       as its own page by the Router, it behaves normally. */
+    function openForm() {
+      var url = BASE +
+        '?screen=tracform' +
+        '&lot=' + encodeURIComponent(document.getElementById('lot').value) +
+        '&op='  + encodeURIComponent(document.getElementById('op').value) +
+        '&who=' + encodeURIComponent(document.getElementById('who').value);
+      window.top.location.href = url;
+    }
+
+    function showErr(html) {
+      var m = document.getElementById('msg');
+      m.className = 'err';
+      m.innerHTML = html;
+    }
+  </script>
+</body>
+</html>
