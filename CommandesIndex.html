@@ -755,6 +755,14 @@
           '<div><label>Bon de livraison externe</label><input type="text" id="uBl" value="'+esc(o.bl || '')+'"></div>' +
         '</div>' +
         '<button class="go" id="btnFul" onclick="doFulfil()">Enregistrer</button>' +
+        '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #dadce0">' +
+          '<button id="btnCancel" onclick="askCancel()" ' +
+            'style="background:#fff;color:#c5221f;border:1px solid #c5221f;' +
+            'border-radius:4px;padding:10px 14px;font-size:15px;cursor:pointer">' +
+            'Annuler la commande</button>' +
+          '<div class="muted" style="margin-top:6px">D\u00e9finitif : une commande ' +
+            'annul\u00e9e ne peut pas \u00eatre r\u00e9activ\u00e9e.</div>' +
+        '</div>' +
       '</div>';
 
     // The results list can be long; make sure the form is actually seen.
@@ -793,6 +801,39 @@
         facture: el('uFacture').value,
         bl: el('uBl').value
       });
+  }
+
+  /**
+   * First click arms the button, second click cancels. Deliberately not
+   * window.confirm(): a dialog can be blocked inside this frame, and a
+   * blocked dialog leaves the button silently doing nothing. selectHit
+   * rebuilds the card, so the armed state never survives a reselect.
+   */
+  function askCancel() {
+    const b = el('btnCancel');
+    if (!b) return;
+    if (b.getAttribute('data-armed') === '1') { doCancel(); return; }
+    b.setAttribute('data-armed', '1');
+    b.textContent = "Confirmer l'annulation \u2014 d\u00e9finitif";
+    b.style.background = '#c5221f';
+    b.style.color = '#fff';
+  }
+
+  function doCancel() {
+    const o = hits.filter(h => h.key === selectedKey)[0];
+    if (!o) return;
+    const b = el('btnCancel');
+    b.disabled = true;
+    setStatus('banner', 'Annulation\u2026');
+    google.script.run
+      .withSuccessHandler(res => {
+        doSearch({ cls: 'ok',
+          html: 'Commande annul\u00e9e \u2014 ' + res.rows.length + ' ligne(s). ' +
+                'Si elle avait d\u00e9j\u00e0 \u00e9t\u00e9 d\u00e9duite, le stock ' +
+                'sera recr\u00e9dit\u00e9 cette nuit.' });
+      })
+      .withFailureHandler(e => { b.disabled = false; setStatusAndScroll('err', esc(e.message)); })
+      .cmdCancelOrder(o.rows);
   }
 </script>
 </body>

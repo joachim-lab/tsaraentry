@@ -374,6 +374,43 @@ function cmdRecordFulfilment(rows, payload) {
   return { rows: targets, changed: changed };
 }
 
+/**
+ * Mark every row of an order cancelled (column AA = "x").
+ *
+ * One way only, by Kim's rule (2026-08-15): a cancelled order can never
+ * be reactivated. cmdFindOrders skips cancelled rows, so the order
+ * disappears from the search as soon as this returns.
+ *
+ * Stock is not touched here. The engine settles it on its next run: an
+ * order it had already deducted is re-credited to the lot exactly once
+ * (guarded against a second credit), and an order it never processed
+ * simply becomes ineligible, so nothing moves.
+ */
+function cmdCancelOrder(rows) {
+  const sh = cmdSheet();
+  const C = CMD_CFG.COL;
+  const lastRow = findNextCommandeRow(sh) - 1;
+
+  const targets = (rows || []).map(Number).filter(function (r) {
+    return isFinite(r) && r >= CMD_CFG.START_ROW && r <= lastRow;
+  });
+  if (!targets.length) throw new Error("Aucune ligne de commande valide \u00e0 annuler.");
+
+  const already = [];
+  targets.forEach(function (r) {
+    if (String(sh.getRange(r, C.ANNULE).getDisplayValue() || "").trim() !== "") {
+      already.push(r);
+    }
+  });
+  if (already.length === targets.length) {
+    throw new Error("Cette commande est d\u00e9j\u00e0 annul\u00e9e.");
+  }
+
+  targets.forEach(function (r) { sh.getRange(r, C.ANNULE).setValue("x"); });
+  SpreadsheetApp.flush();
+  return { rows: targets, alreadyCancelled: already };
+}
+
 /** RUN FROM EDITOR: read-only checks of the screen-3 server side. */
 function testCommandesServer() {
   const sh = cmdSheet();
