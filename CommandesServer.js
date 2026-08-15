@@ -940,3 +940,163 @@ function cmdValidateOrderLines(lines, orderType) {
 
   return { ok: blocks.length === 0, blocks: blocks, warnings: warnings, detail: detail };
 }
+
+/***************************************************************
+ * RESERVATIONS - third tab on the Commandes screen.
+ *
+ * The Réservations tab lives in the SAME spreadsheet as the orders
+ * (CMD_CFG.SS_ID). Columns: A=Lot, B=Type, C=Quantité, D=Note.
+ * Headers in row 1, data from row 2.
+ *
+ * Two types only, matching tt_loadReservations in engine_core.js:
+ *   TOUT    - the whole lot is held; no order may touch it.
+ *   NOMBRE  - a count is held back; availability drops by that much.
+ *
+ * ONE HOLD PER LOT - enforced here, on add and on edit.
+ * cmdGetReservation's NOMBRE branch OVERWRITES rather than sums, so a
+ * second NOMBRE row for the same lot is silently ignored at order time.
+ * The read path already behaves as one-hold-per-lot; this makes it true.
+ *
+ * NO Z-CLEARING. TSARAENGINE tt_clearReservedFlags wipes every column-Z
+ * "LOT RÉSERVÉ" at the start of each Commandes pass and re-applies it
+ * only if the hold still stands. Deleting a row here is the whole job.
+ *
+ * NO CACHE TO CLEAR. buildReservedAllMap is deliberately uncached and
+ * read fresh on every page load, so a change here shows on the next load.
+ *
+ * DEAD HOLDS ARE HARMLESS. A lot that has been caged or moved leaves its
+ * key behind. The dropdown is built from Stock Poisson, so a dead key
+ * greys out nothing, and lot numbers never repeat, so it can never be
+ * inherited by a future lot. Rows are listed as they are, not flagged.
+ *
+ * ROW NUMBERS ARE THE HANDLE, and they shift when a row is deleted.
+ * Every write therefore re-reads the row and checks the lot still
+ * matches what the browser last saw. Mismatch = stale screen, refuse.
+ *
+ * resSheet() THROWS on a missing tab, where cmdGetReservation returns 0.
+ * Deliberate: order validation must fail safe, but a management screen
+ * must say the tab is gone rather than show an empty list.
+ ***************************************************************/
+
+const RES_SHEET = "Réservations";
+const RES_TYPES = ["TOUT", "NOMBRE"];
+
+function resSheet() {
+  const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
+  const sh = ss.getSheetByName(RES_SHEET);
+  if (!sh) throw new Error('Onglet introuvable: "' + RES_SHEET + '"');
+  return sh;
+}
+
+/** Every hold, in sheet order. row is the handle for edit and delete. */
+function resList() {
+  const sh = resSheet();
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+  const vals = sh.getRange(2, 1, lastRow - 1, 4).getValues();
+  const out = [];
+  for (var i = 0; i < vals.length; i++) {
+    const lot = String(vals[i][0] == null ? "" : vals[i][0]).trim();
+    if (!lot) continue;
+    out.push({
+      row: i + 2,
+      lot: lot,
+      key: cmdCanonKey(lot),
+      type: String(vals[i][1] == null ? "" : vals[i][1]).trim().toUpperCase(),
+      qty: cmdToNum(vals[i][2]),
+      note: String(vals[i][3] == null ? "" : vals[i][3]).trim()
+    });
+  }
+  return out;
+}
+
+/**
+ * Validate one payload and return cleaned values, or throw.
+ * excludeRow is the row being edited, so it does not clash with itself.
+ * Pass 0 when adding.
+ */
+function resClean(p, excludeRow) {
+  const lot = String(p && p.lot != null ? p.lot : "").trim();
+  if (!lot) throw new Error("Choisir un lot.");
+  const key = cmdCanonKey(lot);
+  if (!key) throw new Error("Clé de lot invalide : " + lot);
+
+  const type = String(p && p.type != null ? p.type : "").trim().toUpperCase();
+  if (RES_TYPES.indexOf(type) < 0) throw new Error("Type invalide : " + type);
+
+  var qty = null;
+  if (type === "NOMBRE") {
+    qty = cmdToNum(p.qty);
+    if (qty == null || qty <= 0) {
+      throw new Error("Quantité requise (nombre positif) pour une réservation NOMBRE.");
+    }
+    qty = Math.round(qty);
+  }
+
+  const existing = resList();
+  for (var i = 0; i < existing.length; i++) {
+    if (existing[i].row === excludeRow) continue;
+    if (existing[i].key === key) {
+      throw new Error("Le lot " + existing[i].lot + " a déjà une réservation (ligne " +
+                      existing[i].row + "). Modifier celle-ci plutôt que d'en ajouter une seconde.");
+    }
+  }
+
+  return {
+    lot: lot,
+    key: key,
+    type: type,
+    qty: qty,
+    note: String(p && p.note != null ? p.note : "").trim()
+  };
+}
+
+/**
+ * The row must still hold the lot the browser last saw. Guards against a
+ * stale screen writing to a row that shifted after someone else deleted.
+ */
+function resCheckRow(sh, row, seenLot) {
+  if (!(row >= 2)) throw new Error("Ligne invalide.");
+  if (row > sh.getLastRow()) throw new Error("Ligne introuvable — recharger l'écran.");
+  const now = cmdCanonKey(sh.getRange(row, 1).getValue());
+  if (now !== cmdCanonKey(seenLot)) {
+    throw new Error("La liste a changé depuis l'affichage. Recharger l'écran.");
+  }
+}
+
+function resAdd(p) {
+  const c = resClean(p, 0);
+  const sh = resSheet();
+  const row = sh.getLastRow() + 1;
+  sh.getRange(row, 1, 1, 4).setValues([[c.lot, c.type, c.qty == null ? "" : c.qty, c.note]]);
+  return { row: row };
+}
+
+function resUpdate(p) {
+  const row = Number(p && p.row);
+  const sh = resSheet();
+  resCheckRow(sh, row, p && p.seenLot);
+  const c = resClean(p, row);
+  sh.getRange(row, 1, 1, 4).setValues([[c.lot, c.type, c.qty == null ? "" : c.qty, c.note]]);
+  return { row: row };
+}
+
+function resDelete(p) {
+  const row = Number(p && p.row);
+  const sh = resSheet();
+  resCheckRow(sh, row, p && p.seenLot);
+  sh.deleteRow(row);
+  return { row: row };
+}
+
+/** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> testReservations
+ *  Read-only. Prints every hold with its canonical key. */
+function testReservations() {
+  const rows = resList();
+  Logger.log("Réservations : " + rows.length);
+  rows.forEach(function (r) {
+    Logger.log("  ligne " + r.row + "   " + r.lot + " [" + r.key + "]   " + r.type +
+               (r.qty == null ? "" : "  " + r.qty) +
+               (r.note ? "   — " + r.note : ""));
+  });
+}
