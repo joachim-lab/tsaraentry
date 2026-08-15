@@ -146,6 +146,24 @@ function cmdCreateOrder(payload) {
     }
   });
 
+  // Stock guard on the server. The browser calls cmdValidateOrderLines
+  // before saving, but that is the browser's choice; any other caller
+  // would write an over-sold order unchecked. Same validator, same
+  // verdict - the quantities are reshaped to the shape it expects.
+  const vLines = lines.map(function (ln) {
+    if (isAlevins) {
+      return { lot: ln.lot, qty: ln.alevinsLivrer, pm: ln.alevinsPm };
+    }
+    const kg = cmdToNum(ln.poissonKg);
+    const pm = cmdToNum(ln.poissonPm);
+    return { lot: ln.lot, pm: pm,
+             qty: (kg != null && pm != null && pm > 0) ? kg * 1000 / pm : null };
+  });
+  const verdict = cmdValidateOrderLines(vLines, f.type);
+  if (!verdict.ok) {
+    throw new Error("Commande refusée : " + verdict.blocks.join(" ; "));
+  }
+
   const sh = cmdSheet();
   const firstRow = findNextCommandeRow(sh);
   const C = CMD_CFG.COL;

@@ -438,6 +438,10 @@
     if (k && l !== null && MANAGED_KEYS[k]) {
       const i = Number(l);
       if (lines[i] && lines[i].__auto) delete lines[i].__auto[k];
+      // Emptying a managed field hands it straight back to AUTO. Without
+      // this the field stayed blank until some other input fired a
+      // recompute, and a blank price saves as no price at all.
+      if (String(t.value).trim() === '') recomputeLinePrice(i);
     }
   });
 
