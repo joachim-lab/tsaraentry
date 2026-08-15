@@ -867,8 +867,13 @@ function cmdValidateOrderLines(lines, orderType) {
     // strict > : ordering exactly down to the reservation floor is legal,
     // because the engine blocks on next < reserved, not next <= reserved.
     if (wanted[k] > a.available) {
+      // Grossis only: the worker typed kg, so quote kg back. Rounded down.
+      const grKg = (orderType &&
+                    String(orderType).toUpperCase().indexOf("AL") !== 0 &&
+                    a.pm != null && a.available != null)
+        ? " (" + Math.floor(a.available * a.pm / 1000) + " kg)" : "";
       blocks.push(k + " : stock insuffisant — demandé " + Math.round(wanted[k]) +
-                      ", disponible " + a.available +
+                      ", disponible " + a.available + grKg +
                       " (stock " + a.count +
                       (a.reserved ? ", réservé " + a.reserved : "") +
                       (a.pending ? ", en attente " + a.pending : "") + ")");

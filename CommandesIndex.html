@@ -390,9 +390,14 @@
           return;
         }
         box.className = (verdict.level === 'warn') ? 'availWarn' : 'muted';
+        // Grossis only: fish are sold by weight, so show the kg the lot
+        // represents. Rounded down - never overstate what is available.
+        var avKg = (!alSel2 && a.available != null && a.pm != null)
+          ? Math.floor(a.available * a.pm / 1000) : null;
         box.innerHTML = (verdict.level === 'warn' ? '\u26a0 ' + verdict.msg + '<br>' : '') +
                         'disponible : <b>' + fmtNum(a.available) +
-                        '</b> \u00b7 PM : <b>' + fmtNum(a.pm) + ' g</b>';
+                        '</b> \u00b7 PM : <b>' + fmtNum(a.pm) + ' g</b>' +
+                        (avKg != null ? ' \u00b7 <b>' + fmtNum(avKg) + ' kg</b>' : '');
         prefillPm(i, a.pm);
         recomputeLinePrice(i);
       })
