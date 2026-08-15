@@ -49,28 +49,3 @@ function doGet(e) {
 function getWebAppUrl() {
   return ScriptApp.getService().getUrl();
 }
-
-/**
- * TEMPORAIRE - test d'identite Step 1b. A supprimer une fois la reponse notee.
- *
- * active    = l'utilisateur connecte, mais uniquement s'il appartient au meme
- *             domaine que le proprietaire du script. Chaine vide sinon.
- * effective = le compte sous lequel le script s'execute. Avec "Execute as: Me"
- *             c'est toujours le proprietaire. Sert de temoin: prouve que
- *             l'appel a bien atteint le serveur.
- */
-function whoAmITest() {
-  var active = '';
-  try {
-    active = Session.getActiveUser().getEmail() || '';
-  } catch (e) {
-    active = 'erreur: ' + e.message;
-  }
-  var effective = '';
-  try {
-    effective = Session.getEffectiveUser().getEmail() || '';
-  } catch (e) {
-    effective = 'erreur: ' + e.message;
-  }
-  return { active: active, effective: effective };
-}

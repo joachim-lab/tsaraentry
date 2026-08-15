@@ -16,8 +16,6 @@
   <h1>TSARA Entry</h1>
   <div id="tiles">Chargement…</div>
 
-  <div id="whoami" style="margin-top:22px;font-size:12px;color:#5f6368;border-top:1px solid #dadce0;padding-top:10px;">identite : chargement</div>
-
   <script>
     google.script.run.withSuccessHandler(function (url) {
       document.getElementById('tiles').innerHTML =
@@ -32,18 +30,6 @@
         '<a class="tile" href="' + url + '?screen=tracabilite">' +
           '<h2>Mouvements de lot</h2><p>Tri, déplacement, mélange, mise en cage</p></a>';
     }).getWebAppUrl();
-
-    google.script.run
-      .withSuccessHandler(function (r) {
-        document.getElementById('whoami').textContent =
-          'active: ' + (r.active || '(VIDE)') +
-          '  |  effective: ' + (r.effective || '(VIDE)');
-      })
-      .withFailureHandler(function (err) {
-        document.getElementById('whoami').textContent =
-          'echec appel serveur: ' + err.message;
-      })
-      .whoAmITest();
   </script>
 </body>
 </html>
