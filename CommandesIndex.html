@@ -52,11 +52,13 @@
   <div class="tabs">
     <div class="tab active" id="tabNew" onclick="switchMode('new')">Nouvelle commande</div>
     <div class="tab" id="tabFul" onclick="switchMode('ful')">Paiement &amp; livraison</div>
+    <div class="tab" id="tabRes" onclick="switchMode('res')">R&eacute;servations</div>
   </div>
 
   <div id="status"></div>
   <div id="paneNew"></div>
   <div id="paneFul" style="display:none"></div>
+  <div id="paneRes" style="display:none"></div>
 
 <script>
 
@@ -126,10 +128,179 @@
     mode = m;
     el('tabNew').className = 'tab' + (m === 'new' ? ' active' : '');
     el('tabFul').className = 'tab' + (m === 'ful' ? ' active' : '');
+    el('tabRes').className = 'tab' + (m === 'res' ? ' active' : '');
     el('paneNew').style.display = (m === 'new' ? '' : 'none');
     el('paneFul').style.display = (m === 'ful' ? '' : 'none');
+    el('paneRes').style.display = (m === 'res' ? '' : 'none');
     setStatus('', '');
     if (m === 'ful' && !el('ficherche')) renderFul();
+    // Rebuilt on every visit, never cached: the tab is shared and a stale
+    // list is exactly what would let two people fight over one hold.
+    if (m === 'res') renderRes();
+  }
+
+  // ---------- MODE C: réservations ----------
+  //
+  // Reuses OPTS.lots (already loaded for the order form) - no extra server
+  // call for the lot list. Server side enforces one hold per lot; the
+  // dropdown greys held lots out so the error is rare rather than normal.
+  //
+  // Deletion arms on the first click and acts on the second, like order
+  // cancellation. window.confirm() can be blocked inside this frame, which
+  // would leave the button doing nothing at all, with no error.
+
+  let resRows = [];   // last list from the server
+  let resEdit = 0;    // row being edited; 0 = adding
+  let resArmed = 0;   // row armed for deletion; 0 = none
+
+  function renderRes() {
+    el('paneRes').innerHTML =
+      '<div id="resList">Chargement\u2026</div>' +
+      '<div id="resForm"></div>';
+    loadRes();
+  }
+
+  function loadRes() {
+    google.script.run
+      .withSuccessHandler(function (rows) {
+        resRows = rows; resArmed = 0; drawResList(); drawResForm();
+      })
+      .withFailureHandler(function (e) {
+        el('resList').innerHTML = '<div class="err">Erreur : ' + esc(e.message) + '</div>';
+      })
+      .resList();
+  }
+
+  function drawResList() {
+    if (!resRows.length) {
+      el('resList').innerHTML = '<div class="warn">Aucune r\u00e9servation.</div>';
+      return;
+    }
+    var h = '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
+      '<tr style="text-align:left;border-bottom:2px solid #dadce0">' +
+      '<th style="padding:6px 8px">Lot</th>' +
+      '<th style="padding:6px 8px">Type</th>' +
+      '<th style="padding:6px 8px">Quantit\u00e9</th>' +
+      '<th style="padding:6px 8px">Note</th>' +
+      '<th style="padding:6px 8px"></th></tr>';
+    resRows.forEach(function (r) {
+      var armed = (resArmed === r.row);
+      h += '<tr style="border-bottom:1px solid #e8eaed">' +
+        '<td style="padding:6px 8px"><b>' + esc(r.lot) + '</b></td>' +
+        '<td style="padding:6px 8px">' + esc(r.type) + '</td>' +
+        '<td style="padding:6px 8px">' + (r.qty == null ? '' : fmtNum(r.qty)) + '</td>' +
+        '<td style="padding:6px 8px">' + esc(r.note) + '</td>' +
+        '<td style="padding:6px 8px;white-space:nowrap">' +
+          '<button onclick="resStartEdit(' + r.row + ')">Modifier</button> ' +
+          '<button onclick="resAskDelete(' + r.row + ')"' +
+            (armed ? ' style="background:#d93025;color:#fff;border-color:#d93025"' : '') +
+            '>' + (armed ? 'Confirmer \u2014 d\u00e9finitif' : 'Supprimer') + '</button>' +
+        '</td></tr>';
+    });
+    el('resList').innerHTML = h + '</table>';
+  }
+
+  function drawResForm() {
+    var cur = null;
+    resRows.forEach(function (r) { if (r.row === resEdit) cur = r; });
+    if (resEdit && !cur) resEdit = 0;          // row vanished under us
+
+    // Lots that already carry a hold, excluding the one being edited.
+    var held = {};
+    resRows.forEach(function (r) { if (r.row !== resEdit) held[r.key] = true; });
+
+    var opts = '<option value="">\u2014 choisir un lot \u2014</option>';
+    OPTS.lots.forEach(function (l) {
+      var k = canonKey(l);
+      opts += '<option value="' + esc(l) + '"' +
+              (held[k] ? ' disabled' : '') +
+              (cur && cur.key === k ? ' selected' : '') + '>' +
+              esc(l) + (held[k] ? ' \u2014 d\u00e9j\u00e0 r\u00e9serv\u00e9' : '') +
+              '</option>';
+    });
+
+    var type = cur ? cur.type : 'TOUT';
+    el('resForm').innerHTML =
+      '<h3 style="margin:0 0 10px">' +
+        (resEdit ? 'Modifier la r\u00e9servation (ligne ' + resEdit + ')' : 'Nouvelle r\u00e9servation') +
+      '</h3>' +
+      '<div style="margin-bottom:10px"><label>Lot<br><select id="rLot">' + opts + '</select></label></div>' +
+      '<div style="margin-bottom:10px"><label>Type<br>' +
+        '<select id="rType" onchange="resTypeChanged()">' +
+        '<option value="TOUT"' + (type === 'TOUT' ? ' selected' : '') + '>Tout le lot</option>' +
+        '<option value="NOMBRE"' + (type === 'NOMBRE' ? ' selected' : '') + '>Un nombre</option>' +
+        '</select></label></div>' +
+      '<div style="margin-bottom:10px" id="rQtyWrap"><label>Quantit\u00e9 (poissons)<br>' +
+        '<input id="rQty" type="number" min="1" step="1" value="' +
+        (cur && cur.qty != null ? cur.qty : '') + '"></label></div>' +
+      '<div style="margin-bottom:12px"><label>Note<br>' +
+        '<input id="rNote" type="text" size="50" value="' + esc(cur ? cur.note : '') + '"></label></div>' +
+      '<button onclick="resSave()">' + (resEdit ? 'Enregistrer' : 'Ajouter') + '</button>' +
+      (resEdit ? ' <button onclick="resCancelEdit()">Annuler</button>' : '');
+    resTypeChanged();
+  }
+
+  function resTypeChanged() {
+    var w = el('rQtyWrap');
+    if (w) w.style.display = (el('rType').value === 'NOMBRE' ? '' : 'none');
+  }
+
+  function resStartEdit(row) {
+    resEdit = row; resArmed = 0;
+    drawResList(); drawResForm();
+  }
+
+  function resCancelEdit() {
+    resEdit = 0; drawResForm();
+  }
+
+  function resSave() {
+    var p = {
+      lot:  el('rLot').value,
+      type: el('rType').value,
+      qty:  el('rQty') ? el('rQty').value : '',
+      note: el('rNote').value
+    };
+    setStatus('banner', 'Enregistrement\u2026');
+    if (resEdit) {
+      var cur = null;
+      resRows.forEach(function (r) { if (r.row === resEdit) cur = r; });
+      p.row = resEdit;
+      p.seenLot = cur ? cur.lot : '';
+      google.script.run
+        .withSuccessHandler(function () {
+          resEdit = 0;
+          setStatusAndScroll('ok', 'R\u00e9servation modifi\u00e9e.');
+          loadRes();
+        })
+        .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+        .resUpdate(p);
+    } else {
+      google.script.run
+        .withSuccessHandler(function (r) {
+          setStatusAndScroll('ok', 'R\u00e9servation ajout\u00e9e (ligne ' + r.row + ').');
+          loadRes();
+        })
+        .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+        .resAdd(p);
+    }
+  }
+
+  function resAskDelete(row) {
+    if (resArmed !== row) { resArmed = row; drawResList(); return; }
+    var cur = null;
+    resRows.forEach(function (r) { if (r.row === row) cur = r; });
+    setStatus('banner', 'Suppression\u2026');
+    google.script.run
+      .withSuccessHandler(function () {
+        setStatusAndScroll('ok', 'R\u00e9servation supprim\u00e9e.');
+        loadRes();
+      })
+      .withFailureHandler(function (e) {
+        resArmed = 0; drawResList();
+        setStatusAndScroll('err', esc(e.message));
+      })
+      .resDelete({ row: row, seenLot: cur ? cur.lot : '' });
   }
 
   // ---------- MODE A: new order ----------
