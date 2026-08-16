@@ -8,6 +8,7 @@
  *   ?screen=morts        -> MortsIndex.html      (screen 4)
  *   ?screen=tracabilite  -> TracabiliteIndex.html (screen 5 picker)
  *   ?screen=tracform     -> LigneeUI's form, rendered live (screen 5 form)
+ *   ?screen=creerlot     -> CreerLotIndex.html    (screen 6)
  *   no parameter         -> Menu.html            (chooser)
  ***************************************************************/
 
@@ -37,6 +38,7 @@ function doGet(e) {
   else if (screen === "commandes") file = "CommandesIndex";
   else if (screen === "morts") file = "MortsIndex";
   else if (screen === "tracabilite") file = "TracabiliteIndex";
+  else if (screen === "creerlot") file = "CreerLotIndex";
   else file = "Menu";
 
   return HtmlService.createHtmlOutputFromFile(file)

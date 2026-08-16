@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; color: #202124; }
+    h1 { font-size: 20px; }
+    label { display: block; margin-top: 12px; font-weight: bold; font-size: 14px; }
+    select, input[type=text] { width: 100%; padding: 8px; font-size: 16px; margin-top: 4px; box-sizing: border-box; }
+    button { margin-top: 20px; padding: 10px 16px; font-size: 15px; cursor: pointer; border: none; border-radius: 4px;
+             background: #188038; color: white; }
+    button:disabled { background: #999; cursor: not-allowed; }
+    #msg { margin-top: 16px; padding: 10px; border-radius: 4px; display: none; }
+    #msg.err { background: #fce8e6; color: #c5221f; display: block; }
+    #msg.ok { background: #e6f4ea; color: #137333; display: block; }
+    #msg.warn { background: #fef7e0; color: #b06000; display: block; }
+    #msg.banner { background: #e8f0fe; color: #1967d2; display: block; }
+    #msg a { color: inherit; }
+    .backlink { display:inline-block; margin-bottom:10px; font-size:14px; color:#1a73e8; text-decoration:none; }
+    .backlink:hover { text-decoration:underline; }
+    .hint { margin-top: 6px; font-size: 13px; color: #5f6368; }
+    .rules { margin: 6px 0 0 0; padding-left: 20px; font-size: 13px; color: #5f6368; }
+    .rules li { margin: 2px 0; }
+    #nameBlock { display: none; }
+  </style>
+</head>
+<body>
+  <a class="backlink" id="backLink" href="#">&larr; Menu</a>
+  <h1>Créer un lot</h1>
+  <p class="hint">Le numéro du lot est calculé automatiquement au moment de la création.</p>
+
+  <label for="type">Type de lot</label>
+  <select id="type" onchange="onType()">
+    <option value="">-- choisir --</option>
+    <option value="gr">Grossissement</option>
+    <option value="gen">Géniteur</option>
+  </select>
+
+  <div id="nameBlock">
+    <label for="nom">Nom de la famille</label>
+    <input type="text" id="nom" autocomplete="off" oninput="onField()">
+    <ul class="rules">
+      <li>Commence par une lettre.</li>
+      <li>Jamais deux chiffres de suite : NG-1 est accepté, NG-2026 est refusé.</li>
+      <li>Lettres, chiffres isolés, espaces, tirets et apostrophes uniquement.</li>
+    </ul>
+  </div>
+
+  <button id="goBtn" onclick="askCreate()" disabled>Créer le lot</button>
+  <div id="msg"></div>
+
+  <script>
+    var BASE = '';
+
+    function el(id) { return document.getElementById(id); }
+
+    function esc(s) {
+      return String(s === null || s === undefined ? '' : s)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function setMsg(cls, html) {
+      var m = el('msg');
+      m.className = cls;
+      m.innerHTML = html;
+      if (html) window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    google.script.run.withSuccessHandler(function (u) {
+      BASE = u;
+      var b = el('backLink');
+      if (b) b.href = u;
+      refresh();
+    }).getWebAppUrl();
+
+    function isBrood() { return el('type').value === 'gen'; }
+
+    function onType() {
+      el('nameBlock').style.display = isBrood() ? 'block' : 'none';
+      onField();
+    }
+
+    /* Any change to a field disarms the button. Without this, a user
+       could arm the confirmation, change the type, and create a lot of
+       a kind they never confirmed. */
+    function onField() {
+      disarm();
+      refresh();
+    }
+
+    /* The button stays disabled until the type is chosen, a family name
+       is present when one is required, and the web app URL has arrived.
+       BASE is tested because the result panel builds a link from it. */
+    function refresh() {
+      var ready = BASE && el('type').value &&
+        (!isBrood() || el('nom').value.trim().length > 0);
+      el('goBtn').disabled = !ready;
+    }
+
+    function disarm() {
+      var b = el('goBtn');
+      b.removeAttribute('data-armed');
+      b.textContent = 'Créer le lot';
+      b.style.background = '';
+    }
+
+    /**
+     * First click arms the button, second click creates. Deliberately
+     * not window.confirm(): a dialog can be blocked inside this frame,
+     * and a blocked dialog leaves the button silently doing nothing.
+     * Creation mints a cohort and advances the registry counter, so it
+     * must not happen on a single stray tap.
+     */
+    function askCreate() {
+      var b = el('goBtn');
+      if (b.getAttribute('data-armed') === '1') { doCreate(); return; }
+      b.setAttribute('data-armed', '1');
+      b.textContent = 'Confirmer — créer le lot';
+      b.style.background = '#c5221f';
+      setMsg('banner', isBrood()
+        ? 'Cliquez une seconde fois pour créer le lot de géniteurs.'
+        : 'Cliquez une seconde fois pour créer le lot de grossissement.');
+    }
+
+    function doCreate() {
+      var b = el('goBtn');
+      b.disabled = true;
+      setMsg('banner', 'Création en cours…');
+
+      google.script.run
+        .withSuccessHandler(function (res) {
+          disarm();
+          if (!res || !res.ok) {
+            b.disabled = false;
+            setMsg('err', esc(res && res.message ? res.message : 'Création refusée.') +
+              '<br>Aucun fichier n\'a été créé.');
+            return;
+          }
+          showCreated(res);
+        })
+        .withFailureHandler(function (e) {
+          disarm();
+          b.disabled = false;
+          setMsg('err', 'Erreur : ' + esc(e.message) +
+            '<br>Vérifiez le dossier des lots avant de réessayer.');
+        })
+        .creerCreateLot(isBrood(), el('nom').value);
+    }
+
+    /* On success the form is cleared and the button stays disabled
+       until a type is chosen again. Creating the same lot twice is the
+       one mistake this screen must not make easy. */
+    function showCreated(res) {
+      var h = 'Lot créé : <b>' + esc(res.newName) + '</b>' +
+        '<br>Cohorte : ' + esc(res.cohortId ? res.cohortId : '—') +
+        '<br>Accès éditeur accordé à : ' + esc(res.editorEmail) +
+        '<br><a href="' + esc(res.fileUrl) + '" target="_blank">Ouvrir le fichier</a>';
+
+      if (res.mintWarning) {
+        setMsg('warn', h +
+          '<br><br><b>La cohorte racine n\'a pas été créée.</b> Le fichier lot ' +
+          'existe et reste utilisable. Signalez-le à Kim : aucun message ' +
+          'automatique n\'est envoyé depuis cet écran.');
+      } else {
+        setMsg('ok', h);
+      }
+
+      el('type').value = '';
+      el('nom').value = '';
+      el('nameBlock').style.display = 'none';
+      refresh();
+    }
+  </script>
+</body>
+</html>

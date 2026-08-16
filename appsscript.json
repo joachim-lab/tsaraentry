@@ -25,6 +25,12 @@
         "libraryId": "1s2BI_qqCIid4l4RZowX0Lukyr56UYt4uI-Mpzr19ZGfMoFsz5kGBLsoe",
         "version": "0",
         "developmentMode": true
+      },
+      {
+        "userSymbol": "CreationLot",
+        "libraryId": "1yF75uGGsO6oVsN1Xub_Qb1h1LfUO1KxXrev9uDuYUvDrXlpwdfnUMI1Z",
+        "version": "0",
+        "developmentMode": true
       }
     ]
   },
