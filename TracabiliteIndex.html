@@ -15,15 +15,16 @@
     .backlink { display:inline-block; margin-bottom:10px; font-size:14px; color:#1a73e8; text-decoration:none; }
     .backlink:hover { text-decoration:underline; }
     .hint { margin-top: 6px; font-size: 13px; color: #5f6368; }
+    .who { padding: 8px 0; font-size: 16px; color: #202124; }
   </style>
 </head>
 <body>
   <a class="backlink" id="backLink" href="#">&larr; Menu</a>
   <h1>Mouvements de lot</h1>
-  <p class="hint">Choisir l'opérateur, le lot et l'opération, puis ouvrir le formulaire.</p>
+  <p class="hint">Choisir le lot et l'opération, puis ouvrir le formulaire.</p>
 
-  <label for="who">Opérateur</label>
-  <select id="who" onchange="refresh()"><option value="">Chargement...</option></select>
+  <label>Opérateur</label>
+  <div id="who" class="who">Chargement...</div>
 
   <label for="lot">Lot</label>
   <select id="lot" onchange="refresh()"><option value="">Chargement...</option></select>
@@ -51,7 +52,7 @@
 
     google.script.run
       .withSuccessHandler(function (o) {
-        fill('who', o.operators.map(function (x) { return { v: x.idx, t: x.name }; }));
+        document.getElementById('who').textContent = o.operator;
         fill('lot', o.lots.map(function (x) { return { v: x.fileId, t: 'Lot-' + x.lotNumber }; }));
         fill('op',  o.ops.map(function (x) { return { v: x.key, t: x.label }; }));
         refresh();
@@ -69,12 +70,13 @@
         }).join('');
     }
 
-    /* The button stays disabled until all three are chosen AND the web
+    /* The button stays disabled until BOTH lists are chosen AND the web
        app URL has arrived. Without BASE there is nowhere to navigate,
-       and a click would silently do nothing. */
+       and a click would silently do nothing. The operator is not tested
+       here: if identity detection failed, tracGetOptions threw, the
+       lists never filled, and the button can never enable. */
     function refresh() {
       var ready = BASE &&
-        document.getElementById('who').value &&
         document.getElementById('lot').value &&
         document.getElementById('op').value;
       document.getElementById('goBtn').disabled = !ready;
@@ -88,8 +90,7 @@
       var url = BASE +
         '?screen=tracform' +
         '&lot=' + encodeURIComponent(document.getElementById('lot').value) +
-        '&op='  + encodeURIComponent(document.getElementById('op').value) +
-        '&who=' + encodeURIComponent(document.getElementById('who').value);
+        '&op='  + encodeURIComponent(document.getElementById('op').value);
       window.top.location.href = url;
     }
 

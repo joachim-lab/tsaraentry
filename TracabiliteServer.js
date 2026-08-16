@@ -16,26 +16,18 @@
  *   A–G + I  LigneeUI      H  registry consumer      J  LigneeWriter
  * This screen writes nothing directly. It cannot touch H or J.
  *
- * WHY AN OPERATOR LIST EXISTS HERE. The lot-file menu records
- * Session.getActiveUser(), which is the real worker. tsaraentry runs as
- * USER_DEPLOYING, so that call returns the DEPLOYER for everyone. The
- * chosen operator's e-mail travels in payload.operator and lands in
- * column G, keeping G homogeneous with every row the menu ever wrote.
+ * OPERATOR IDENTITY IS DETECTED, NOT CHOSEN. Session.getActiveUser()
+ * returns the SIGNED-IN WORKER's address here, because the workers hold
+ * accounts inside the jdsresearch.com domain and the app is deployed to
+ * that domain. An earlier comment in this file claimed the call returns
+ * the deployer for everyone; that was wrong, and the operator dropdown
+ * it justified has been removed. The detected address travels in
+ * payload.operator and lands in column G, keeping G homogeneous with
+ * every row the lot-file menu ever wrote.
  *
  * Reuses, unchanged, from elsewhere in this project:
  *   getLotFileList()   (Lot.js) — {lotNumber, fileId, fileName}
  ***************************************************************/
-
-const TRAC_CFG = {
-  /* Farm workers who may log a traceability event. The dropdown shows
-   * name; column G receives email, matching what the menu path writes.
-   * Adding a worker is one line here — no sheet, no lookup, no cache. */
-  OPERATORS: [
-    { name: "Hasina",  email: "fenoharijaonatsinjohasina@gmail.com" },
-    { name: "Audry",   email: "audryjoach21@gmail.com" },
-    { name: "Charles", email: "charlesmascar48@gmail.com" }
-  ]
-};
 
 /**
  * Everything the picker needs, in one round trip.
@@ -44,7 +36,7 @@ const TRAC_CFG = {
  * here. LEGACY_OPS is excluded on purpose: those labels are accepted on
  * input so old rows stay valid, but must never be produced again.
  *
- * @return {Object} { lots, operators, ops }
+ * @return {Object} { lots, operator, ops }
  */
 function tracGetOptions() {
   const lots = getLotFileList().map(function (l) {
@@ -53,26 +45,28 @@ function tracGetOptions() {
   const ops = LigneeUI.LU_CFG.OPS.map(function (o) {
     return { key: o.key, label: o.label };
   });
-  const operators = TRAC_CFG.OPERATORS.map(function (o, i) {
-    return { idx: i, name: o.name };
-  });
-  return { lots: lots, operators: operators, ops: ops };
+  return { lots: lots, operator: tracCurrentOperatorEmail(), ops: ops };
 }
 
 /**
- * E-mail for an operator index, as sent by the picker.
- * Throws rather than defaulting: an unattributable event is worse than
- * a refused one, and a silent fallback would write the deployer's
- * address while looking correct.
+ * The signed-in worker's e-mail address.
  *
- * @param {string|number} idx
+ * Throws rather than defaulting. An unattributable event is worse than
+ * a refused one, and an empty string in column G would look like a
+ * saved row while being untraceable. The throw surfaces on the picker's
+ * first round trip, so a wrong or missing sign-in is seen before a lot
+ * is chosen, not after the form is filled in.
+ *
  * @return {string}
  */
-function tracOperatorEmail(idx) {
-  const i = Number(idx);
-  const o = TRAC_CFG.OPERATORS[i];
-  if (!o) throw new Error("Opérateur inconnu (index: " + idx + ").");
-  return o.email;
+function tracCurrentOperatorEmail() {
+  const email = Session.getActiveUser().getEmail();
+  if (!email) {
+    throw new Error(
+      "Impossible d'identifier l'opérateur. Vérifiez que vous êtes connecté " +
+      "avec votre compte @jdsresearch.com, puis rechargez la page.");
+  }
+  return email;
 }
 
 /**
@@ -98,7 +92,6 @@ function testTracabiliteServer() {
     o.lots.slice(0, 5).map(function (l) { return l.lotNumber; }).join(" | "));
   Logger.log("Opérations: " +
     o.ops.map(function (x) { return x.key + "=" + x.label; }).join(" | "));
-  Logger.log("Opérateurs: " +
-    o.operators.map(function (x) { return x.idx + "=" + x.name; }).join(" | "));
+  Logger.log("Opérateur détecté: " + o.operator);
   Logger.log("CohortRegistry reachable: " + (typeof CohortRegistry.lp_serialise === "function"));
 }

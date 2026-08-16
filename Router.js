@@ -23,7 +23,7 @@ function doGet(e) {
     const p = (e && e.parameter) || {};
     if (!p.lot || !p.op) throw new Error("Paramètres manquants (lot, op).");
     const html = LigneeUI.lu_dialogHtmlForLot(
-      p.lot, p.op, tracOperatorEmail(p.who),
+      p.lot, p.op, tracCurrentOperatorEmail(),
       getWebAppUrl() + "?screen=tracabilite");
     return HtmlService.createHtmlOutput(html)
       .setTitle("TSARA Entry")
