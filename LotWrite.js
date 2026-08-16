@@ -85,6 +85,13 @@ function addChange(sh, row, col, value, note, plan) {
   const from = cell.getValue();
   const to = (value === null) ? "" : value;
   if (normaliseForCompare(from) === normaliseForCompare(to)) return; // no-op
+
+  const formula = cell.getFormula();
+  if (formula) {
+    throw new Error("Ecriture refusee : la cellule " + sh.getName() + "!" +
+      cell.getA1Notation() + " contient une formule. Cette valeur est calculee " +
+      "par le fichier et ne peut pas etre modifiee ici. Champ : " + (note || ""));
+  }
   plan.push({
     sheet: sh.getName(),
     row: row, col: col,
@@ -103,9 +110,9 @@ function planEarlyTab(sh, tabName, payload, plan) {
     addChange(sh, 2, 2, f.B2, "Bassin", plan);
     addChange(sh, 3, 2, f.B3, "Happa", plan);
     addChange(sh, 5, 2, f.B5, "Date de départ (ancre la chaîne de dates)", plan);
+    addChange(sh, 11, 4, f.D11, "Biomasse (g)", plan);
   }
   addChange(sh, 4, 2, f.B4, "Température de l'eau", plan);
-  addChange(sh, 11, 4, f.D11, "Nombre", plan);
   addChange(sh, 11, 7, f.G11, "Commentaires", plan);
 
   planSamples(sh, tabName, f.samples, plan);
