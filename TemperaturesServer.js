@@ -102,7 +102,7 @@ function tempBuildPdf() {
     + "&size=A4"
     + "&portrait=false"
     + "&fitw=true"
-    + "&gridlines=false"
+    + "&gridlines=true"
     + "&printtitle=false"
     + "&sheetnames=false"
     + "&pagenum=UNDEFINED"
