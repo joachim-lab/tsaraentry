@@ -905,8 +905,8 @@ function cmdValidateOrderLines(lines, orderType) {
       return;
     }
     if (!a.found) {
-      warnings.push(k + " : ce lot n'est pas trouvé dans le fichier lot ; " +
-                        "la déduction échouera cette nuit");
+      blocks.push(k + " : ce lot n'est pas encore vendable — le stock " +
+                      "n'est pas trouvé dans le fichier lot");
       return;
     }
     // ---- lot/type gate ----
