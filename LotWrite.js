@@ -439,3 +439,31 @@ function testWriteSamplesLive_TESTCOPY_ONLY() {
 
   Logger.log(ok1 && ok2 && ok3 ? "=== TEST REUSSI ===" : "=== TEST ECHOUE — voir ci-dessus ===");
 }
+
+/** RUN FROM EDITOR: proves the formula guard. Writes NOTHING. */
+function testFormulaGuard() {
+  const FILE_ID = "10GhmZm67YmaTscdvIWRsYnybCPOA3gpkgXFxcKce_o8"; // Lot-31 live
+  const sh = SpreadsheetApp.openById(FILE_ID).getSheetByName("16-21");
+  const plan = [];
+  let pass = 0, fail = 0;
+
+  try {
+    addChange(sh, 11, 4, 999, "test D11 formule", plan);
+    Logger.log("FAIL 1 : pas d erreur sur D11 (cellule formule)");
+    fail++;
+  } catch (e) {
+    Logger.log("PASS 1 : " + e.message);
+    pass++;
+  }
+
+  try {
+    addChange(sh, 11, 7, "guard test ok", "test G11 saisie", plan);
+    Logger.log("PASS 2 : G11 accepte, plan = " + plan.length);
+    pass++;
+  } catch (e) {
+    Logger.log("FAIL 2 : " + e.message);
+    fail++;
+  }
+
+  Logger.log("pass=" + pass + " fail=" + fail + " ecritures=0");
+}
