@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 560px; margin: 32px auto; padding: 0 16px; color: #202124; }
+    h1 { font-size: 22px; margin: 0 0 4px 0; }
+    h2 { font-size: 16px; margin: 28px 0 8px 0; }
+    a.back { font-size: 13px; color: #1a73e8; text-decoration: none; }
+    hr { border: 0; border-top: 1px solid #dadce0; margin: 26px 0 0 0; }
+    label { display: block; font-size: 13px; color: #5f6368; margin: 14px 0 4px 0; }
+    input { width: 100%; box-sizing: border-box; font-size: 17px; padding: 10px 12px;
+            border: 1px solid #dadce0; border-radius: 6px; }
+    button { margin-top: 16px; width: 100%; font-size: 15px; padding: 12px 16px; border: 0;
+             border-radius: 6px; background: #1a73e8; color: #fff; cursor: pointer; }
+    button:disabled { background: #dadce0; color: #5f6368; cursor: default; }
+    .panel { margin-top: 14px; padding: 12px 14px; border-radius: 6px; font-size: 14px; display: none; }
+    .ok { background: #e6f4ea; color: #137333; }
+    .err { background: #fce8e6; color: #c5221f; }
+    .note { font-size: 13px; color: #5f6368; margin-top: 6px; }
+    a.pdf { display: none; margin-top: 14px; padding: 12px 14px; border: 1px solid #1a73e8;
+            border-radius: 6px; font-size: 15px; color: #1a73e8; text-decoration: none; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>Températures</h1>
+  <a class="back" id="back" href="#">← Menu</a>
+
+  <div id="loading" class="note">Chargement…</div>
+
+  <div id="form" style="display:none">
+    <label for="bassin">Température bassin (°C)</label>
+    <input id="bassin" type="text" inputmode="decimal" autocomplete="off">
+
+    <label for="lac">Température lac (°C)</label>
+    <input id="lac" type="text" inputmode="decimal" autocomplete="off">
+
+    <button id="save">Enregistrer</button>
+    <div id="saveMsg" class="panel"></div>
+
+    <hr>
+    <h2>Impression</h2>
+    <p class="note">Tableau Stock poisson, colonnes N à X, A4 paysage.
+       Le PDF s'enregistre sur l'appareil ; ouvrez-le pour l'imprimer.</p>
+    <button id="print">Préparer le PDF</button>
+    <a class="pdf" id="pdfLink" download>Ouvrir le PDF</a>
+    <div id="printMsg" class="panel"></div>
+  </div>
+
+  <script>
+    var el = function (id) { return document.getElementById(id); };
+
+    function show(id, text, cls) {
+      var p = el(id);
+      p.textContent = text;
+      p.className = 'panel ' + cls;
+      p.style.display = 'block';
+    }
+
+    function hide(id) { el(id).style.display = 'none'; }
+
+    google.script.run.withSuccessHandler(function (url) {
+      el('back').href = url;
+    }).getWebAppUrl();
+
+    google.script.run
+      .withSuccessHandler(function (cur) {
+        el('bassin').value = cur.bassin;
+        el('lac').value = cur.lac;
+        hide('loading');
+        el('form').style.display = 'block';
+      })
+      .withFailureHandler(function (e) {
+        el('loading').textContent = e.message;
+      })
+      .tempGetCurrent();
+
+    el('save').onclick = function () {
+      hide('saveMsg');
+      el('save').disabled = true;
+      el('save').textContent = 'Enregistrement…';
+      google.script.run
+        .withSuccessHandler(function (r) {
+          el('save').disabled = false;
+          el('save').textContent = 'Enregistrer';
+          show('saveMsg', 'Enregistré — bassin ' + r.bassin + ' °C · lac ' + r.lac + ' °C', 'ok');
+        })
+        .withFailureHandler(function (e) {
+          el('save').disabled = false;
+          el('save').textContent = 'Enregistrer';
+          show('saveMsg', e.message, 'err');
+        })
+        .tempSave(el('bassin').value, el('lac').value);
+    };
+
+    el('print').onclick = function () {
+      hide('printMsg');
+      el('pdfLink').style.display = 'none';
+      el('print').disabled = true;
+      el('print').textContent = 'Préparation…';
+      google.script.run
+        .withSuccessHandler(function (r) {
+          el('print').disabled = false;
+          el('print').textContent = 'Préparer le PDF';
+          var bin = atob(r.base64);
+          var bytes = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
+          var link = el('pdfLink');
+          link.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+          link.download = r.filename;
+          link.textContent = 'Ouvrir le PDF (' + Math.round(r.size / 1024) + ' Ko)';
+          link.style.display = 'block';
+        })
+        .withFailureHandler(function (e) {
+          el('print').disabled = false;
+          el('print').textContent = 'Préparer le PDF';
+          show('printMsg', e.message, 'err');
+        })
+        .tempBuildPdf();
+    };
+  </script>
+</body>
+</html>
