@@ -747,6 +747,22 @@ function cmdGetLotGateData() {
   };
 }
 
+/** RUN FROM EDITOR: which lots the !found block would refuse. Writes nothing. */
+function testFoundBlock() {
+  const keys = Object.keys(cmdGetLotGateData().pm).sort();
+  const blocked = [];
+  keys.forEach(function (k) {
+    let a;
+    try { a = cmdGetLotAvailability(k); }
+    catch (e) { Logger.log(k + "  ERREUR : " + e.message); return; }
+    if (a.reservedAll) { Logger.log(k + "  [RESERVE TOUT]"); return; }
+    if (!a.found) { blocked.push(k); Logger.log(k + "  >>> BLOQUE (found=false)"); return; }
+    Logger.log(k + "  ok  dispo=" + a.available);
+  });
+  Logger.log("total=" + keys.length + "  bloques=" + blocked.length +
+             "  : " + (blocked.join(", ") || "aucun"));
+}
+
 /** RUN FROM EDITOR: what the dropdown will allow, per lot. */
 function testLotGate() {
   const d = cmdGetLotGateData();
