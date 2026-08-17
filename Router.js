@@ -28,7 +28,7 @@ function doGet(e) {
       p.lot, p.op, tracCurrentOperatorEmail(),
       getWebAppUrl() + "?screen=tracabilite");
     return HtmlService.createHtmlOutput(html)
-      .setTitle("TSARA Entry")
+      .setTitle("Interface Tsara Tilapia")
       .addMetaTag("viewport", "width=device-width, initial-scale=1")
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
@@ -44,7 +44,7 @@ function doGet(e) {
   else file = "Menu";
 
   return HtmlService.createHtmlOutputFromFile(file)
-    .setTitle("TSARA Entry")
+    .setTitle("Interface Tsara Tilapia")
     .addMetaTag("viewport", "width=device-width, initial-scale=1")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
