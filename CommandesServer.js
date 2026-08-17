@@ -763,6 +763,32 @@ function testFoundBlock() {
              "  : " + (blocked.join(", ") || "aucun"));
 }
 
+/**
+ * RUN FROM EDITOR: which lots the client's "pas encore vendable" block
+ * will catch, and why. Writes nothing. The client blocks on count == 0
+ * (the engine's own deduct cell), so this prints count next to reserved,
+ * pending and available — if a lot is caught for the wrong reason, the
+ * numbers say so.
+ */
+function testNotSellable() {
+  const keys = Object.keys(cmdGetLotGateData().pm).sort();
+  const blocked = [];
+  keys.forEach(function (k) {
+    let a;
+    try { a = cmdGetLotAvailability(k); }
+    catch (e) { Logger.log(k + "  ERREUR : " + e.message); return; }
+    if (a.reservedAll) { Logger.log(k + "  [RESERVE TOUT]"); return; }
+    if (!a.found) { Logger.log(k + "  [NON TROUVE]"); return; }
+    const line = k + "  count=" + a.count + "  reserve=" + a.reserved +
+                 "  pending=" + a.pending + "  dispo=" + a.available +
+                 "  pm=" + a.pm + "  source=" + a.source;
+    if (!a.count) { blocked.push(k); Logger.log(line + "   >>> PAS ENCORE VENDABLE"); }
+    else Logger.log(line);
+  });
+  Logger.log("total=" + keys.length + "  bloques=" + blocked.length +
+             "  : " + (blocked.join(", ") || "aucun"));
+}
+
 /** RUN FROM EDITOR: what the dropdown will allow, per lot. */
 function testLotGate() {
   const d = cmdGetLotGateData();

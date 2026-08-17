@@ -71,6 +71,10 @@
   let OPTS = { lots: [], types: [] };
   let TARIFS = null;           // { bands:[...], fish:{detail,gros} } - loaded once at boot
   let GATE = null;             // { pm:{key:PM}, fryMax, grBlock, grWarn } - lot/type gate
+  // Sub-lots the lot file reports with no stock at all. Filled in as
+  // selections reveal them (the dropdown is built before any lot file is
+  // opened), then honoured by every later render. Page-life only.
+  const NOT_SELLABLE = {};
   let lines = [{}];            // create mode: one line per lot
   let mode = 'new';
   let hits = [];               // fulfilment search results
@@ -397,6 +401,14 @@
                (pm === undefined ? '' : ' \u00b7 ' + fmtNum(pm) + ' g') +
                ' \u2014 r\u00e9serv\u00e9</option>';
       }
+      // Learned during this page's life, not known at load: the lot file
+      // is only opened when a lot is picked. Once one selection has proved
+      // a sub-lot carries no stock, it stays greyed for every line.
+      if (NOT_SELLABLE[key]) {
+        return '<option value="'+esc(l)+'" disabled>' + esc(l) +
+               (pm === undefined ? '' : ' \u00b7 ' + fmtNum(pm) + ' g') +
+               ' \u2014 pas encore vendable</option>';
+      }
       if (pm === undefined) return '<option value="'+esc(l)+'">'+esc(l)+'</option>';
       const v = lotTypeVerdict(alSel, pm);
       const tag = ' \u00b7 ' + fmtNum(pm) + ' g' +
@@ -548,6 +560,25 @@
                           'la d\u00e9duction \u00e9chouera cette nuit.';
           return;
         }
+        // The sub-lot exists but its stock cell is empty: fry that have
+        // not yet been through the tri are not on sale. Stock Poisson
+        // still shows the fish, so this cannot be caught before the lot
+        // file is opened - hence the block lands here, not in the list.
+        // The server refuses it again at save (qty > available = 0).
+        if (!a.count) {
+          NOT_SELLABLE[key] = true;
+          disableLotOption(key);
+          sel.value = '';                       // fires no event: box stays
+          const alNs = isAlevins();
+          setAuto(i, alNs ? 'alevinsPm' : 'poissonPm', null);
+          if (alNs) setAuto(i, 'alevinsPrix', null);
+          box.className = 'availBlock';
+          box.innerHTML = '\u26d4 Ce lot ne peut pas encore \u00eatre vendu.' +
+                          '<div style="font-weight:normal;font-size:13px;margin-top:4px">' +
+                          'Le fichier lot n\'indique aucun stock pour ce sous-lot. ' +
+                          'Choisir un autre lot.</div>';
+          return;
+        }
         // ---- lot/type gate (Kim 2026-08-12) ----
         // A fry order against a lot of harvest-size fish (or a fish
         // order against a fry lot) is always a mistake. Red-block here,
@@ -579,6 +610,22 @@
         box.innerHTML = 'Stock indisponible : ' + esc(e.message);
       })
       .cmdGetLotAvailability(key);
+  }
+
+  /**
+   * Grey out one lot in every line's dropdown, without re-rendering the
+   * form (a re-render here would wipe the message that explains why).
+   * Any existing " — ..." tag is replaced, so the label never doubles up.
+   */
+  function disableLotOption(key) {
+    document.querySelectorAll('select[data-k="lot"]').forEach(s => {
+      for (var o = 0; o < s.options.length; o++) {
+        const opt = s.options[o];
+        if (!opt.value || canonKey(opt.value) !== key) continue;
+        opt.disabled = true;
+        opt.textContent = opt.textContent.split(' — ')[0] + ' — pas encore vendable';
+      }
+    });
   }
 
   /**
