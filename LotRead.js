@@ -143,10 +143,18 @@ function readS2Tri_(sh, tabName) {
  * D (Biomasse) is derived (=C*B), read for display, never written.
  */
 function readS3Plus_(sh, tabName) {
+  // B2/B3 = bassin/happa of sub-lot 1; C2/C3 and D2/D3 = sub-lots 2 and 3.
+  // All six are green cells on S3..S20 (green-cell contract, 2026-08-16 §5).
+  // The screen used to read and show only B2/B3, so a worker could not
+  // record where sub-lots 2 and 3 were kept. Same layout as S2-Tri.
   const fields = {
     B2: sh.getRange("B2").getValue(),
     B3: sh.getRange("B3").getValue(),
     B4: sh.getRange("B4").getValue(),
+    C2: sh.getRange("C2").getValue(),
+    D2: sh.getRange("D2").getValue(),
+    C3: sh.getRange("C3").getValue(),
+    D3: sh.getRange("D3").getValue(),
     subLots: []
   };
 
