@@ -377,6 +377,48 @@ function cmdRecordFulfilment(rows, payload) {
   });
 
   SpreadsheetApp.flush();
+
+  // Mint the invoice number, exactly as a manual edit to Date livraison
+  // would. Apps Script edit triggers do NOT fire on programmatic writes,
+  // so AutoCommandes' own onEdit never sees the date this function just
+  // wrote — the same reason cmdCreateOrder has to call
+  // generateOrderNumbersForRows explicitly.
+  //
+  // Calls the library's own function, so manual edits and app writes
+  // share one numbering rule. It skips any order that already holds a
+  // value in column C, which makes this safe to call every time, and
+  // keeps finance's override (typed above) untouched.
+  //
+  // AFTER the flush: the function reads Date livraison back from the
+  // sheet, so the write must have landed first.
+  //
+  // Never fatal. The fulfilment is already saved and correct; a missing
+  // invoice number is recorded and reported, not raised as an error that
+  // would suggest the save failed.
+  if (!cmdParseDate(f.dateLivraison)) {
+    return { rows: targets, changed: changed };
+  }
+  try {
+    // ONE row, not the span. The library mints for every row sharing that
+    // row's order number, so a single row is enough — while a span would
+    // sweep every delivered-but-uninvoiced order that happens to sit
+    // between the first and last row of this one, and invoice those too.
+    const anyRow = Math.min.apply(null, targets);
+    // Before/after, so a number finance typed above is not reported as
+    // "généré". The library leaves such an order alone, and this says so.
+    const before = targets.map(r => sh.getRange(r, C.FACTURE).getDisplayValue());
+    AutoCommandes.acFillFactureForRows(sh, anyRow, anyRow);
+    SpreadsheetApp.flush();
+    targets.forEach((r, i) => {
+      const after = sh.getRange(r, C.FACTURE).getDisplayValue();
+      if (after && after !== before[i]) {
+        changed.push("L" + r + " N° facture (généré): " + after);
+      }
+    });
+  } catch (err) {
+    changed.push("N° facture non généré : " + err + ". Prévenir Kim.");
+  }
+
   return { rows: targets, changed: changed };
 }
 
