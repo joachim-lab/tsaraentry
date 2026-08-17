@@ -40,7 +40,7 @@ const CS_CFG = {
 /** Open the count sheet, or fail loudly. */
 function openCheckStockSheet() {
   const sh = SpreadsheetApp.openById(CS_CFG.SS_ID).getSheetByName(CS_CFG.SHEET);
-  if (!sh) throw new Error('Sheet not found: "' + CS_CFG.SHEET + '"');
+  if (!sh) throw new Error('Onglet introuvable: "' + CS_CFG.SHEET + '"');
   return sh;
 }
 
@@ -136,7 +136,7 @@ function getCheckStockContext() {
  * Returns { column, date, filled }.
  */
 function submitCheckStock(payload) {
-  if (!payload) throw new Error("Aucune donnee recue.");
+  if (!payload) throw new Error("Aucune donnée reçue.");
 
   const dateStr = String(payload.date || "").trim();
   if (!dateStr) throw new Error("Date du comptage obligatoire.");
@@ -147,14 +147,14 @@ function submitCheckStock(payload) {
   const sh = openCheckStockSheet();
   const tz = sh.getParent().getSpreadsheetTimeZone() || Session.getScriptTimeZone();
   const countDate = new Date(dateStr);
-  if (isNaN(countDate.getTime())) throw new Error("Date invalide: " + dateStr);
+  if (isNaN(countDate.getTime())) throw new Error("Date invalide (reçu: " + dateStr + ").");
 
   const newest = findNewestCountDate(sh);
   if (newest && countDate.getTime() < newest.getTime()) {
     throw new Error(
       "Date trop ancienne. Un comptage du " + Utilities.formatDate(newest, tz, "dd/MM/yyyy") +
-      " existe deja, et le systeme compare toujours le comptage le plus recent. " +
-      "Une colonne plus ancienne serait ignoree."
+      " existe déjà, et le système compare toujours le comptage le plus récent. " +
+      "Une colonne plus ancienne serait ignorée."
     );
   }
 
@@ -174,13 +174,13 @@ function submitCheckStock(payload) {
     const nm = String(counts[k].name || "").trim();
     if (!nm) continue;
     if (!(nm in rowIndexByName)) {
-      throw new Error('Type de provende absent de la feuille: "' + nm + '". Rechargez l\'ecran.');
+      throw new Error('Type de provende absent de l\'onglet: "' + nm + '". Rechargez l\'écran.');
     }
     const raw = counts[k].value;
     if (raw === "" || raw === null || raw === undefined) continue;
     const v = Number(raw);
     if (!isFinite(v) || v < 0) {
-      throw new Error("Comptage invalide pour " + nm + ": " + raw);
+      throw new Error("Comptage invalide pour " + nm + " (reçu: " + raw + ").");
     }
     values[rowIndexByName[nm]] = [v];
     filled++;

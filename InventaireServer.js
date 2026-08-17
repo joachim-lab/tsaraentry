@@ -34,7 +34,7 @@ const INV_CFG = {
 /** Open the Inventaire sheet, or fail loudly. */
 function openInventaireSheet() {
   const sh = SpreadsheetApp.openById(INV_CFG.SS_ID).getSheetByName(INV_CFG.SHEET);
-  if (!sh) throw new Error('Sheet not found: "' + INV_CFG.SHEET + '"');
+  if (!sh) throw new Error('Onglet introuvable: "' + INV_CFG.SHEET + '"');
   return sh;
 }
 
@@ -92,7 +92,7 @@ function findNextInventaireRow(sh) {
  * Returns { written, startRow, endRow }.
  */
 function submitInventaire(entries) {
-  if (!entries || !entries.length) throw new Error("Aucune ligne a enregistrer.");
+  if (!entries || !entries.length) throw new Error("Aucune entrée à enregistrer.");
 
   const rows = entries.map(en => {
     const type = String(en.type || "").trim();
@@ -100,11 +100,11 @@ function submitInventaire(entries) {
     const dateCommande = String(en.dateCommande || "").trim();
     const nbreCommande = Number(en.nbreCommande);
 
-    if (!type) throw new Error("Type manquant.");
-    if (!dateCommande) throw new Error("Date commande manquante.");
-    if (!unite) throw new Error("Unite manquante.");
+    if (!type || !dateCommande || !unite) {
+      throw new Error("Entrée incomplète : type, date commande et unité sont obligatoires.");
+    }
     if (!isFinite(nbreCommande) || nbreCommande <= 0) {
-      throw new Error("Nbre commande doit etre un nombre positif (recu: " + en.nbreCommande + ").");
+      throw new Error("Nbre commandé invalide (reçu: " + en.nbreCommande + ").");
     }
 
     const dateReception = String(en.dateReception || "").trim();
@@ -113,10 +113,10 @@ function submitInventaire(entries) {
     if (hasRecu) {
       nbreRecu = Number(en.nbreRecu);
       if (!isFinite(nbreRecu) || nbreRecu < 0) {
-        throw new Error("Nbre recu doit etre un nombre positif ou zero (recu: " + en.nbreRecu + ").");
+        throw new Error("Nbre reçu invalide (reçu: " + en.nbreRecu + ").");
       }
       if (nbreRecu > 0 && !dateReception) {
-        throw new Error("Date reception obligatoire quand le nbre recu est superieur a zero.");
+        throw new Error("Date réception obligatoire quand le nbre reçu est supérieur à zéro.");
       }
     }
 
@@ -215,15 +215,15 @@ function completeInventaireReception(item) {
   if (!item || !item.row) throw new Error("Ligne manquante.");
   const row = Number(item.row);
   if (!isFinite(row) || row < INV_CFG.START_ROW) {
-    throw new Error("Numero de ligne invalide: " + item.row);
+    throw new Error("Numéro de ligne invalide (reçu: " + item.row + ").");
   }
 
   const dateReception = String(item.dateReception || "").trim();
-  if (!dateReception) throw new Error("Date reception obligatoire.");
+  if (!dateReception) throw new Error("Date réception obligatoire.");
 
   const nbreRecu = Number(item.nbreRecu);
   if (!isFinite(nbreRecu) || nbreRecu < 0) {
-    throw new Error("Nbre recu doit etre un nombre positif ou zero (recu: " + item.nbreRecu + ").");
+    throw new Error("Nbre reçu invalide (reçu: " + item.nbreRecu + ").");
   }
 
   const sh = openInventaireSheet();
@@ -233,11 +233,11 @@ function completeInventaireReception(item) {
   const curRecu = cur[5];
 
   if (type === "" || type === null) {
-    throw new Error("La ligne " + row + " est vide. La liste est perimee: rechargez l'ecran.");
+    throw new Error("La ligne " + row + " est vide. La liste est périmée : rechargez l'écran.");
   }
   if ((curDateReception !== "" && curDateReception !== null) ||
       (curRecu !== "" && curRecu !== null)) {
-    throw new Error("La ligne " + row + " a deja une reception. Rechargez l'ecran.");
+    throw new Error("La ligne " + row + " a déjà une réception. Rechargez l'écran.");
   }
 
   sh.getRange(row, INV_CFG.DATE_RECEPTION_COL, 1, 2)
