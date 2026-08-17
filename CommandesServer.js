@@ -957,6 +957,22 @@ function cmdValidateOrderLines(lines, orderType) {
   return { ok: blocks.length === 0, blocks: blocks, warnings: warnings, detail: detail };
 }
 
+/** RUN FROM EDITOR: prove the !found block refuses an order. Writes nothing.
+ *  Case 1 must be ok=false with a "pas encore vendable" block.
+ *  Case 2 must be ok=true — it proves the test can pass at all. */
+function testFoundBlockVerdict() {
+  var cases = [
+    { lot: "15 ter-C5", qty: 10, expect: "REFUS attendu" },
+    { lot: "19-8-L",    qty: 10, expect: "OK attendu" }
+  ];
+  cases.forEach(function (c) {
+    var v = cmdValidateOrderLines([{ lot: c.lot, qty: c.qty }], "GR");
+    Logger.log(c.lot + "  [" + c.expect + "]  ok=" + v.ok +
+               "  blocks=" + JSON.stringify(v.blocks) +
+               "  warnings=" + JSON.stringify(v.warnings));
+  });
+}
+
 /***************************************************************
  * RESERVATIONS - third tab on the Commandes screen.
  *
