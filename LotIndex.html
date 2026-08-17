@@ -76,6 +76,16 @@
       const n = Number(s);
       return isFinite(n) ? n : null;
     }
+    /**
+     * Display-only gram formatting for sheet-owned values. The sheet
+     * stores full float precision (Lot-31 16-21!D11 = 7517.381341447861);
+     * one decimal and a French comma is what a worker needs to read.
+     * Never used on a value that will be written back.
+     */
+    function fmtG(v) {
+      const n = num(v);
+      return n === null ? '' : n.toFixed(1).replace('.', ',');
+    }
 
     // ---------- lot list ----------
     google.script.run
@@ -133,9 +143,22 @@
             field('B5', 'Date de départ', f.B5, 'date') +
             '</div>';
         }
+        // D11 is BIOMASSE, not Nombre. It was mislabelled here.
+        // Ownership (field-ownership contract, 2026-08-16 §3.4):
+        //   1-5                  D11 is the input cell  -> editable
+        //   6-10 / 11-15 / 16-21 D11 is =C11*B11        -> sheet-owned
+        // Since 2026-08-17 the server writes D11 only on 1-5 and silently
+        // ignores it elsewhere (LotWrite.js, commit 6fb1069). Rendering an
+        // input there invited a worker to type a value that did nothing.
+        // Shown read-only instead, so the screen and the server agree.
+        const d11Field = (d.tabName === '1-5')
+          ? field('D11', 'Biomasse (g)', f.D11, 'number')
+          : '<label>Biomasse (g)</label>' +
+            '<div class="muted">' + esc(fmtG(f.D11)) + ' (calculé par la feuille)</div>';
+
         html += '<div class="card"><h3>Mesures</h3>' +
           field('B4', "Température de l'eau (°C)", f.B4, 'number') +
-          field('D11', 'Nombre', f.D11, 'number') +
+          d11Field +
           field('G11', 'Commentaires', f.G11, 'text') +
           '</div>';
         html += renderSamples(f.samples);
