@@ -143,18 +143,26 @@ function readS2Tri_(sh, tabName) {
  * D (Biomasse) is derived (=C*B), read for display, never written.
  */
 function readS3Plus_(sh, tabName) {
-  // B2/B3 = bassin/happa of sub-lot 1; C2/C3 and D2/D3 = sub-lots 2 and 3.
-  // All six are green cells on S3..S20 (green-cell contract, 2026-08-16 §5).
-  // The screen used to read and show only B2/B3, so a worker could not
-  // record where sub-lots 2 and 3 were kept. Same layout as S2-Tri.
+  // Bassin/Happa for FOUR sub-lots: B2/B3, C2/C3, D2/D3, E2/E3.
+  // Read live from Lot-26 tab S5 on 2026-08-17: all eight cells carry
+  // the green fill and a dropdown; column F is empty and not green, so
+  // four is the template limit. The green-cell contract of 2026-08-16 §5
+  // listed only three pairs — it was incomplete.
+  // The screen used to show only B2/B3, so sub-lots 2, 3 and 4 could not
+  // be recorded at all.
+  const row2 = sh.getRange("B2:E2").getValues()[0];
+  const row3 = sh.getRange("B3:E3").getValues()[0];
+
   const fields = {
-    B2: sh.getRange("B2").getValue(),
-    B3: sh.getRange("B3").getValue(),
     B4: sh.getRange("B4").getValue(),
-    C2: sh.getRange("C2").getValue(),
-    D2: sh.getRange("D2").getValue(),
-    C3: sh.getRange("C3").getValue(),
-    D3: sh.getRange("D3").getValue(),
+    B2: row2[0],
+    C2: row2[1],
+    D2: row2[2],
+    E2: row2[3],
+    B3: row3[0],
+    C3: row3[1],
+    D3: row3[2],
+    E3: row3[3],
     subLots: []
   };
 

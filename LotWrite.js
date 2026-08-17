@@ -164,11 +164,15 @@ function planS3Plus(sh, tabName, payload, plan) {
   addChange(sh, 3, 2, f.B3, "Happa (sous-lot 1)", plan);
   addChange(sh, 4, 2, f.B4, "Température de l'eau", plan);
 
-  // Sub-lots 2 and 3 — same cells and same order as planS2Tri.
+  // Sub-lots 2, 3 and 4. Four pairs exist on S3..S20 (B/C/D/E in rows 2
+  // and 3), verified live on Lot-26 tab S5, 2026-08-17. Column F is not
+  // green, so four is the limit.
   addChange(sh, 2, 3, f.C2, "Bassin (sous-lot 2)", plan);
   addChange(sh, 2, 4, f.D2, "Bassin (sous-lot 3)", plan);
+  addChange(sh, 2, 5, f.E2, "Bassin (sous-lot 4)", plan);
   addChange(sh, 3, 3, f.C3, "Happa (sous-lot 2)", plan);
   addChange(sh, 3, 4, f.D3, "Happa (sous-lot 3)", plan);
+  addChange(sh, 3, 5, f.E3, "Happa (sous-lot 4)", plan);
 
   (f.subLots || []).forEach(sl => {
     if (!isValidSubLotRow(sl.row)) throw new Error("Invalid sub-lot row: " + sl.row);

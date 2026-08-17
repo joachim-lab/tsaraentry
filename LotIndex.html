@@ -190,9 +190,10 @@
       }
 
       else if (d.kind === 's3plus') {
-        // Bassin/Happa for the three sub-lots, laid out exactly as on
-        // S2-Tri. The screen previously showed only sub-lot 1 (B2/B3),
-        // so C2/D2/C3/D3 could not be recorded from the app at all.
+        // Bassin/Happa for FOUR sub-lots: B/C/D/E in rows 2 and 3.
+        // Verified live on Lot-26 tab S5, 2026-08-17 — all eight cells
+        // green with dropdowns, column F empty and not green.
+        // The screen previously showed only sub-lot 1 (B2/B3).
         html += '<div class="card"><h3>Conditions</h3>' +
           field('B4', "Température de l'eau (°C)", f.B4, 'number') +
           '<div class="muted" style="margin-top:10px">Bassin / Happa par sous-lot :</div>' +
@@ -200,6 +201,7 @@
             '<div>' + field('B2', 'Bassin 1', f.B2, 'text') + field('B3', 'Happa 1', f.B3, 'text') + '</div>' +
             '<div>' + field('C2', 'Bassin 2', f.C2, 'text') + field('C3', 'Happa 2', f.C3, 'text') + '</div>' +
             '<div>' + field('D2', 'Bassin 3', f.D2, 'text') + field('D3', 'Happa 3', f.D3, 'text') + '</div>' +
+            '<div>' + field('E2', 'Bassin 4', f.E2, 'text') + field('E3', 'Happa 4', f.E3, 'text') + '</div>' +
           '</div></div>';
         html += renderSubLots(f.subLots, 's3plus');
       }
