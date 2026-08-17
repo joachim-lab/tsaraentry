@@ -1072,7 +1072,12 @@
         '</div>' +
         '<label>Moyen de paiement</label><input type="text" id="uMoyen" value="'+esc(o.moyenPaiement || '')+'">' +
         '<div class="row">' +
-          '<div><label>N° facture</label><input type="text" id="uFacture" value="'+esc(o.facture || '')+'"></div>' +
+          '<div><label>N° facture <span class="muted" style="font-weight:400">(optionnel)</span></label>' +
+            '<input type="text" id="uFacture" placeholder="Généré automatiquement" ' +
+              'value="'+esc(o.facture || '')+'">' +
+            '<div class="muted" style="margin-top:4px">Laissez vide : le numéro est créé ' +
+              'à l\'enregistrement. Remplissez seulement pour imposer un numéro existant ' +
+              '(plusieurs commandes sur une même facture).</div></div>' +
           '<div><label>Bon de livraison externe</label><input type="text" id="uBl" value="'+esc(o.bl || '')+'"></div>' +
         '</div>' +
         '<button class="go" id="btnFul" onclick="doFulfil()">Enregistrer</button>' +
