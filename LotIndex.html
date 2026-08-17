@@ -552,7 +552,18 @@
           setStatus('ok', res.changeCount + ' cellule(s) enregistrée(s).');
           newSamples = [];
           const fileId = loaded.fileId;
-          google.script.run.withSuccessHandler(onLotLoaded).uiLoadLot(fileId); // reload fresh state
+          // The write succeeded. If the RELOAD fails, the screen would keep
+          // showing the pre-save values with no sign anything went wrong, and
+          // the worker could save again on top of a stale form. Say so instead.
+          google.script.run
+            .withSuccessHandler(onLotLoaded)
+            .withFailureHandler(function (err) {
+              setStatus('warn',
+                'Enregistré (' + res.changeCount + ' cellule(s)), mais l\'écran n\'a pas pu ' +
+                'se recharger : ' + esc(err && err.message ? err.message : err) +
+                '. Les valeurs affichées ne sont plus à jour. Rechargez la page avant de continuer.');
+            })
+            .uiLoadLot(fileId);
         })
         .withFailureHandler(e => { btn.disabled = false; setStatus('err', esc(e.message)); })
         .uiSubmit(loaded.fileId, collectPayload());

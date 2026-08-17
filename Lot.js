@@ -204,16 +204,26 @@ function getLotStage(fileId) {
       stage: "grossissement",
       targetGroupStartCol: targetCol,
       mixedWarning: activeS.length
-        ? "This lot also has active sub-lot(s) on S-tab(s): " +
-          activeS.map(a => a.sheet + " (" + a.subLots.join(", ") + ")").join("; ") +
-          ". These will NOT reach Stock Poisson — same behaviour as the engine today."
+        ? "Ce lot a aussi des sous-lots actifs sur : " +
+          activeS.map(a => a.sheet + " (" + a.subLots.join(", ") + ")").join(" ; ") +
+          ". Ces sous-lots n'arrivent PAS dans Stock Poisson — c'est le " +
+          "comportement actuel du moteur, pas une erreur de saisie."
         : null
     };
   }
 
   const tabName = findCurrentSTab_(ss);
   if (!tabName) {
-    return { stage: "none", reason: "La date introduite n'existe pas pour ce lot" };
+    // The old wording was "La date introduite n'existe pas pour ce lot", which
+    // sent people looking for a date they never typed. findCurrentSTab_ scans
+    // row 8 of every S-tab and asks whether TODAY falls inside that tab's date
+    // range. Reaching here means no tab covers today.
+    return {
+      stage: "none",
+      reason: "Aucun onglet de ce lot ne couvre la date d'aujourd'hui. " +
+        "Les dates de nourrissage (ligne 8) ne vont pas jusqu'a aujourd'hui, " +
+        "ou le lot n'est pas encore passe au Grossissement."
+    };
   }
   return { stage: "s-tab", tabName: tabName, mixedWarning: null };
 }

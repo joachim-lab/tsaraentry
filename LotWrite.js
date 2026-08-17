@@ -323,7 +323,17 @@ function testWriteDryRun() {
  * Writes NOTHING. Confirms new samples land AFTER existing ones.
  */
 function testWriteSamplesDryRun() {
-  const fileId = '1DdQxI1mRzGbI_PHdrUMAjGk6l4ptyL31MaCo3il9X38'; // Lot-31
+  // The hardcoded Lot-31 id here pointed at a file that no longer exists —
+  // the lot was recreated on 2026-08-15 with a new id. Looked up by name
+  // instead, so this test cannot rot again when a lot file is recreated.
+  const lot = getLotFileList().filter(function (l) { return l.fileName === 'Lot-31'; })[0];
+  if (!lot) {
+    Logger.log("Lot-31 introuvable dans le dossier des lots. Test ignore.");
+    return;
+  }
+  const fileId = lot.fileId;
+  Logger.log("Lot-31 -> " + fileId);
+
   const stageResult = getLotStage(fileId);
   Logger.log("Stage: " + JSON.stringify(stageResult));
 
