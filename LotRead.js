@@ -197,7 +197,18 @@ function readGrossissementFields_(ss, targetGroupStartCol) {
   const gross = ss.getSheetByName(LOT_CFG.GROSS_SHEET);
   const g = LOT_CFG.GROSS_GROUP_SIZE;
 
-  const date = gross.getRange(LOT_CFG.GROSS_ROW_DATE, targetGroupStartCol).getValue();
+  // The block date must be formatted with the SPREADSHEET's timezone, not
+  // the script's. The lot files are (GMT+04:00) Dubai; this Apps Script
+  // project is Africa/Nairobi (GMT+03:00). A cell holding 24/08 means
+  // midnight in Dubai, which is 23/08 23:00 in Nairobi — so the default
+  // conversion reported the day before. Verified on Lot-14, column 55,
+  // whose row 5 holds =IF(AY5="";"";AY5+14), 2026-08-17.
+  // Safe to return a formatted string: row 5 is a formula, the screen shows
+  // this read-only, and nothing parses it back.
+  const rawDate = gross.getRange(LOT_CFG.GROSS_ROW_DATE, targetGroupStartCol).getValue();
+  const date = (rawDate instanceof Date && !isNaN(rawDate.getTime()))
+    ? Utilities.formatDate(rawDate, ss.getSpreadsheetTimeZone(), "dd/MM/yyyy")
+    : rawDate;
   const temp = gross.getRange(LOT_CFG.GROSS_ROW_TEMP, targetGroupStartCol).getValue();
 
   const bassinRow  = gross.getRange(LOT_CFG.GROSS_ROW_BASSIN, targetGroupStartCol, 1, g).getValues()[0];
