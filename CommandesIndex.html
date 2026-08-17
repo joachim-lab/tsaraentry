@@ -367,6 +367,10 @@
       '</div>' +
       '<div id="linesWrap"></div>' +
       '<button class="primary" style="margin-top:12px" onclick="addLine()">+ Ajouter un lot</button>' +
+      '<button class="ghost" style="margin-top:12px;margin-left:8px" id="btnRefreshLots" ' +
+        'onclick="doRefreshLots()">Actualiser les lots vendables</button>' +
+      '<div id="refreshLotsMsg" class="muted" style="margin-top:6px">' +
+        'À faire après un tri. Environ 90 secondes.</div>' +
       '<div class="card"><h3>Prix total</h3><div id="totalAmount" class="totalAmount">—</div></div>' +
       '<button class="go" id="btnCreate" onclick="doCreate()">Enregistrer la commande</button>';
     renderLines();
@@ -620,6 +624,51 @@
         box.innerHTML = 'Stock indisponible : ' + esc(e.message);
       })
       .cmdGetLotAvailability(key);
+  }
+
+  /**
+   * Rebuild the not-sellable list on demand, for staff, after a tri.
+   * Calls the SAME function the nightly trigger calls - no second code
+   * path, so a lot can never be judged by two different rules.
+   *
+   * The set is REPLACED, not merged: a lot that has just been tri'd must
+   * lose its grey. Merging would leave it blocked until the next reload.
+   *
+   * ~90 s, because every lot file is opened. The button is disabled
+   * throughout, so it cannot be started twice.
+   */
+  function doRefreshLots() {
+    const btn = el('btnRefreshLots');
+    const msg = el('refreshLotsMsg');
+    if (btn) { btn.disabled = true; btn.textContent = 'Actualisation…'; }
+    if (msg) {
+      msg.className = 'banner';
+      msg.textContent = 'Lecture de tous les fichiers lot. Environ 90 secondes. Ne pas fermer la page.';
+    }
+    google.script.run
+      .withSuccessHandler(map => {
+        const fresh = map || {};
+        Object.keys(NOT_SELLABLE).forEach(k => { delete NOT_SELLABLE[k]; });
+        Object.keys(fresh).forEach(k => { NOT_SELLABLE[k] = true; });
+        if (GATE) GATE.notSellable = fresh;
+        stashLines();
+        renderLines();
+        const b = el('btnRefreshLots');
+        const m = el('refreshLotsMsg');
+        if (b) { b.disabled = false; b.textContent = 'Actualiser les lots vendables'; }
+        if (m) {
+          m.className = 'ok';
+          m.textContent = 'Liste à jour — ' + Object.keys(fresh).length +
+                          ' lot(s) pas encore vendable(s).';
+        }
+      })
+      .withFailureHandler(e => {
+        const b = el('btnRefreshLots');
+        const m = el('refreshLotsMsg');
+        if (b) { b.disabled = false; b.textContent = 'Actualiser les lots vendables'; }
+        if (m) { m.className = 'err'; m.textContent = 'Échec : ' + esc(e.message); }
+      })
+      .refreshNotSellableMap();
   }
 
   /**
