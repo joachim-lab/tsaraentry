@@ -14,6 +14,8 @@
     a.tile.warn { border-color: #c5221f; }
     a.tile.warn h2, a.tile.warn p { color: #c5221f; }
     a.tile.warn .note { font-size: 12px; font-weight: bold; margin-top: 4px; }
+    a.tile.green { border-color: #188038; }
+    a.tile.green h2, a.tile.green p { color: #188038; }
   </style>
 </head>
 <body>
@@ -24,10 +26,12 @@
   <script>
     google.script.run.withSuccessHandler(function (url) {
       document.getElementById('tiles').innerHTML =
+        '<a class="tile green" href="' + url + '?screen=nourrissage">' +
+          '<h2>Nourrissage</h2><p>Saisie des quantités de provende distribuées</p></a>' +
+        '<a class="tile green" href="' + url + '?screen=gestioninventaires">' +
+          '<h2>Gestion des inventaires</h2><p>Entrées, sorties et achats</p></a>' +
         '<a class="tile" href="' + url + '?screen=temperatures">' +
           '<h2>Températures + impressions stock poisson &amp; programme</h2><p>Température bassin et lac</p></a>' +
-        '<a class="tile" href="' + url + '?screen=nourrissage">' +
-          '<h2>Nourrissage</h2><p>Saisie des quantités de provende distribuées</p></a>' +
         '<a class="tile" href="' + url + '?screen=creerlot">' +
           '<h2>Créer un lot</h2><p>Nouveau fichier lot — grossissement ou géniteurs</p></a>' +
         '<a class="tile" href="' + url + '?screen=commandes">' +

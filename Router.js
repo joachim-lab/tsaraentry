@@ -10,6 +10,8 @@
  *   ?screen=tracform     -> LigneeUI's form, rendered live (screen 5 form)
  *   ?screen=creerlot     -> CreerLotIndex.html    (screen 6)
  *   ?screen=temperatures -> TemperaturesIndex.html (screen 7)
+ *   ?screen=gestioninventaires -> GestionInventairesIndex.html (screen 8 picker)
+ *   ?screen=inventaire   -> InventaireIndex.html  (screen 8a)
  *   no parameter         -> Menu.html            (chooser)
  ***************************************************************/
 
@@ -41,6 +43,8 @@ function doGet(e) {
   else if (screen === "tracabilite") file = "TracabiliteIndex";
   else if (screen === "creerlot") file = "CreerLotIndex";
   else if (screen === "temperatures") file = "TemperaturesIndex";
+  else if (screen === "gestioninventaires") file = "GestionInventairesIndex";
+  else if (screen === "inventaire") file = "InventaireIndex";
   else file = "Menu";
 
   return HtmlService.createHtmlOutputFromFile(file)

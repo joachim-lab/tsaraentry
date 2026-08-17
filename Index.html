@@ -144,6 +144,8 @@
       const m = document.getElementById('msg');
       m.className = cls;
       m.textContent = text;
+      m.style.display = '';   // clear the inline "none" left by hideMsg, else the CSS class cannot show it
+      m.scrollIntoView({ block: 'nearest' });
     }
     function hideMsg() {
       const m = document.getElementById('msg');
