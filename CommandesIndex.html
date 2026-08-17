@@ -18,6 +18,7 @@
     .tab.active { border-bottom-color: #1a73e8; color: #1a73e8; font-weight: bold; }
     .card { border: 1px solid #dadce0; border-radius: 6px; padding: 12px 14px; margin-top: 14px; }
     .card h3 { margin: 0 0 4px 0; font-size: 15px; }
+    .totalAmount { font-size: 22px; font-weight: bold; color: #188038; }
     .muted { color: #5f6368; font-size: 12px; font-weight: normal; }
     /* Lot readout states. A blocking condition must not render in the same
        12px grey as an informational one - a reserved lot silently stops PM
@@ -355,6 +356,7 @@
       '</div>' +
       '<div id="linesWrap"></div>' +
       '<button class="primary" style="margin-top:12px" onclick="addLine()">+ Ajouter un lot</button>' +
+      '<div class="card"><h3>Prix total</h3><div id="totalAmount" class="totalAmount">—</div></div>' +
       '<button class="go" id="btnCreate" onclick="doCreate()">Enregistrer la commande</button>';
     renderLines();
   }
@@ -614,6 +616,9 @@
       // recompute, and a blank price saves as no price at all.
       if (String(t.value).trim() === '') recomputeLinePrice(i);
     }
+    // Prix total tracks every line field, not just the auto-managed ones
+    // (Kg poisson, Frais additionnels, Nombre alevins have no other hook).
+    if (l !== null) recomputeGrandTotal();
   });
 
   /**
@@ -630,12 +635,13 @@
     const isBlank = String(inp.value).trim() === '';
     if (!isAuto && !isBlank) return;                 // USER-owned: never touch
     if (value === null || value === undefined || !isFinite(value) || value === 0) {
-      if (isAuto) { inp.value = ''; delete lines[i].__auto[key]; lines[i][key] = ''; }
+      if (isAuto) { inp.value = ''; delete lines[i].__auto[key]; lines[i][key] = ''; recomputeGrandTotal(); }
       return;
     }
     inp.value = String(Math.round(value * 100) / 100).replace('.', ',');
     lines[i].__auto[key] = true;
     lines[i][key] = inp.value;
+    recomputeGrandTotal();
   }
 
   /** Lot PM -> this line's PM field, through the same ownership rules. */
@@ -733,6 +739,7 @@
     if (!TARIFS) return;
     lines.forEach((ln, i) => recomputeLinePrice(i));
     recomputeTransport();
+    recomputeGrandTotal();
   }
 
   /**
@@ -748,6 +755,38 @@
       ? transportAmount(num((el('fKm') || {}).value))
       : null;
     setAuto(0, 'transport', amt);
+  }
+
+  /**
+   * Client's total, recomputed from CURRENT DOM values (not the lines[]
+   * cache, which only refreshes on render/add/remove — a field the user
+   * is mid-typing would otherwise read stale). Display only, never sent
+   * to the server.
+   *
+   * AL : Nombre alevins commandés x Prix alevin + Prix transport, per line.
+   * GR : Kg poisson commandé x Prix / kg + Frais additionnels, per line.
+   * A line missing its quantity or unit price contributes nothing yet.
+   */
+  function recomputeGrandTotal() {
+    const al = isAlevins();
+    const byLine = {};
+    document.querySelectorAll('[data-l]').forEach(inp => {
+      const i = inp.getAttribute('data-l');
+      const k = inp.getAttribute('data-k');
+      byLine[i] = byLine[i] || {};
+      byLine[i][k] = inp.value;
+    });
+    let total = null;
+    Object.keys(byLine).forEach(i => {
+      const ln = byLine[i];
+      const qty = num(al ? ln.alevinsNb : ln.poissonKg);
+      const prix = num(al ? ln.alevinsPrix : ln.prixKg);
+      if (qty === null || prix === null) return;
+      const extra = num(al ? ln.transport : ln.frais) || 0;
+      total = (total || 0) + qty * prix + extra;
+    });
+    const out = el('totalAmount');
+    if (out) out.textContent = total === null ? '—' : fmtNum(total) + ' Ar';
   }
 
   function onLivraisonChange() {
