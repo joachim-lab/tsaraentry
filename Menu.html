@@ -23,7 +23,7 @@
     google.script.run.withSuccessHandler(function (url) {
       document.getElementById('tiles').innerHTML =
         '<a class="tile" href="' + url + '?screen=temperatures">' +
-          '<h2>Températures</h2><p>Température bassin et lac · impression · stock poisson + programme</p></a>' +
+          '<h2>Températures + impressions stock poisson &amp; programme</h2><p>Température bassin et lac</p></a>' +
         '<a class="tile" href="' + url + '?screen=nourrissage">' +
           '<h2>Nourrissage</h2><p>Saisie des quantités de provende distribuées</p></a>' +
         '<a class="tile" href="' + url + '?screen=creerlot">' +
