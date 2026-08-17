@@ -92,6 +92,18 @@
      * [data-field] elements, so a read-only field cannot be sent, and
      * the screen therefore cannot disagree with the server.
      */
+    /**
+     * Display-only date, dd/MM/yyyy, in the BROWSER's local time.
+     * The Grossissement block date is a formula (=IF(AY5="";"";AY5+14)),
+     * so it is never written back and never needs parsing again.
+     */
+    function fmtDate(v) {
+      if (v === null || v === undefined || v === '') return null;
+      const d = new Date(v);
+      if (isNaN(d.getTime())) return String(v);
+      const p = function (n) { return (n < 10 ? '0' : '') + n; };
+      return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear();
+    }
     function roField(label, value, dec) {
       const n = fmtNum(value, dec);
       return '<label>' + esc(label) + '</label>' +
@@ -220,10 +232,17 @@
       }
 
       else if (d.kind === 'grossissement') {
+        // The block date is SHEET-OWNED: row 5 holds =IF(<prev>="";"";<prev>+14),
+        // one block every 14 days. addChange refuses to write a formula cell,
+        // so an edited date could only ever fail the whole save. Shown
+        // read-only, like the other calculated fields.
+        const dateShown = fmtDate(f.date);
         html += '<div class="card"><h3>Bloc de pesée</h3>' +
-          field('date', 'Date de la pesée', f.date, 'date') +
+          '<label>Date de la pesée</label>' +
+          '<div class="muted">' + esc(dateShown === null ? '—' : dateShown) +
+          ' (calculé par la feuille)</div>' +
           field('temperature', "Température de l'eau (°C)", f.temperature, 'number') +
-          '<div class="muted">Ces deux valeurs s\'appliquent à tout le bloc.</div>' +
+          '<div class="muted">La température s\'applique à tout le bloc.</div>' +
           '</div>';
         html += renderGrossSubLots(f.subLots);
       }
