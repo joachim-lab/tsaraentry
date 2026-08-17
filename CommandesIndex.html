@@ -337,10 +337,13 @@
           '<div><label>Client</label><input type="text" id="fClient"></div>' +
           '<div><label>Contact</label><input type="text" id="fContact"></div>' +
         '</div>' +
-        '<div class="row">' +
-          '<div><label>N° facture</label><input type="text" id="fFacture"></div>' +
-          '<div><label>Bon de livraison externe</label><input type="text" id="fBl"></div>' +
-        '</div>' +
+        // No N° facture here, deliberately. AutoCommandes mints it when a
+        // Date livraison is entered, and it SKIPS any order that already
+        // has a value in column C. A number typed at this stage would not
+        // just be premature - it would permanently stop the generator for
+        // that order, and break the routine grouping of several orders
+        // onto one invoice. It stays editable on Paiement & livraison.
+        '<label>Bon de livraison externe</label><input type="text" id="fBl">' +
         '<label>Remarques / destination</label><input type="text" id="fRemarques">' +
         '<div class="row">' +
           '<div id="provendeWrap"><label>Type de client</label>' +
@@ -914,7 +917,7 @@
       dateCommande: el('fDate').value,
       client: el('fClient').value,
       contact: el('fContact').value,
-      facture: el('fFacture').value,
+      // facture is not sent: column C belongs to the AutoCommandes generator.
       bl: el('fBl').value,
       remarques: el('fRemarques').value,
       lines: lines.map(ln => {

@@ -179,7 +179,13 @@ function cmdCreateOrder(payload) {
     put(C.LOT, ln.lot);
     // Column B (order number) is written later, row by row — see the
     // sequential generation block below.
-    put(C.FACTURE, f.facture);
+    //
+    // Column C (N° facture) is NOT written here. AutoCommandes mints it
+    // when a Date livraison is entered, and it skips any order that
+    // already holds a value in C — so writing anything at order time
+    // would permanently disable the generator for that order. The
+    // fulfilment path (cmdRecordFulfilment) still writes C, which is
+    // where finance overrides the generated number.
     put(C.BL, f.bl);
     put(C.DATE_CMD, cmdParseDate(f.dateCommande));
 
