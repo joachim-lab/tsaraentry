@@ -1,11 +1,14 @@
 /***************************************************************
  * TemperaturesServer.js — TSARA Entry web app, screen 7
  *
- * Two jobs, one screen:
+ * Three jobs, one screen:
  *   1. Write the two water temperatures into Stock poisson,
  *      sheet "lot", cells R1 (bassin) and T1 (lac).
  *   2. Build a PDF of that sheet, columns N to X, A4 landscape,
  *      and hand it to the browser for printing.
+ *   3. Build a PDF of the Programme "planning" sheet, print area
+ *      sized to its actual content (not a fixed range — the sheet
+ *      is short-lived and its row count changes week to week).
  *
  * R1 and T1 are NOT a new convention. WARNINGSYSTEM reads them
  * (WS_CFG.TEMP) and the cockpit reads them (KPI_CFG.STOCK).
@@ -13,7 +16,7 @@
  * of truth. Do not move them without changing those two projects.
  *
  * The engine writes the "lot" sheet from row 3 down, so row 1 is
- * free. The spreadsheet ID comes from CFG in Code.js — no copy.
+ * free. Both spreadsheet IDs come from CFG in Code.js — no copy.
  *
  * No date stamp is written. The cockpit already logs both values
  * with the date in its hidden "_TempLog" sheet.
@@ -85,6 +88,31 @@ function tempSave(bassinRaw, lacRaw) {
 }
 
 /**
+ * Fetches a Sheets PDF export URL and returns it base64-encoded.
+ * Shared by both PDF buttons on this screen. Throws a French message
+ * on a non-200 response instead of returning a broken PDF.
+ */
+function tempFetchPdf(url, filenamePrefix) {
+  const res = UrlFetchApp.fetch(url, {
+    headers: { Authorization: "Bearer " + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+
+  if (res.getResponseCode() !== 200) {
+    throw new Error("Google a refusé l'export PDF (code " + res.getResponseCode() + ").");
+  }
+
+  const bytes = res.getBlob().getBytes();
+  const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd_HHmm");
+
+  return {
+    base64: Utilities.base64Encode(bytes),
+    filename: filenamePrefix + "_" + stamp + ".pdf",
+    size: bytes.length
+  };
+}
+
+/**
  * PDF of the "lot" sheet, columns N to X, all rows, A4 landscape,
  * narrow margins. Returned base64-encoded, because the browser
  * cannot read the sheet itself — the web app runs as the deploying
@@ -113,23 +141,49 @@ function tempBuildPdf() {
     + "&r2=" + lastRow
     + "&c2=" + TEMP_CFG.PRINT_LAST_COL;
 
-  const res = UrlFetchApp.fetch(url, {
-    headers: { Authorization: "Bearer " + ScriptApp.getOAuthToken() },
-    muteHttpExceptions: true
-  });
+  return tempFetchPdf(url, "Stock_poisson");
+}
 
-  if (res.getResponseCode() !== 200) {
-    throw new Error("Google a refusé l'export PDF (code " + res.getResponseCode() + ").");
+/** The Programme "planning" sheet. Throws if it is missing. */
+function tempProgrammeSheet() {
+  const sh = SpreadsheetApp
+    .openById(CFG.PROGRAMME_SS_ID)
+    .getSheetByName(CFG.PROGRAMME_SHEET);
+  if (!sh) {
+    throw new Error('Onglet "' + CFG.PROGRAMME_SHEET + '" introuvable dans Programme.');
   }
+  return sh;
+}
 
-  const bytes = res.getBlob().getBytes();
-  const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd_HHmm");
+/**
+ * PDF of the Programme "planning" sheet. Print area is sized to the
+ * sheet's actual content (getLastRow/getLastColumn), not a fixed
+ * range — the sheet is short and its size changes week to week.
+ * A4 landscape, same narrow margins as the Stock poisson PDF.
+ */
+function tempBuildProgrammePdf() {
+  const sh = tempProgrammeSheet();
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
 
-  return {
-    base64: Utilities.base64Encode(bytes),
-    filename: "Stock_poisson_" + stamp + ".pdf",
-    size: bytes.length
-  };
+  const url = "https://docs.google.com/spreadsheets/d/" + CFG.PROGRAMME_SS_ID + "/export"
+    + "?format=pdf"
+    + "&gid=" + sh.getSheetId()
+    + "&size=A4"
+    + "&portrait=false"
+    + "&fitw=true"
+    + "&gridlines=true"
+    + "&printtitle=false"
+    + "&sheetnames=false"
+    + "&pagenum=UNDEFINED"
+    + "&attachment=false"
+    + "&top_margin=0.25&bottom_margin=0.25&left_margin=0.25&right_margin=0.25"
+    + "&r1=0"
+    + "&c1=0"
+    + "&r2=" + lastRow
+    + "&c2=" + lastCol;
+
+  return tempFetchPdf(url, "Programme");
 }
 
 /**
@@ -149,5 +203,10 @@ function testTemperaturesServer() {
   Logger.log("Valeurs lues — bassin : " + cur.bassin + " · lac : " + cur.lac);
 
   const pdf = tempBuildPdf();
-  Logger.log("PDF construit : " + pdf.size + " octets · " + pdf.filename);
+  Logger.log("PDF Stock poisson construit : " + pdf.size + " octets · " + pdf.filename);
+
+  const progSh = tempProgrammeSheet();
+  Logger.log("Programme onglet : " + progSh.getName() + " · dernière ligne " + progSh.getLastRow() + " · dernière colonne " + progSh.getLastColumn());
+  const progPdf = tempBuildProgrammePdf();
+  Logger.log("PDF Programme construit : " + progPdf.size + " octets · " + progPdf.filename);
 }

@@ -17,6 +17,9 @@ const CFG = {
   STOCK_LOT_START_ROW: 3,
   STOCK_LOT_END_ROW: 50,
 
+  PROGRAMME_SS_ID: "1Ky1DKbNxeBnqTXUxgk8PedPSuwISgS4rvVhFMUHBdsM",
+  PROGRAMME_SHEET: "planning",
+
   NOURRISSAGE_SS_ID: "1JBoH5c7BqZc2V5czcDAnEt-2hvkNKlJAxuDSupttTfs",
   CONSO_SHEET: "Consommation provende",
   CONSO_START_ROW: 2,

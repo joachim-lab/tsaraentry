@@ -14,6 +14,8 @@
     button { margin-top: 16px; width: 100%; font-size: 15px; padding: 12px 16px; border: 0;
              border-radius: 6px; background: #1a73e8; color: #fff; cursor: pointer; }
     button:disabled { background: #dadce0; color: #5f6368; cursor: default; }
+    button.green { background: #188038; }
+    button.green:disabled { background: #dadce0; color: #5f6368; }
     .panel { margin-top: 14px; padding: 12px 14px; border-radius: 6px; font-size: 14px; display: none; }
     .ok { background: #e6f4ea; color: #137333; }
     .err { background: #fce8e6; color: #c5221f; }
@@ -39,12 +41,16 @@
     <div id="saveMsg" class="panel"></div>
 
     <hr>
-    <h2>Impression</h2>
+    <h2>Impression stock poisson</h2>
     <p class="note">Tableau Stock poisson, colonnes N à X, A4 paysage.
        Le PDF s'enregistre sur l'appareil ; ouvrez-le pour l'imprimer.</p>
-    <button id="print">Préparer le PDF</button>
+    <button id="print">Préparer PDF Stock poisson</button>
     <a class="pdf" id="pdfLink" download>Ouvrir le PDF</a>
     <div id="printMsg" class="panel"></div>
+
+    <button id="printProgramme" class="green">Imprimer Programme</button>
+    <a class="pdf" id="pdfLinkProgramme" download>Ouvrir le PDF</a>
+    <div id="printProgrammeMsg" class="panel"></div>
   </div>
 
   <script>
@@ -101,7 +107,7 @@
       google.script.run
         .withSuccessHandler(function (r) {
           el('print').disabled = false;
-          el('print').textContent = 'Préparer le PDF';
+          el('print').textContent = 'Préparer PDF Stock poisson';
           var bin = atob(r.base64);
           var bytes = new Uint8Array(bin.length);
           for (var i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
@@ -113,10 +119,36 @@
         })
         .withFailureHandler(function (e) {
           el('print').disabled = false;
-          el('print').textContent = 'Préparer le PDF';
+          el('print').textContent = 'Préparer PDF Stock poisson';
           show('printMsg', e.message, 'err');
         })
         .tempBuildPdf();
+    };
+
+    el('printProgramme').onclick = function () {
+      hide('printProgrammeMsg');
+      el('pdfLinkProgramme').style.display = 'none';
+      el('printProgramme').disabled = true;
+      el('printProgramme').textContent = 'Préparation…';
+      google.script.run
+        .withSuccessHandler(function (r) {
+          el('printProgramme').disabled = false;
+          el('printProgramme').textContent = 'Imprimer Programme';
+          var bin = atob(r.base64);
+          var bytes = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
+          var link = el('pdfLinkProgramme');
+          link.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+          link.download = r.filename;
+          link.textContent = 'Ouvrir le PDF (' + Math.round(r.size / 1024) + ' Ko)';
+          link.style.display = 'block';
+        })
+        .withFailureHandler(function (e) {
+          el('printProgramme').disabled = false;
+          el('printProgramme').textContent = 'Imprimer Programme';
+          show('printProgrammeMsg', e.message, 'err');
+        })
+        .tempBuildProgrammePdf();
     };
   </script>
 </body>
