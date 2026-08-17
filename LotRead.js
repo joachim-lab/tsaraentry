@@ -55,9 +55,18 @@ function readEarlyTab_(sh, tabName) {
   };
   const r = ranges[tabName];
 
+  // B11 Nombre, C11 Poids moyen, D11 Biomasse — read in ONE call.
+  // B11 and C11 are sheet-owned on every early tab (B11 is a formula
+  // everywhere, C11 is the sample average everywhere), so they are read
+  // for DISPLAY only and are never written back. See the field-ownership
+  // contract, 2026-08-16 §3.4.
+  const row11 = sh.getRange("B11:D11").getValues()[0];
+
   const fields = {
     B4: sh.getRange("B4").getValue(),
-    D11: sh.getRange("D11").getValue(),
+    B11: row11[0],
+    C11: row11[1],
+    D11: row11[2],
     G11: sh.getRange("G11").getValue(),
     samples: readSampleColumn_(sh, r.sampleCol, r.sampleStart, r.sampleEnd)
   };
@@ -73,8 +82,15 @@ function readEarlyTab_(sh, tabName) {
 
 /** S1 — one sub-lot, row 11 only. Samples in column K. */
 function readS1_(sh, tabName) {
+  // B11 Nombre (='1-5'!B11), C11 Poids moyen (=K55), D11 Biomasse.
+  // All three are sheet-owned on S1 — display only, never written.
+  const row11 = sh.getRange("B11:D11").getValues()[0];
+
   const fields = {
     B4: sh.getRange("B4").getValue(),
+    B11: row11[0],
+    C11: row11[1],
+    D11: row11[2],
     H11: sh.getRange("H11").getValue(),
     samples: readSampleColumn_(sh, "K", 5, 54)
   };

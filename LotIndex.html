@@ -77,14 +77,25 @@
       return isFinite(n) ? n : null;
     }
     /**
-     * Display-only gram formatting for sheet-owned values. The sheet
+     * Display-only number formatting for sheet-owned values. The sheet
      * stores full float precision (Lot-31 16-21!D11 = 7517.381341447861);
-     * one decimal and a French comma is what a worker needs to read.
+     * a worker needs a rounded value with a French comma.
      * Never used on a value that will be written back.
      */
-    function fmtG(v) {
+    function fmtNum(v, dec) {
       const n = num(v);
-      return n === null ? '' : n.toFixed(1).replace('.', ',');
+      return n === null ? null : n.toFixed(dec).replace('.', ',');
+    }
+    /**
+     * A field the SHEET owns: label plus grey text, no input.
+     * Rendering no input is the point — collectPayload only reads
+     * [data-field] elements, so a read-only field cannot be sent, and
+     * the screen therefore cannot disagree with the server.
+     */
+    function roField(label, value, dec) {
+      const n = fmtNum(value, dec);
+      return '<label>' + esc(label) + '</label>' +
+        '<div class="muted">' + esc(n === null ? '—' : n) + ' (calculé par la feuille)</div>';
     }
 
     // ---------- lot list ----------
@@ -143,30 +154,36 @@
             field('B5', 'Date de départ', f.B5, 'date') +
             '</div>';
         }
-        // D11 is BIOMASSE, not Nombre. It was mislabelled here.
+        // The three quantities, in sheet order B11 / C11 / D11.
         // Ownership (field-ownership contract, 2026-08-16 §3.4):
-        //   1-5                  D11 is the input cell  -> editable
-        //   6-10 / 11-15 / 16-21 D11 is =C11*B11        -> sheet-owned
+        //   Nombre B11       formula on EVERY early tab   -> sheet-owned
+        //   Poids moyen C11  sample average on every tab   -> sheet-owned
+        //   Biomasse D11     input on 1-5 only;
+        //                    =C11*B11 on 6-10/11-15/16-21  -> sheet-owned
         // Since 2026-08-17 the server writes D11 only on 1-5 and silently
         // ignores it elsewhere (LotWrite.js, commit 6fb1069). Rendering an
         // input there invited a worker to type a value that did nothing.
-        // Shown read-only instead, so the screen and the server agree.
-        const d11Field = (d.tabName === '1-5')
-          ? field('D11', 'Biomasse (g)', f.D11, 'number')
-          : '<label>Biomasse (g)</label>' +
-            '<div class="muted">' + esc(fmtG(f.D11)) + ' (calculé par la feuille)</div>';
-
         html += '<div class="card"><h3>Mesures</h3>' +
           field('B4', "Température de l'eau (°C)", f.B4, 'number') +
-          d11Field +
+          roField('Nombre', f.B11, 0) +
+          roField('Poids moyen (g)', f.C11, 2) +
+          (d.tabName === '1-5'
+            ? field('D11', 'Biomasse (g)', f.D11, 'number')
+            : roField('Biomasse (g)', f.D11, 1)) +
           field('G11', 'Commentaires', f.G11, 'text') +
           '</div>';
         html += renderSamples(f.samples);
       }
 
       else if (d.kind === 's1') {
+        // S1 owns none of the three: B11 mirrors '1-5'!B11, C11 is the
+        // sample average (=K55), D11 is derived. Poids moyen changes only
+        // through the sample cells below. Comments are H11 on S1, not G11.
         html += '<div class="card"><h3>Mesures</h3>' +
           field('B4', "Température de l'eau (°C)", f.B4, 'number') +
+          roField('Nombre', f.B11, 0) +
+          roField('Poids moyen (g)', f.C11, 2) +
+          roField('Biomasse (g)', f.D11, 1) +
           field('H11', 'Commentaires', f.H11, 'text') +
           '</div>';
         html += renderSamples(f.samples);
