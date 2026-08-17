@@ -71,9 +71,10 @@
   let OPTS = { lots: [], types: [] };
   let TARIFS = null;           // { bands:[...], fish:{detail,gros} } - loaded once at boot
   let GATE = null;             // { pm:{key:PM}, fryMax, grBlock, grWarn } - lot/type gate
-  // Sub-lots the lot file reports with no stock at all. Filled in as
-  // selections reveal them (the dropdown is built before any lot file is
-  // opened), then honoured by every later render. Page-life only.
+  // Sub-lots the lot file reports with no stock at all. Seeded at boot
+  // from GATE.notSellable (the nightly map), then extended by any
+  // selection that reveals one the map did not have - a lot file created
+  // or emptied since the last rebuild. One set, two sources of entries.
   const NOT_SELLABLE = {};
   let lines = [{}];            // create mode: one line per lot
   let mode = 'new';
@@ -125,7 +126,13 @@
   // If it fails the dropdown simply stays unfiltered - the per-lot check
   // at selection and the server check at save both still run.
   google.script.run
-    .withSuccessHandler(g => { GATE = g; if (el('linesWrap')) renderLines(); })
+    .withSuccessHandler(g => {
+      GATE = g;
+      if (g && g.notSellable) {
+        Object.keys(g.notSellable).forEach(k => { NOT_SELLABLE[k] = true; });
+      }
+      if (el('linesWrap')) renderLines();
+    })
     .withFailureHandler(() => { GATE = null; })
     .cmdGetLotGateData();
 
@@ -566,8 +573,11 @@
         // file is opened - hence the block lands here, not in the list.
         // The server refuses it again at save (qty > available = 0).
         if (!a.count) {
-          NOT_SELLABLE[key] = true;
-          disableLotOption(key);
+          // Canonical key, not the raw label: renderLines looks NOT_SELLABLE
+          // up under canonKey(), and "15 ter-C5" canonicalises to
+          // "15TER-C5". Storing the raw label would grey nothing.
+          NOT_SELLABLE[canonKey(key)] = true;
+          disableLotOption(canonKey(key));
           sel.value = '';                       // fires no event: box stays
           const alNs = isAlevins();
           setAuto(i, alNs ? 'alevinsPm' : 'poissonPm', null);

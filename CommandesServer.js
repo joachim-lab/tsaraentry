@@ -732,15 +732,126 @@ function buildReservedAllMap() {
   return out;
 }
 
+/* -------------------------------------------------------------
+ * "Pas encore vendable" map
+ *
+ * A sub-lot whose stock cell in the LOT FILE is empty cannot be sold —
+ * fry before the tri are the usual case. Stock Poisson cannot tell this
+ * apart from a sellable lot (it still shows the fish), so the only
+ * source is the lot files themselves, and the dropdown is built long
+ * before any lot file is opened.
+ *
+ * Hence: build it ahead of time, store it, serve it instantly.
+ * Rebuilt nightly by refreshNotSellableMap, after the engine has
+ * finished writing the lot files. Kim runs the same function by hand
+ * after a tri, so a lot that became sellable during the day does not
+ * stay greyed until the next night.
+ *
+ * ScriptProperties, not CacheService: an expiry here would silently
+ * empty the map and quietly un-grey every lot.
+ *
+ * A lot MISSING from this map is left selectable and falls through to
+ * the per-selection check, which blocks it anyway — same rule as the PM
+ * map. A gap must never hide a real lot.
+ * ------------------------------------------------------------- */
+
+const NOT_SELLABLE_PROP_KEY = "cmd_not_sellable_v1";
+
+/** Nightly trigger hour, script timezone. The engine finishes ~04:53. */
+const NOT_SELLABLE_TRIGGER_HOUR = 6;
+
+/** Stored map. Empty until refreshNotSellableMap has run once. */
+function getNotSellableMap() {
+  const raw = PropertiesService.getScriptProperties().getProperty(NOT_SELLABLE_PROP_KEY);
+  return raw ? JSON.parse(raw) : {};
+}
+
+/**
+ * The real scan. Opens each LOT FILE ONCE and resolves every key that
+ * belongs to it, instead of calling cmdGetLotAvailability per key —
+ * that reopens the lot file AND the Commandes file (reservations,
+ * pending) for all 30 keys, which is what made the per-key measurement
+ * 1 min 46 s. Reservations and pending quantities are irrelevant here:
+ * this map answers "is there any stock at all", not "how much is left".
+ *
+ * Resolution itself goes through findSubLotColumnByOrderKey, the same
+ * function the per-lot check and the engine mirror use. Do not inline a
+ * second copy of that scan — two copies of the rule would drift apart.
+ */
+function buildNotSellableMap() {
+  const list = getLotFileList();
+  const byLot = {};
+  Object.keys(cmdGetLotPmMap()).forEach(function (k) {
+    const lotNum = k.split("-")[0];
+    if (!byLot[lotNum]) byLot[lotNum] = [];
+    byLot[lotNum].push(k);
+  });
+
+  const out = {};
+  Object.keys(byLot).forEach(function (lotNum) {
+    var fileId = null;
+    for (var i = 0; i < list.length; i++) {
+      if (cmdCanonKey(list[i].lotNumber) === lotNum) { fileId = list[i].fileId; break; }
+    }
+    if (!fileId) return;                       // no lot file -> stays selectable
+    const ss = SpreadsheetApp.openById(fileId);
+    byLot[lotNum].forEach(function (k) {
+      const m = findSubLotColumnByOrderKey(ss, k);
+      if (m.found && !m.count) out[k] = true;  // found, but the cell is empty
+    });
+  });
+  return out;
+}
+
+/**
+ * RUN FROM EDITOR after a tri, and nightly by trigger. Rebuilds and
+ * stores the map. Writes only to ScriptProperties — no spreadsheet is
+ * touched.
+ */
+function refreshNotSellableMap() {
+  const started = new Date();
+  const map = buildNotSellableMap();
+  PropertiesService.getScriptProperties()
+    .setProperty(NOT_SELLABLE_PROP_KEY, JSON.stringify(map));
+  const ks = Object.keys(map).sort();
+  Logger.log("Carte reconstruite en " + Math.round((new Date() - started) / 1000) + " s");
+  Logger.log("Pas encore vendable (" + ks.length + ") : " + (ks.join(", ") || "aucun"));
+  return map;
+}
+
+/**
+ * RUN FROM EDITOR ONCE. Installs the nightly rebuild. Deletes any
+ * existing trigger for the same handler first, so running it twice
+ * cannot leave two triggers rebuilding the same map.
+ */
+function installNotSellableTrigger() {
+  const existing = ScriptApp.getProjectTriggers();
+  var removed = 0;
+  existing.forEach(function (t) {
+    if (t.getHandlerFunction() === "refreshNotSellableMap") {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  ScriptApp.newTrigger("refreshNotSellableMap")
+    .timeBased()
+    .everyDays(1)
+    .atHour(NOT_SELLABLE_TRIGGER_HOUR)
+    .create();
+  Logger.log("Anciens déclencheurs supprimés : " + removed);
+  Logger.log("Déclencheur quotidien installé vers " + NOT_SELLABLE_TRIGGER_HOUR + " h.");
+}
+
 /**
  * Everything the Commandes screen needs to gate its lot dropdown:
- * the PM map, the TOUT reservations, and the boundaries - so the
- * client never hardcodes any of them.
+ * the PM map, the TOUT reservations, the sub-lots with no stock, and
+ * the boundaries - so the client never hardcodes any of them.
  */
 function cmdGetLotGateData() {
   return {
     pm: cmdGetLotPmMap(),
     reservedAll: buildReservedAllMap(),
+    notSellable: getNotSellableMap(),
     fryMax: cmdFryMaxPm(),
     grBlock: CMD_GR_BLOCK_PM,
     grWarn: CMD_GR_WARN_PM
