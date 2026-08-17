@@ -485,7 +485,17 @@
 
       if (newSamples.length) fields.samples = newSamples.slice();
 
-      return { fields: fields };
+      // What this form was RENDERED for. The server re-detects the stage at
+      // save time and refuses if it has moved — a form left open across a
+      // date boundary would otherwise write these fields into another tab.
+      return {
+        fields: fields,
+        stageStamp: {
+          stage: loaded.stage,
+          tabName: loaded.tabName || null,
+          targetGroupStartCol: loaded.targetGroupStartCol || null
+        }
+      };
     }
 
     function doPreview() {

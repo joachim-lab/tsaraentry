@@ -70,8 +70,43 @@ function uiLoadLot(fileId) {
  *   additions  = changes to cells that were empty
  * Only overwrites require confirmation (Kim's decision, 2026-08-09).
  */
+/**
+ * Refuse a save whose target moved while the form was open.
+ *
+ * The screen decides which tab (or which Grossissement block) it is on
+ * when it LOADS. uiPreviewSubmit and uiSubmit both re-detect it at SAVE
+ * time. If a form is left open across a date boundary the two differ,
+ * and the payload built for one tab would be written into another
+ * tab's cells — G11 on 16-21 is a comment, on S1 it is a formula.
+ *
+ * The client sends what it displayed as payload.stageStamp. Editor test
+ * functions send no stamp, so they are unaffected.
+ */
+function assertStageUnchanged(stageResult, payload) {
+  const stamp = payload && payload.stageStamp;
+  if (!stamp) return;
+
+  const nowTab = stageResult.tabName || null;
+  const nowCol = stageResult.targetGroupStartCol || null;
+
+  if (stamp.stage === stageResult.stage && stamp.tabName === nowTab &&
+      stamp.targetGroupStartCol === nowCol) {
+    return;
+  }
+
+  const was = stamp.tabName || ("Grossissement, colonne " + stamp.targetGroupStartCol);
+  const is = nowTab || ("Grossissement, colonne " + nowCol);
+
+  throw new Error(
+    "Enregistrement refuse : la periode a change pendant que le formulaire " +
+    "etait ouvert. Le formulaire a ete ouvert sur " + was + ", mais le lot " +
+    "est maintenant sur " + is + ". Rien n'a ete ecrit. Rechargez la page et " +
+    "ressaisissez.");
+}
+
 function uiPreviewSubmit(fileId, payload) {
   const stageResult = getLotStage(fileId);
+  assertStageUnchanged(stageResult, payload);
   const result = submitLotEntry(fileId, stageResult, payload); // dry run by default
 
   const overwrites = [];
@@ -98,6 +133,7 @@ function uiPreviewSubmit(fileId, payload) {
 /** UI: perform the write. Called only after the UI has handled any confirmation. */
 function uiSubmit(fileId, payload) {
   const stageResult = getLotStage(fileId);
+  assertStageUnchanged(stageResult, payload);
   const result = submitLotEntry(fileId, stageResult, payload, { dryRun: false });
   return { changeCount: result.changeCount };
 }
