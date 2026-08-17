@@ -13,6 +13,7 @@
  *   ?screen=gestioninventaires -> GestionInventairesIndex.html (screen 8 picker)
  *   ?screen=inventaire   -> InventaireIndex.html  (screen 8a)
  *   ?screen=checkstock   -> CheckStockIndex.html  (screen 8b)
+ *   ?screen=achats       -> AchatsIndex.html      (screen 8c)
  *   no parameter         -> Menu.html            (chooser)
  ***************************************************************/
 
@@ -47,6 +48,7 @@ function doGet(e) {
   else if (screen === "gestioninventaires") file = "GestionInventairesIndex";
   else if (screen === "inventaire") file = "InventaireIndex";
   else if (screen === "checkstock") file = "CheckStockIndex";
+  else if (screen === "achats") file = "AchatsIndex";
   else file = "Menu";
 
   return HtmlService.createHtmlOutputFromFile(file)
