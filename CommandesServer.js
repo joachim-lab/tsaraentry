@@ -961,9 +961,14 @@ function cmdValidateOrderLines(lines, orderType) {
  *  Case 1 must be ok=false with a "pas encore vendable" block.
  *  Case 2 must be ok=true — it proves the test can pass at all. */
 function testFoundBlockVerdict() {
+  // Case 1 must be a key that exists in NO lot file, so it reaches the
+  // !found block. Do not use a real lot: 15 ter-C5 was used until
+  // 2026-08-17, and once Lot-15 ter resolved, that case started failing
+  // on the 149 g calibre gate instead — a pass for the wrong reason.
+  // Case 2 must PASS, or a test that always refuses looks like a success.
   var cases = [
-    { lot: "15 ter-C5", qty: 10, expect: "REFUS attendu" },
-    { lot: "19-8-L",    qty: 10, expect: "OK attendu" }
+    { lot: "99-1-A", qty: 10, expect: "REFUS attendu (lot inexistant)" },
+    { lot: "19-8-L", qty: 10, expect: "OK attendu" }
   ];
   cases.forEach(function (c) {
     var v = cmdValidateOrderLines([{ lot: c.lot, qty: c.qty }], "GR");
