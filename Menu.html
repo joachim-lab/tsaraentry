@@ -10,6 +10,9 @@
     a.tile:hover { background: #f8f9fa; }
     a.tile h2 { margin: 0 0 4px 0; font-size: 17px; color: #1a73e8; }
     a.tile p { margin: 0; font-size: 13px; color: #5f6368; }
+    a.tile.warn { border-color: #c5221f; }
+    a.tile.warn h2, a.tile.warn p { color: #c5221f; }
+    a.tile.warn .note { font-size: 12px; font-weight: bold; margin-top: 4px; }
   </style>
 </head>
 <body>
@@ -19,20 +22,22 @@
   <script>
     google.script.run.withSuccessHandler(function (url) {
       document.getElementById('tiles').innerHTML =
+        '<a class="tile" href="' + url + '?screen=temperatures">' +
+          '<h2>Températures</h2><p>Température bassin et lac · impression · stock poisson + programme</p></a>' +
         '<a class="tile" href="' + url + '?screen=nourrissage">' +
           '<h2>Nourrissage</h2><p>Saisie des quantités de provende distribuées</p></a>' +
-        '<a class="tile" href="' + url + '?screen=lot">' +
-          '<h2>Échantillonnage lot</h2><p>Pesées, température, commentaires par sous-lot</p></a>' +
+        '<a class="tile" href="' + url + '?screen=creerlot">' +
+          '<h2>Créer un lot</h2><p>Nouveau fichier lot — grossissement ou géniteurs</p></a>' +
         '<a class="tile" href="' + url + '?screen=commandes">' +
           '<h2>Commandes</h2><p>Nouvelle commande · paiement &amp; livraison</p></a>' +
         '<a class="tile" href="' + url + '?screen=morts">' +
           '<h2>Mortalité</h2><p>Déclaration des poissons morts</p></a>' +
-        '<a class="tile" href="' + url + '?screen=tracabilite">' +
-          '<h2>Mouvements de lot</h2><p>Tri, déplacement, mélange, mise en cage</p></a>' +
-        '<a class="tile" href="' + url + '?screen=creerlot">' +
-          '<h2>Créer un lot</h2><p>Nouveau fichier lot — grossissement ou géniteurs</p></a>' +
-        '<a class="tile" href="' + url + '?screen=temperatures">' +
-          '<h2>Températures</h2><p>Température bassin et lac · impression du tableau</p></a>';
+        '<a class="tile warn" href="' + url + '?screen=lot">' +
+          '<h2>Échantillonnage de lot</h2><p>Poids moyen, nombre, biomasse</p>' +
+          '<p class="note">(seulement lot 31 et plus)</p></a>' +
+        '<a class="tile warn" href="' + url + '?screen=tracabilite">' +
+          '<h2>Mouvement de lot</h2><p>Tri, déplacement, mélange, mise en cage</p>' +
+          '<p class="note">(seulement lot 31 et plus)</p></a>';
     }).getWebAppUrl();
   </script>
 </body>
