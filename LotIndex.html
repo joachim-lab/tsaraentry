@@ -291,10 +291,18 @@
       // Show a card for each sub-lot that already has data, but at
       // least one. The rest are added on demand — most lots have a
       // single sub-lot and four empty cards invite mis-keying.
-      const withData = all.filter(s =>
-        String(s.bassin || '') !== '' || String(s.happa || '') !== '' ||
-        String(s.nombre || '') !== '' || String(s.poidsMoyen || '') !== '');
-      grossVisible = Math.max(1, withData.length);
+      // Show cards up to and INCLUDING the last column that holds data.
+      // Counting filled columns was wrong: data in columns 1 and 3 gave a
+      // count of 2, so slice(0, 2) rendered columns 1 and 2 — hiding the
+      // filled column 3 and showing an empty column 2 in its place.
+      let lastFilled = -1;
+      all.forEach(function (s, i) {
+        if (String(s.bassin || '') !== '' || String(s.happa || '') !== '' ||
+            String(s.nombre || '') !== '' || String(s.poidsMoyen || '') !== '') {
+          lastFilled = i;
+        }
+      });
+      grossVisible = Math.max(1, lastFilled + 1);
       grossAll = all;
       return '<div id="grossCards">' + grossCardsHtml() + '</div>' +
              '<div id="grossAddWrap"></div>';
