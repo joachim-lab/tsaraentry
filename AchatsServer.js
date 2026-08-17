@@ -195,6 +195,43 @@ function createAchatsMonthBlock(sh, monthDate) {
 }
 
 /**
+ * ONE-OFF REPAIR — run once from the editor, then leave alone.
+ * Project TSARA Entry -> AchatsServer.js -> repairAchatsTotalsRow
+ *
+ * Row 18 of every month block reads =SUM(<total>4:<total>16). The feed
+ * types run to row 17, so Pre-Grower/LFL has never been counted in any
+ * monthly Total or Valeur. February 2026 is the proof: the per-type
+ * totals add up to 77 sacs, row 18 shows 67, and the missing 10 is
+ * Pre-Grower.
+ *
+ * Only the two cells of row 18 in each block are touched, and only
+ * their formulas — the per-type Total column and everything the ecarts
+ * check reads are untouched. R1C1 is used so one formula string is
+ * correct for every block: from row 18, R[-14] is row 4 and R[-1] is
+ * row 17.
+ *
+ * Run this BEFORE any new month block is created, or the new block
+ * will copy the old broken formula from its neighbour.
+ */
+function repairAchatsTotalsRow() {
+  const sh = openAchatsSheet();
+  const blocks = findAchatsBlocks(sh);
+  if (!blocks.length) throw new Error("Aucun bloc de mois trouvé.");
+
+  const formula = "=SUM(R[-14]C:R[-1]C)";
+  const done = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const totalCol = blocks[i].col + AP_CFG.SLOTS;
+    sh.getRange(AP_CFG.TOTAL_ROW, totalCol, 1, 2).setFormulaR1C1(formula);
+    done.push(blocks[i].label);
+  }
+
+  const msg = done.length + " bloc(s) corrigé(s): " + done.join(", ");
+  Logger.log(msg);
+  return msg;
+}
+
+/**
  * Record one invoice: its date goes in the first free slot of the
  * month, the bags per feed type go in rows 4-17 of that slot.
  *
