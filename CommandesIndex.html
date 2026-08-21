@@ -1062,6 +1062,7 @@
     });
     const o = hits.filter(h => h.key === key)[0];
     if (!o) return;
+    const mp = String(o.moyenPaiement || '').trim().toLowerCase();
 
     el('fulForm').innerHTML =
       '<div class="card"><h3>' + esc(o.orderNumber || '(sans numéro)') + ' — ' + esc(o.client) + '</h3>' +
@@ -1071,7 +1072,11 @@
           '<div><label>Paiement reçu le</label><input type="date" id="uPaiement" value="'+esc(toISO(o.paiement))+'"></div>' +
           '<div><label>Date livraison</label><input type="date" id="uLivraison" value="'+esc(toISO(o.dateLivraison))+'"></div>' +
         '</div>' +
-        '<label>Moyen de paiement</label><input type="text" id="uMoyen" value="'+esc(o.moyenPaiement || '')+'">' +
+        '<label>Moyen de paiement</label><select id="uMoyen">' +
+          '<option value="">-- choisir --</option>' +
+          '<option value="espèce"' + (mp === 'espèce' ? ' selected' : '') + '>espèce</option>' +
+          '<option value="mobile"' + (mp === 'mobile' ? ' selected' : '') + '>mobile</option>' +
+        '</select>' +
         '<div class="row">' +
           '<div><label>N° facture <span class="muted" style="font-weight:400">(optionnel)</span></label>' +
             '<input type="text" id="uFacture" placeholder="Généré automatiquement" ' +
