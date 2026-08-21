@@ -187,6 +187,7 @@
           field('G11', 'Commentaires', f.G11, 'text') +
           '</div>';
         html += renderSamples(f.samples);
+        if (d.tabName === '1-5') html += renderSplitPanel();
       }
 
       else if (d.kind === 's1') {
@@ -408,6 +409,98 @@
         '<div class="samples" id="sampleList"></div></div>';
     }
 
+    // ---------- répartition de la récolte ----------
+    /**
+     * AIDE AU CALCUL SEULEMENT. Ce bloc n'écrit dans aucune cellule et
+     * n'envoie rien au serveur. Ses deux champs ne sont jamais stockés.
+     *
+     * À la récolte les alevins sont pesés EN UNE FOIS puis répartis entre
+     * les happas. Le nombre de poissons ne se connaît quaprès coup, une
+     * fois la biomasse et le millimétrage saisis — donc trop tard pour
+     * décider combien de lots ouvrir. Ce panneau donne le nombre AVANT
+     * l'enregistrement.
+     *
+     * L'arithmétique reproduit celle de la feuille :
+     *   J58 = (moyenne_mm ^ 3) * 0,02 / 1000   -> poids moyen en g
+     *   B11 = D11 / C11                        -> nombre de poissons
+     * Si ces formules changent dans le modèle, changez-les ici aussi.
+     */
+    function splitMeanWeightG() {
+      if (!newSamples.length) return null;
+      const mm = newSamples.reduce((a, b) => a + b, 0) / newSamples.length;
+      if (!(mm > 0)) return null;
+      return (mm * mm * mm * 0.02) / 1000;
+    }
+
+    function splitFmt(n, dec) {
+      return Number(n).toLocaleString('fr-FR',
+        { minimumFractionDigits: dec, maximumFractionDigits: dec });
+    }
+
+    function renderSplitPanel() {
+      return '<div class="card"><h3>Répartition de la récolte</h3>' +
+        '<div class="muted">Aide au calcul. Ce bloc n\'enregistre rien.</div>' +
+        '<div class="row" style="align-items:flex-end;margin-top:8px">' +
+          '<div style="flex:1 1 150px"><label>Biomasse totale récoltée (g)</label>' +
+          '<input type="number" step="any" id="splitTotalBio" oninput="renderSplit()"></div>' +
+          '<div style="flex:1 1 150px"><label>Max poissons par happa</label>' +
+          '<input type="number" step="1" id="splitMaxHappa" oninput="renderSplit()"></div>' +
+        '</div>' +
+        '<div id="splitOut" style="margin-top:10px"></div></div>';
+    }
+
+    function renderSplit() {
+      const out = el('splitOut');
+      if (!out) return;
+
+      const pm = splitMeanWeightG();
+      if (pm === null) {
+        out.innerHTML = '<span class="muted">Ajoutez des mesures en mm pour calculer.</span>';
+        return;
+      }
+
+      let html = 'Poids moyen : <b>' + splitFmt(pm, 3) + ' g</b>';
+
+      const totalBio = num(el('splitTotalBio').value);
+      if (totalBio === null || totalBio <= 0) {
+        out.innerHTML = html +
+          '<br><span class="muted">Entrez la biomasse totale récoltée.</span>';
+        return;
+      }
+
+      const totalFish = totalBio / pm;
+      html += '<br>Récolte totale : <b>' + splitFmt(totalFish, 0) + '</b> poissons';
+
+      const maxHappa = num(el('splitMaxHappa').value);
+      if (maxHappa !== null && maxHappa > 0) {
+        html += ' — <b>' + Math.ceil(totalFish / maxHappa) + ' lot(s)</b> nécessaires';
+      }
+
+      const bioEl = document.querySelector('[data-field="D11"]');
+      const thisBio = bioEl ? num(bioEl.value) : null;
+      if (thisBio !== null && thisBio > 0) {
+        const thisFish = thisBio / pm;
+        const restBio = totalBio - thisBio;
+        const restFish = totalFish - thisFish;
+        html += '<br>Ce lot : <b>' + splitFmt(thisFish, 0) + '</b> poissons' +
+          ' · Restant : <b>' + splitFmt(restFish < 0 ? 0 : restFish, 0) + '</b> poissons' +
+          ' (' + splitFmt(restBio < 0 ? 0 : restBio, 0) + ' g)';
+        if (restBio < 0) {
+          html += '<br><span style="color:#b26a00">La biomasse de ce lot dépasse ' +
+            'la récolte totale.</span>';
+        }
+      }
+
+      out.innerHTML = html;
+    }
+
+    // Delegated so it survives every re-render: typing this lot's biomasse
+    // redraws the panel. No hook is needed inside the field renderer.
+    document.addEventListener('input', function (e) {
+      const t = e.target;
+      if (t && t.getAttribute && t.getAttribute('data-field') === 'D11') renderSplit();
+    });
+
     // ---------- samples ----------
     function wireSampleInput() {
       const inp = el('sampleInput');
@@ -452,6 +545,8 @@
           stats.textContent = newSamples.length + ' ajouté(s) · moyenne ' + avg.toFixed(2) + ' mm';
         }
       }
+
+      renderSplit();
     }
 
     // ---------- submit ----------
