@@ -61,6 +61,65 @@ function creerCreateLot(isBroodstock, broodName) {
 }
 
 /**
+ * Read-only. What the continuation box should show, or null when there
+ * is no harvest waiting to be continued. Thin by design: the carry's
+ * rules live in CarryServer.js.
+ *
+ * @return {Object|null}
+ */
+function creerCarryStatus() {
+  return carryDescribe();
+}
+
+/**
+ * Create a growout lot and fill it from the harvest carry.
+ *
+ * SEQUENCING ONLY. Every rule still belongs to createLotFile — the
+ * numbering, the duplicate check, the cohort mint — and every cell
+ * write still belongs to submitLotEntry, reached through
+ * carryApplyToLot. This function does nothing but call the two in
+ * order and report what happened.
+ *
+ * Always a GROWOUT lot. A géniteur family is never a harvest
+ * continuation, and the screen hides the box for that type.
+ *
+ * If the fill fails the file still exists and is returned with
+ * carry.ok false. The carry itself is left untouched by
+ * carryApplyToLot in that case, so the remainder is not lost.
+ *
+ * @param {string} bassin  bassin of the NEW lot
+ * @param {string} happa   happa of the NEW lot
+ * @return {Object} createLotFile result, plus fileId and carry
+ */
+function creerCreateLotWithCarry(bassin, happa) {
+  const res = CreationLot.createLotFile({ isBroodstock: false });
+  if (!res.ok) return res;
+
+  // createLotFile returns the URL, not the id. Reading the id out of
+  // the URL keeps this change inside one project; changing the library
+  // signature would touch the Google Form path too, for one field.
+  const m = String(res.fileUrl || "").match(/\/d\/([a-zA-Z0-9_-]{15,})/);
+  if (!m) {
+    return Object.assign({}, res, {
+      carry: {
+        ok: false,
+        message: "Le fichier a été créé mais son identifiant n'a pas pu être lu. " +
+          "Saisissez ce lot à la main dans Échantillonnage."
+      }
+    });
+  }
+
+  let applied;
+  try {
+    applied = carryApplyToLot(m[1], bassin, happa);
+  } catch (e) {
+    applied = { ok: false, message: String(e && e.message ? e.message : e) };
+  }
+
+  return Object.assign({}, res, { fileId: m[1], carry: applied });
+}
+
+/**
  * RUN FROM EDITOR: read-only check that the library binding resolves.
  *
  * Writes nothing and creates nothing. Run this after every clasp push

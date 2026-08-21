@@ -49,6 +49,21 @@
     </ul>
   </div>
 
+  <div id="carryBlock" style="display:none;border:1px solid #c8c8c8;border-radius:6px;padding:10px;margin:12px 0">
+    <div id="carryInfo"></div>
+    <label style="font-weight:normal;margin-top:8px;display:block">
+      <input type="checkbox" id="carryUse" onchange="onCarryToggle()">
+      Continuation de cette récolte
+    </label>
+    <div id="carryFields" style="display:none">
+      <label for="carryBassin">Bassin (nouveau lot)</label>
+      <input type="text" id="carryBassin" autocomplete="off" oninput="onField()">
+      <label for="carryHappa">Happa (nouveau lot)</label>
+      <input type="text" id="carryHappa" autocomplete="off" oninput="onField()">
+    </div>
+    <button id="carryDropBtn" onclick="dropCarry()" style="margin-top:10px">Ignorer ce report</button>
+  </div>
+
   <button id="goBtn" onclick="askCreate()" disabled>Créer le lot</button>
 
   <script>
@@ -75,11 +90,90 @@
       refresh();
     }).getWebAppUrl();
 
+    /* The harvest waiting to be continued, or null. Fetched once on
+       load. A failure is silent on purpose: no carry simply means the
+       screen behaves exactly as it did before. */
+    var CARRY = null;
+
+    google.script.run
+      .withSuccessHandler(function (c) { CARRY = c; showCarry(); })
+      .withFailureHandler(function () { CARRY = null; })
+      .creerCarryStatus();
+
+    function fmt(n) {
+      return Number(n).toLocaleString('fr-FR', { maximumFractionDigits: 0 });
+    }
+
+    /* The box appears only for a growout lot: a géniteur family is
+       never the continuation of a harvest. */
+    function showCarry() {
+      var block = el('carryBlock');
+      if (!block) return;
+
+      if (!CARRY || isBrood() || el('type').value !== 'gr') {
+        block.style.display = 'none';
+        return;
+      }
+
+      el('carryInfo').innerHTML =
+        'Récolte en cours depuis le <b>Lot-' + esc(CARRY.sourceLot) + '</b><br>' +
+        'Reste : <b>' + fmt(CARRY.remainingBiomasse) + ' g</b> pour <b>' +
+        esc(CARRY.lotsRemaining) + ' lot(s)</b><br>' +
+        'Ce lot recevrait <b>' + fmt(CARRY.nextShare) + ' g</b> et ' +
+        esc(CARRY.sampleCount) + ' mesure(s) en mm.';
+
+      block.style.display = 'block';
+    }
+
+    function useCarry() {
+      var c = el('carryUse');
+      return !!(CARRY && c && c.checked && el('type').value === 'gr');
+    }
+
+    function onCarryToggle() {
+      el('carryFields').style.display = useCarry() ? 'block' : 'none';
+      onField();
+    }
+
+    /* Throwing the carry away is deliberate and irreversible, so it is
+       armed the same way lot creation is: two taps, never one. */
+    function dropCarry() {
+      var b = el('carryDropBtn');
+      if (b.getAttribute('data-armed') !== '1') {
+        b.setAttribute('data-armed', '1');
+        b.textContent = 'Confirmer — ignorer ce report';
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(function () {
+          CARRY = null;
+          el('carryUse').checked = false;
+          onCarryToggle();
+          showCarry();
+          setMsg('banner', 'Report supprimé.');
+        })
+        .withFailureHandler(function (e) { setMsg('err', esc(e.message)); })
+        .carryClear();
+    }
+
+    function carryOutcomeHtml(res) {
+      if (!res || !res.carry) return '';
+      if (res.carry.ok) {
+        return 'Report appliqué : <b>' + fmt(res.carry.share) + ' g</b> et les mesures ' +
+          'ont été écrites dans ce lot (' + esc(res.carry.changeCount) + ' cellule(s)). ' +
+          'Lots restants : ' + esc(res.carry.lotsRemaining) + '.<br><br>';
+      }
+      return '<b>Le lot a été créé, mais le report a échoué :</b> ' +
+        esc(res.carry.message) + '<br>Saisissez ce lot dans Échantillonnage.<br><br>';
+    }
+
     function isBrood() { return el('type').value === 'gen'; }
 
     function onType() {
       el('nameBlock').style.display = isBrood() ? 'block' : 'none';
-      onField();
+      if (isBrood()) el('carryUse').checked = false;
+      showCarry();
+      onCarryToggle();
     }
 
     /* Any change to a field disarms the button. Without this, a user
@@ -96,6 +190,15 @@
     function refresh() {
       var ready = BASE && el('type').value &&
         (!isBrood() || el('nom').value.trim().length > 0);
+
+      /* A continuation writes into the new file straight away, and the
+         guarded save refuses tab 1-5 without bassin and happa. Asking
+         here avoids creating a file that cannot then be filled. */
+      if (useCarry()) {
+        ready = ready && el('carryBassin').value.trim().length > 0 &&
+          el('carryHappa').value.trim().length > 0;
+      }
+
       el('goBtn').disabled = !ready;
     }
 
@@ -129,7 +232,7 @@
       b.disabled = true;
       setMsg('banner', 'Création en cours…');
 
-      google.script.run
+      var runner = google.script.run
         .withSuccessHandler(function (res) {
           disarm();
           if (!res || !res.ok) {
@@ -145,15 +248,21 @@
           b.disabled = false;
           setMsg('err', 'Erreur : ' + esc(e.message) +
             '<br>Vérifiez le dossier des lots avant de réessayer.');
-        })
-        .creerCreateLot(isBrood(), el('nom').value);
+        });
+
+      if (useCarry()) {
+        runner.creerCreateLotWithCarry(el('carryBassin').value, el('carryHappa').value);
+      } else {
+        runner.creerCreateLot(isBrood(), el('nom').value);
+      }
     }
 
     /* On success the form is cleared and the button stays disabled
        until a type is chosen again. Creating the same lot twice is the
        one mistake this screen must not make easy. */
     function showCreated(res) {
-      var h = 'Lot créé : <b>' + esc(res.newName) + '</b>' +
+      var h = carryOutcomeHtml(res) +
+        'Lot créé : <b>' + esc(res.newName) + '</b>' +
         '<br>Cohorte : ' + esc(res.cohortId ? res.cohortId : '—') +
         '<br>Accès éditeur accordé à : ' + esc(res.editorEmail) +
         '<br><a href="' + esc(res.fileUrl) + '" target="_blank">Ouvrir le fichier</a>';
