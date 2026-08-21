@@ -397,8 +397,11 @@
         '<span class="muted">' + s.used + '/' + s.capacity + ' déjà saisis · ' +
         s.remaining + ' place(s) libre(s)</span></h3>' +
         '<div class="row" style="align-items:flex-end">' +
-          '<div style="flex:0 0 160px"><label>Poids (g)</label>' +
-          '<input type="number" step="any" id="sampleInput" placeholder="ex: 14.5"></div>' +
+          '<div style="flex:0 0 160px"><label>Millimètres (mm)</label>' +
+          '<input type="number" step="any" list="mmOptions" id="sampleInput" placeholder="ex: 12">' +
+          '<datalist id="mmOptions">' +
+            Array.from({ length: 20 }, (_, i) => '<option value="' + (i + 1) + '"></option>').join('') +
+          '</datalist></div>' +
           '<div style="flex:0 0 auto"><button class="primary" onclick="addSample()">Ajouter</button></div>' +
           '<div id="sampleStats" class="muted"></div>' +
         '</div>' +
@@ -417,7 +420,7 @@
     function addSample() {
       const inp = el('sampleInput');
       const v = num(inp.value);
-      if (v === null || v <= 0) { setStatus('err', 'Poids invalide.'); return; }
+      if (v === null || v <= 0) { setStatus('err', 'Mesure invalide.'); return; }
 
       const s = loaded.fields.samples;
       if (newSamples.length >= s.remaining) {
@@ -446,7 +449,7 @@
         else {
           const sum = newSamples.reduce((a, b) => a + b, 0);
           const avg = sum / newSamples.length;
-          stats.textContent = newSamples.length + ' ajouté(s) · moyenne ' + avg.toFixed(2) + ' g';
+          stats.textContent = newSamples.length + ' ajouté(s) · moyenne ' + avg.toFixed(2) + ' mm';
         }
       }
     }
