@@ -1,0 +1,108 @@
+<!-- Spinner.html - shared busy overlay for every TSARA Entry screen.
+     Each screen includes it once, immediately before </body>:
+         <?!= include('Spinner'); ?>
+     It wraps google.script.run one time. Call sites do not change.
+     The overlay appears when a server call starts. It disappears in the
+     success handler and in the failure handler. A call that supplies no
+     failure handler gets one from this file, so a failed call can never
+     leave the wheel turning. -->
+<style>
+  #busyOverlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(255, 255, 255, 0.78);
+    z-index: 99999;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+  }
+  #busyOverlay.on { display: flex; }
+  #busyOverlay .ring {
+    width: 56px; height: 56px;
+    border: 6px solid #cfd8dc;
+    border-top-color: #1976d2;
+    border-radius: 50%;
+    animation: busySpin 0.9s linear infinite;
+  }
+  #busyOverlay .txt {
+    margin-top: 14px;
+    font: 16px/1.3 Arial, Helvetica, sans-serif;
+    color: #37474f;
+  }
+  @keyframes busySpin { to { transform: rotate(360deg); } }
+</style>
+
+<div id="busyOverlay" role="status" aria-live="polite">
+  <div class="ring"></div>
+  <div class="txt">Traitement en cours...</div>
+</div>
+
+<script>
+(function () {
+  var depth = 0;
+  var node = null;
+
+  function box() {
+    if (!node) { node = document.getElementById('busyOverlay'); }
+    return node;
+  }
+  function show() {
+    depth = depth + 1;
+    box().classList.add('on');
+  }
+  function hide() {
+    depth = depth - 1;
+    if (depth < 0) { depth = 0; }
+    if (depth === 0) { box().classList.remove('on'); }
+  }
+
+  // Used only when the screen supplied no failure handler of its own.
+  function defaultFailure(err) {
+    var m = (err && err.message) ? err.message : String(err);
+    window.alert('Erreur du serveur : ' + m);
+  }
+
+  function wrap(runner, hasOk, hasFail) {
+    return new Proxy({}, {
+      get: function (target, prop) {
+        if (prop === 'withSuccessHandler') {
+          return function (fn) {
+            return wrap(runner.withSuccessHandler(function () {
+              hide();
+              if (fn) { fn.apply(this, arguments); }
+            }), true, hasFail);
+          };
+        }
+        if (prop === 'withFailureHandler') {
+          return function (fn) {
+            return wrap(runner.withFailureHandler(function () {
+              hide();
+              if (fn) { fn.apply(this, arguments); }
+            }), hasOk, true);
+          };
+        }
+        if (prop === 'withUserObject') {
+          return function (obj) {
+            return wrap(runner.withUserObject(obj), hasOk, hasFail);
+          };
+        }
+        // Every other property is a server function. This is the call.
+        return function () {
+          var r = runner;
+          if (!hasFail) {
+            r = r.withFailureHandler(function (err) { hide(); defaultFailure(err); });
+          }
+          if (!hasOk) {
+            r = r.withSuccessHandler(function () { hide(); });
+          }
+          show();
+          return r[prop].apply(r, arguments);
+        };
+      }
+    });
+  }
+
+  google.script.run = wrap(google.script.run, false, false);
+})();
+</script>

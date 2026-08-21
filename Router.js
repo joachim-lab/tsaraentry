@@ -51,7 +51,7 @@ function doGet(e) {
   else if (screen === "achats") file = "AchatsIndex";
   else file = "Menu";
 
-  return HtmlService.createHtmlOutputFromFile(file)
+  return HtmlService.createTemplateFromFile(file).evaluate()
     .setTitle("Interface Tsara Tilapia")
     .addMetaTag("viewport", "width=device-width, initial-scale=1")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -60,4 +60,9 @@ function doGet(e) {
 /** URL of this web app — used by Menu.html to build its links. */
 function getWebAppUrl() {
   return ScriptApp.getService().getUrl();
+}
+
+/** Inserts a shared HTML partial into a templated screen. */
+function include(file) {
+  return HtmlService.createHtmlOutputFromFile(file).getContent();
 }
