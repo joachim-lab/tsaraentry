@@ -31,7 +31,7 @@ function doGet(e) {
     const html = LigneeUI.lu_dialogHtmlForLot(
       p.lot, p.op, tracCurrentOperatorEmail(),
       getWebAppUrl() + "?screen=tracabilite");
-    return HtmlService.createHtmlOutput(html)
+    return HtmlService.createHtmlOutput(withSpinner(html))
       .setTitle("Interface Tsara Tilapia")
       .addMetaTag("viewport", "width=device-width, initial-scale=1")
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -65,4 +65,19 @@ function getWebAppUrl() {
 /** Inserts a shared HTML partial into a templated screen. */
 function include(file) {
   return HtmlService.createHtmlOutputFromFile(file).getContent();
+}
+
+/**
+ * Inserts the shared busy overlay into a page that was built outside
+ * this project (the Tracabilite form, built by LigneeUI). The partial
+ * must go before </head>, because the wrapper has to be installed
+ * before any script of that page can call the server.
+ */
+function withSpinner(html) {
+  const marker = "</head>";
+  const i = html.indexOf(marker);
+  if (i < 0) {
+    throw new Error("Spinner : balise </head> absente dans la page recue.");
+  }
+  return html.slice(0, i) + include("Spinner") + html.slice(i);
 }
