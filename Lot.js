@@ -22,6 +22,7 @@ const LOT_CFG = {
   LOTS_FOLDER_ID: "1VeO6WrWjjb0QU6tZJ2VTLUvzYF4Fm3iJ", // 2025 lot files only
 
   // Grossissement layout (verified live on Lot-21, 2026-08-09)
+  FIRST_TAB: "1-5",      // first nursery tab; anchors every date chain
   GROSS_SHEET: "Grossissement",
   GROSS_START_COL: 15,   // O
   GROSS_END_COL: 101,    // matches buildRecapBlock_'s own range, live-verified
@@ -214,6 +215,21 @@ function getLotStage(fileId) {
 
   const tabName = findCurrentSTab_(ss);
   if (!tabName) {
+    // UNSTARTED LOT (2026-08-21). Every tab's date chain anchors on
+    // '1-5'!B5, so an empty B5 proves the lot has no dates anywhere and
+    // has never been started. The screen already OWNS the three cells a
+    // new lot needs: planEarlyTab (LotWrite.js) writes B2 bassin, B3
+    // happa and B5 date de depart on this tab. Refusing the lot here
+    // put the field that unlocks it behind the gate it had to open.
+    // Baseline testAllLotStages 2026-08-21: "none" for Lot-32 only.
+    const firstSheet = ss.getSheetByName(LOT_CFG.FIRST_TAB);
+    if (firstSheet) {
+      const b5 = firstSheet.getRange("B5").getValue();
+      if (b5 === "" || b5 === null) {
+        return { stage: "s-tab", tabName: LOT_CFG.FIRST_TAB, mixedWarning: null };
+      }
+    }
+
     // The old wording was "La date introduite n'existe pas pour ce lot", which
     // sent people looking for a date they never typed. findCurrentSTab_ scans
     // row 8 of every S-tab and asks whether TODAY falls inside that tab's date
