@@ -182,7 +182,7 @@
           roField('Nombre', f.B11, 0) +
           roField('Poids moyen (g)', f.C11, 2) +
           (d.tabName === '1-5'
-            ? field('D11', 'Biomasse (g)', f.D11, 'number')
+            ? field('D11', 'Biomasse de CE lot (g)', f.D11, 'number')
             : roField('Biomasse (g)', f.D11, 1)) +
           field('G11', 'Commentaires', f.G11, 'text') +
           '</div>';
@@ -425,6 +425,11 @@
      *   B11 = D11 / C11                        -> nombre de poissons
      * Si ces formules changent dans le modèle, changez-les ici aussi.
      */
+    // The split the panel is currently proposing, or null when it has
+    // not got enough numbers yet. Read by applySplitToLot and by the
+    // carry builder, so it must be refreshed on every redraw.
+    let lastSplitPlan = null;
+
     function splitMeanWeightG() {
       if (!newSamples.length) return null;
       const mm = newSamples.reduce((a, b) => a + b, 0) / newSamples.length;
@@ -445,6 +450,8 @@
           '<input type="number" step="any" id="splitTotalBio" oninput="renderSplit()"></div>' +
           '<div style="flex:1 1 150px"><label>Max poissons par happa</label>' +
           '<input type="number" step="1" id="splitMaxHappa" oninput="renderSplit()"></div>' +
+          '<div style="flex:0 0 auto">' +
+          '<button onclick="applySplitToLot()">Appliquer à ce lot</button></div>' +
         '</div>' +
         '<div id="splitOut" style="margin-top:10px"></div></div>';
     }
@@ -452,6 +459,8 @@
     function renderSplit() {
       const out = el('splitOut');
       if (!out) return;
+
+      lastSplitPlan = null;
 
       const pm = splitMeanWeightG();
       if (pm === null) {
@@ -473,7 +482,11 @@
 
       const maxHappa = num(el('splitMaxHappa').value);
       if (maxHappa !== null && maxHappa > 0) {
-        html += ' — <b>' + Math.ceil(totalFish / maxHappa) + ' lot(s)</b> nécessaires';
+        const lots = Math.max(1, Math.ceil(totalFish / maxHappa));
+        const share = totalBio / lots;
+        lastSplitPlan = { lots: lots, share: share, totalBio: totalBio, totalFish: totalFish };
+        html += ' — <b>' + lots + ' lot(s)</b> nécessaires, soit <b>' +
+          splitFmt(Math.round(share), 0) + ' g</b> par lot';
       }
 
       const bioEl = document.querySelector('[data-field="D11"]');
@@ -492,6 +505,61 @@
       }
 
       out.innerHTML = html;
+    }
+
+    /**
+     * Put the proposed share into the biomasse FIELD. Writes no cell -
+     * the ordinary save does that, through requireFields and the formula
+     * guard like any other entry. The worker can still overtype it.
+     */
+    function applySplitToLot() {
+      if (!lastSplitPlan) {
+        setStatus('warn', 'Renseignez la biomasse totale récoltée et le max par happa.');
+        return;
+      }
+      const bioEl = document.querySelector('[data-field="D11"]');
+      if (!bioEl) return;
+
+      bioEl.value = Math.round(lastSplitPlan.share);
+      renderSplit();
+      setStatus('ok', lastSplitPlan.lots + ' lot(s) — ' +
+        splitFmt(Math.round(lastSplitPlan.share), 0) + ' g placés dans Biomasse de CE lot.');
+    }
+
+    /**
+     * What the next lot of this harvest will need, or null when there is
+     * nothing to carry.
+     *
+     * Returns null when no samples are staged. A continuation lot with a
+     * biomasse but no millimetrage has an empty C11, therefore an empty
+     * B11, therefore never reaches Stock Poisson. Better no carry than a
+     * lot that looks saved and is invisible.
+     */
+    function buildPendingCarry() {
+      if (!loaded || loaded.tabName !== '1-5') return null;
+      if (!lastSplitPlan) return null;
+      if (!newSamples.length) return null;
+
+      const readField = k => {
+        const e = document.querySelector('[data-field="' + k + '"]');
+        return e ? e.value : null;
+      };
+
+      const thisBio = num(readField('D11'));
+      if (thisBio === null || thisBio <= 0) return null;
+
+      const remaining = lastSplitPlan.totalBio - thisBio;
+      const lotsRemaining = lastSplitPlan.lots - 1;
+      if (!(remaining > 0) || !(lotsRemaining >= 1)) return null;
+
+      return {
+        sourceLot: readField('B1'),
+        b4: num(readField('B4')),
+        b5: readField('B5'),
+        samples: newSamples.slice(),
+        remainingBiomasse: remaining,
+        lotsRemaining: lotsRemaining
+      };
     }
 
     // Delegated so it survives every re-render: typing this lot's biomasse
@@ -647,9 +715,35 @@
       btn.disabled = true;
       setStatus('banner', 'Enregistrement…');
 
+      // Captured BEFORE the round trip: the success handler reloads the
+      // screen, which re-renders the panel and empties newSamples.
+      const pendingCarry = buildPendingCarry();
+
       google.script.run
         .withSuccessHandler(res => {
           setStatus('ok', res.changeCount + ' cellule(s) enregistrée(s).');
+
+          if (pendingCarry) {
+            google.script.run
+              .withSuccessHandler(r => {
+                if (r && r.ok) {
+                  setStatus('ok', res.changeCount + ' cellule(s) enregistrée(s). Reste ' +
+                    splitFmt(Math.round(r.carry.remainingBiomasse), 0) + ' g pour ' +
+                    r.carry.lotsRemaining + ' lot(s) — cochez la continuation dans Créer un lot.');
+                } else {
+                  setStatus('warn', 'Enregistré, mais le report n\'a pas été gardé : ' +
+                    esc((r && r.message) || 'raison inconnue') +
+                    '. Saisissez le lot suivant à la main.');
+                }
+              })
+              .withFailureHandler(err => {
+                setStatus('warn', 'Enregistré, mais le report a échoué : ' +
+                  esc(err && err.message ? err.message : err) +
+                  '. Saisissez le lot suivant à la main.');
+              })
+              .carrySet(pendingCarry);
+          }
+
           newSamples = [];
           const fileId = loaded.fileId;
           // The write succeeded. If the RELOAD fails, the screen would keep
