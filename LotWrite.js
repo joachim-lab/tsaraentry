@@ -101,9 +101,49 @@ function addChange(sh, row, col, value, note, plan) {
   });
 }
 
+/**
+ * Refuse the whole save when a mandatory cell would stay empty.
+ *
+ * Checks the value that WOULD end up in the cell: the submitted one
+ * when supplied, otherwise what the sheet already holds. Adding samples
+ * to a tab whose temperature was recorded earlier is therefore allowed.
+ *
+ * Throws once, listing every missing field, so the worker fixes them in
+ * a single pass instead of meeting them one at a time.
+ *
+ * @param {Sheet} sh
+ * @param {Array<{row:number, col:number, value:*, label:string}>} specs
+ */
+function requireFields(sh, specs) {
+  const isBlank = v => v === undefined || v === null || String(v).trim() === "";
+  const missing = [];
+
+  specs.forEach(sp => {
+    const eventual = isBlank(sp.value) ? sh.getRange(sp.row, sp.col).getValue() : sp.value;
+    if (isBlank(eventual)) missing.push(sp.label);
+  });
+
+  if (missing.length) {
+    throw new Error("Enregistrement refusé. Champ(s) obligatoire(s) manquant(s) : " +
+      missing.join(", ") + ".");
+  }
+}
+
 /** 1-5 / 6-10 / 11-15 / 16-21 — single sub-lot (row 11 only). */
 function planEarlyTab(sh, tabName, payload, plan) {
   const f = payload.fields || {};
+
+  const required = [{ row: 4, col: 2, value: f.B4, label: "Température de l'eau" }];
+
+  if (tabName === "1-5") {
+    required.push(
+      { row: 2, col: 2, value: f.B2, label: "Bassin" },
+      { row: 3, col: 2, value: f.B3, label: "Happa" },
+      { row: 5, col: 2, value: f.B5, label: "Date de départ" }
+    );
+  }
+
+  requireFields(sh, required);
 
   if (tabName === "1-5") {
     addChange(sh, 1, 2, f.B1, "Numéro de lot", plan);
@@ -121,6 +161,9 @@ function planEarlyTab(sh, tabName, payload, plan) {
 /** S1 — single sub-lot, samples in column K, comments in H11. */
 function planS1(sh, tabName, payload, plan) {
   const f = payload.fields || {};
+
+  requireFields(sh, [{ row: 4, col: 2, value: f.B4, label: "Température de l'eau" }]);
+
   addChange(sh, 4, 2, f.B4, "Température de l'eau", plan);
   addChange(sh, 11, 8, f.H11, "Commentaires", plan);
   planSamples(sh, tabName, f.samples, plan);
@@ -134,6 +177,8 @@ function planS1(sh, tabName, payload, plan) {
  */
 function planS2Tri(sh, tabName, payload, plan) {
   const f = payload.fields || {};
+
+  requireFields(sh, [{ row: 4, col: 2, value: f.B4, label: "Température de l'eau" }]);
 
   addChange(sh, 2, 2, f.B2, "Bassin (sous-lot 1)", plan);
   addChange(sh, 3, 2, f.B3, "Happa (sous-lot 1)", plan);
@@ -159,6 +204,8 @@ function planS2Tri(sh, tabName, payload, plan) {
  */
 function planS3Plus(sh, tabName, payload, plan) {
   const f = payload.fields || {};
+
+  requireFields(sh, [{ row: 4, col: 2, value: f.B4, label: "Température de l'eau" }]);
 
   addChange(sh, 2, 2, f.B2, "Bassin (sous-lot 1)", plan);
   addChange(sh, 3, 2, f.B3, "Happa (sous-lot 1)", plan);
@@ -192,6 +239,13 @@ function planGrossissement(ss, targetGroupStartCol, payload, plan) {
   const sh = ss.getSheetByName(LOT_CFG.GROSS_SHEET);
   if (!sh) throw new Error("Grossissement sheet not found");
   const f = payload.fields || {};
+
+  requireFields(sh, [{
+    row: LOT_CFG.GROSS_ROW_TEMP,
+    col: targetGroupStartCol,
+    value: f.temperature,
+    label: "Température de l'eau"
+  }]);
 
   addChange(sh, LOT_CFG.GROSS_ROW_DATE, targetGroupStartCol, f.date,
     "Date du bloc (ré-ancre les dates suivantes)", plan);
