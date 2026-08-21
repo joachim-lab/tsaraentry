@@ -139,7 +139,8 @@ function planEarlyTab(sh, tabName, payload, plan) {
     required.push(
       { row: 2, col: 2, value: f.B2, label: "Bassin" },
       { row: 3, col: 2, value: f.B3, label: "Happa" },
-      { row: 5, col: 2, value: f.B5, label: "Date de départ" }
+      { row: 5, col: 2, value: f.B5, label: "Date de départ" },
+      { row: 11, col: 4, value: f.D11, label: "Biomasse (g)" }
     );
   }
 
