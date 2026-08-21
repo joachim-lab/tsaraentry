@@ -1,11 +1,13 @@
 <!-- Spinner.html - shared busy overlay for every TSARA Entry screen.
-     Each screen includes it once, immediately before </body>:
+     Each screen includes it once, immediately before </head>:
          <?!= include('Spinner'); ?>
-     It wraps google.script.run one time. Call sites do not change.
+     It must come before any screen script, because a screen can call the
+     server at page load. The overlay node is built here, not in the screen.
+
      The overlay appears when a server call starts. It disappears in the
      success handler and in the failure handler. A call that supplies no
      failure handler gets one from this file, so a failed call can never
-     leave the wheel turning. -->
+     leave the wheel turning. Call sites do not change. -->
 <style>
   #busyOverlay {
     display: none;
@@ -33,28 +35,40 @@
   @keyframes busySpin { to { transform: rotate(360deg); } }
 </style>
 
-<div id="busyOverlay" role="status" aria-live="polite">
-  <div class="ring"></div>
-  <div class="txt">Traitement en cours...</div>
-</div>
-
 <script>
 (function () {
+  var MIN_MS = 300;          // shortest time the wheel stays visible
   var depth = 0;
-  var node = null;
+  var startedAt = 0;
 
-  function box() {
-    if (!node) { node = document.getElementById('busyOverlay'); }
-    return node;
-  }
+  var node = document.createElement('div');
+  node.id = 'busyOverlay';
+  node.setAttribute('role', 'status');
+  node.setAttribute('aria-live', 'polite');
+  node.innerHTML = '<div class="ring"></div>' +
+                   '<div class="txt">Traitement en cours...</div>';
+  document.addEventListener('DOMContentLoaded', function () {
+    document.body.appendChild(node);
+  });
+
   function show() {
     depth = depth + 1;
-    box().classList.add('on');
+    if (depth === 1) { startedAt = Date.now(); }
+    node.classList.add('on');
   }
+
   function hide() {
     depth = depth - 1;
     if (depth < 0) { depth = 0; }
-    if (depth === 0) { box().classList.remove('on'); }
+    if (depth > 0) { return; }
+    var left = MIN_MS - (Date.now() - startedAt);
+    if (left > 0) {
+      window.setTimeout(function () {
+        if (depth === 0) { node.classList.remove('on'); }
+      }, left);
+    } else {
+      node.classList.remove('on');
+    }
   }
 
   // Used only when the screen supplied no failure handler of its own.
@@ -104,5 +118,5 @@
   }
 
   google.script.run = wrap(google.script.run, false, false);
-})();
+}());
 </script>
