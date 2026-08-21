@@ -182,7 +182,9 @@
           roField('Nombre', f.B11, 0) +
           roField('Poids moyen (g)', f.C11, 2) +
           (d.tabName === '1-5'
-            ? field('D11', 'Biomasse de CE lot (g)', f.D11, 'number')
+            ? field('D11', 'Biomasse de ce lot (g)', f.D11, 'number',
+                'readonly style="background:#eee;color:#333" ' +
+                'title="Rempli par le bouton Appliquer à ce lot"')
             : roField('Biomasse (g)', f.D11, 1)) +
           field('G11', 'Commentaires', f.G11, 'text') +
           '</div>';
@@ -254,12 +256,18 @@
       return html;
     }
 
-    function field(key, label, value, type) {
+    /**
+     * @param {string} [extraAttr] raw attributes appended to the input,
+     *        e.g. readonly. Optional: every pre-2026-08-21 call passes
+     *        four arguments and renders exactly as before.
+     */
+    function field(key, label, value, type, extraAttr) {
       let v = (value === null || value === undefined) ? '' : value;
       if (type === 'number' && v !== '') { const p = num(v); if (p !== null) v = p; }
       return '<label>' + esc(label) + '</label>' +
         '<input type="' + type + '" data-field="' + key + '" value="' + esc(v) + '"' +
-        (type === 'number' ? ' step="any"' : '') + '>';
+        (type === 'number' ? ' step="any"' : '') +
+        (extraAttr ? ' ' + extraAttr : '') + '>';
     }
 
     /**
@@ -430,6 +438,11 @@
     // carry builder, so it must be refreshed on every redraw.
     let lastSplitPlan = null;
 
+    // Why the last save kept no carry, or null when it kept one. A silent
+    // skip is indistinguishable from a success, which cost a test run on
+    // 2026-08-21.
+    let carrySkipReason = null;
+
     function splitMeanWeightG() {
       if (!newSamples.length) return null;
       const mm = newSamples.reduce((a, b) => a + b, 0) / newSamples.length;
@@ -536,9 +549,20 @@
      * lot that looks saved and is invisible.
      */
     function buildPendingCarry() {
+      carrySkipReason = null;
+
+      // Not the harvest tab: no carry is expected, so stay quiet.
       if (!loaded || loaded.tabName !== '1-5') return null;
-      if (!lastSplitPlan) return null;
-      if (!newSamples.length) return null;
+
+      if (!lastSplitPlan) {
+        carrySkipReason = 'la répartition n\'a pas été calculée (biomasse totale récoltée et max par happa)';
+        return null;
+      }
+
+      if (!newSamples.length) {
+        carrySkipReason = 'aucune mesure en mm ajoutée dans cette session, le lot suivant serait sans poids moyen';
+        return null;
+      }
 
       const readField = k => {
         const e = document.querySelector('[data-field="' + k + '"]');
@@ -546,11 +570,22 @@
       };
 
       const thisBio = num(readField('D11'));
-      if (thisBio === null || thisBio <= 0) return null;
+      if (thisBio === null || thisBio <= 0) {
+        carrySkipReason = 'la biomasse de ce lot est vide';
+        return null;
+      }
 
       const remaining = lastSplitPlan.totalBio - thisBio;
       const lotsRemaining = lastSplitPlan.lots - 1;
-      if (!(remaining > 0) || !(lotsRemaining >= 1)) return null;
+
+      if (!(lotsRemaining >= 1)) {
+        carrySkipReason = 'un seul lot est nécessaire pour cette récolte';
+        return null;
+      }
+      if (!(remaining > 0)) {
+        carrySkipReason = 'il ne reste aucune biomasse à placer';
+        return null;
+      }
 
       return {
         sourceLot: readField('B1'),
@@ -729,7 +764,8 @@
                 if (r && r.ok) {
                   setStatus('ok', res.changeCount + ' cellule(s) enregistrée(s). Reste ' +
                     splitFmt(Math.round(r.carry.remainingBiomasse), 0) + ' g pour ' +
-                    r.carry.lotsRemaining + ' lot(s) — cochez la continuation dans Créer un lot.');
+                    r.carry.lotsRemaining + ' lot(s) — créer maintenant un nouveau lot ' +
+                    'et cochez la continuation dans ce nouveau lot.');
                 } else {
                   setStatus('warn', 'Enregistré, mais le report n\'a pas été gardé : ' +
                     esc((r && r.message) || 'raison inconnue') +
@@ -742,6 +778,8 @@
                   '. Saisissez le lot suivant à la main.');
               })
               .carrySet(pendingCarry);
+          } else if (carrySkipReason) {
+            setStatus('warn', res.changeCount + ' cellule(s) enregistrée(s). Aucun report gardé : ' + esc(carrySkipReason) + '.');
           }
 
           newSamples = [];
