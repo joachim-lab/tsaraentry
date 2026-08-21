@@ -35,6 +35,7 @@
                 text-decoration:none; }
     .backlink:hover { text-decoration:underline; }
   </style>
+  <?!= include('Lists'); ?>
   <?!= include('Spinner'); ?>
 </head>
 <body>
@@ -264,6 +265,18 @@
      */
     function field(key, label, value, type, extraAttr) {
       let v = (value === null || value === undefined) ? '' : value;
+
+      // Bassin / Happa / Temperature come from the shared lists in
+      // Lists.html. A <select> carries data-field like the input it
+      // replaces, so the [data-field] collector needs no change.
+      const listKind = TSARA_FIELD_LIST[key];
+      if (listKind) {
+        return '<label>' + esc(label) + '</label>' +
+          '<select data-field="' + key + '"' +
+          (extraAttr ? ' ' + extraAttr : '') + '>' +
+          tsaraOptionsHtml(listKind, v) + '</select>';
+      }
+
       if (type === 'number' && v !== '') { const p = num(v); if (p !== null) v = p; }
       return '<label>' + esc(label) + '</label>' +
         '<input type="' + type + '" data-field="' + key + '" value="' + esc(v) + '"' +

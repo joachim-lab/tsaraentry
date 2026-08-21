@@ -10,8 +10,8 @@
     a.back { font-size: 13px; color: #1a73e8; text-decoration: none; }
     hr { border: 0; border-top: 1px solid #dadce0; margin: 26px 0 0 0; }
     label { display: block; font-size: 13px; color: #5f6368; margin: 14px 0 4px 0; }
-    input { width: 100%; box-sizing: border-box; font-size: 17px; padding: 10px 12px;
-            border: 1px solid #dadce0; border-radius: 6px; }
+    input, select { width: 100%; box-sizing: border-box; font-size: 17px; padding: 10px 12px;
+            border: 1px solid #dadce0; border-radius: 6px; background: #fff; }
     button { margin-top: 16px; width: 100%; font-size: 15px; padding: 12px 16px; border: 0;
              border-radius: 6px; background: #1a73e8; color: #fff; cursor: pointer; }
     button:disabled { background: #dadce0; color: #5f6368; cursor: default; }
@@ -24,6 +24,7 @@
     a.pdf { display: none; margin-top: 14px; padding: 12px 14px; border: 1px solid #1a73e8;
             border-radius: 6px; font-size: 15px; color: #1a73e8; text-decoration: none; text-align: center; }
   </style>
+  <?!= include('Lists'); ?>
   <?!= include('Spinner'); ?>
 </head>
 <body>
@@ -35,10 +36,10 @@
 
   <div id="form" style="display:none">
     <label for="bassin">Température bassin (°C)</label>
-    <input id="bassin" type="text" inputmode="decimal" autocomplete="off">
+    <select id="bassin"></select>
 
     <label for="lac">Température lac (°C)</label>
-    <input id="lac" type="text" inputmode="decimal" autocomplete="off">
+    <select id="lac"></select>
 
     <button id="save">Enregistrer</button>
     <div id="saveMsg" class="panel"></div>
@@ -74,8 +75,11 @@
 
     google.script.run
       .withSuccessHandler(function (cur) {
-        el('bassin').value = cur.bassin;
-        el('lac').value = cur.lac;
+        // Fill and preselect in one step. A value already in R1/T1 that
+        // is not in the list (a decimal, or below 21) stays unselected,
+        // so the worker must choose a valid one before saving.
+        el('bassin').innerHTML = tsaraOptionsHtml('temp', cur.bassin);
+        el('lac').innerHTML = tsaraOptionsHtml('temp', cur.lac);
         hide('loading');
         el('form').style.display = 'block';
       })

@@ -24,6 +24,7 @@
     .rules li { margin: 2px 0; }
     #nameBlock { display: none; }
   </style>
+  <?!= include('Lists'); ?>
   <?!= include('Spinner'); ?>
 </head>
 <body>
@@ -58,9 +59,9 @@
     </label>
     <div id="carryFields" style="display:none">
       <label for="carryBassin">Bassin (nouveau lot)</label>
-      <input type="text" id="carryBassin" autocomplete="off" oninput="onField()">
+      <select id="carryBassin" onchange="onField()"></select>
       <label for="carryHappa">Happa (nouveau lot)</label>
-      <input type="text" id="carryHappa" autocomplete="off" oninput="onField()">
+      <select id="carryHappa" onchange="onField()"></select>
     </div>
     <button id="carryDropBtn" onclick="dropCarry()" style="margin-top:10px">Ignorer ce report</button>
   </div>
@@ -71,6 +72,12 @@
     var BASE = '';
 
     function el(id) { return document.getElementById(id); }
+
+    // Both lists start empty ('' selected), so the guarded save in
+    // onField() keeps 'Creer le lot' disabled until the worker picks
+    // a bassin AND a happa. Lists come from Lists.html.
+    el('carryBassin').innerHTML = tsaraOptionsHtml('bassin', '');
+    el('carryHappa').innerHTML = tsaraOptionsHtml('happa', '');
 
     function esc(s) {
       return String(s === null || s === undefined ? '' : s)

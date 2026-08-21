@@ -1,0 +1,62 @@
+<script>
+/***************************************************************
+ * Lists.html - shared value lists for the TSARA Entry screens.
+ *
+ * ONE definition of the allowed values for Temperature, Bassin
+ * and Happa. Three screens include this file:
+ *   LotIndex.html, CreerLotIndex.html, TemperaturesIndex.html
+ *
+ * Change a list here and every screen changes. Never copy a list
+ * into a screen.
+ *
+ * TSARA_FIELD_LIST maps a LotIndex cell key to a list. The keys
+ * mean the same thing on every tab kind:
+ *   row 2 = Bassin, row 3 = Happa, row 4 = Temperature de l'eau.
+ *
+ * The gross-harvest fields (Bassin/Cage, Happa/Carre/Rond) are NOT
+ * in this map. They are built by grossField, they accept cage
+ * values, and they stay free text.
+ ***************************************************************/
+var TSARA_LISTS = {
+  temp: (function () { var a = []; for (var i = 21; i <= 40; i++) a.push(String(i)); return a; })(),
+  bassin: (function () { var a = []; for (var i = 1; i <= 10; i++) a.push(String(i)); return a; })(),
+  happa: ['A', 'B', 'C', 'L']
+};
+
+var TSARA_FIELD_LIST = {
+  B2: 'bassin', C2: 'bassin', D2: 'bassin', E2: 'bassin',
+  B3: 'happa',  C3: 'happa',  D3: 'happa',  E3: 'happa',
+  B4: 'temp',   temperature: 'temp'
+};
+
+/**
+ * Puts a stored value into the same form as a list entry.
+ *   "27,0" -> "27"      (sheet decimal comma, trailing zero)
+ *   "26.5" -> "26.5"    (stays out of the integer list)
+ *   " a "  -> "A"
+ */
+function tsaraNorm(v) {
+  var s = String(v === null || v === undefined ? '' : v).trim().replace(',', '.');
+  if (s === '') return '';
+  var n = Number(s);
+  return isFinite(n) ? String(n) : s.toUpperCase();
+}
+
+/**
+ * The <option> list for one kind. The stored value is preselected
+ * ONLY when it is in the list. A value from before this change
+ * therefore cannot be saved again by accident - the worker must
+ * choose a valid one.
+ */
+function tsaraOptionsHtml(kind, current) {
+  var values = TSARA_LISTS[kind];
+  if (!values) throw new Error('Liste inconnue : ' + kind);
+  var cur = tsaraNorm(current);
+  var html = '<option value="">-- choisir --</option>';
+  for (var i = 0; i < values.length; i++) {
+    var v = values[i];
+    html += '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + v + '</option>';
+  }
+  return html;
+}
+</script>
