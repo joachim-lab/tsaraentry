@@ -9,12 +9,13 @@
     label { display: block; margin-top: 12px; font-weight: bold; font-size: 14px; }
     select, input { width: 100%; padding: 8px; font-size: 16px; margin-top: 4px; box-sizing: border-box; }
     button { margin-top: 16px; padding: 10px 16px; font-size: 15px; cursor: pointer; }
-    #addBtn { background: #1a73e8; color: white; border: none; border-radius: 4px; }
     #submitBtn { background: #188038; color: white; border: none; border-radius: 4px; }
     #submitBtn:disabled { background: #999; cursor: not-allowed; }
     table { width: 100%; border-collapse: collapse; margin-top: 20px; }
     th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #ddd; font-size: 14px; }
-    .del { color: #c00; cursor: pointer; font-weight: bold; }
+    td.qty { width: 40%; }
+    td.qty input { margin-top: 0; }
+    .hint { font-weight: normal; font-size: 12px; color: #5f6368; }
     #msg { margin-top: 16px; padding: 10px; border-radius: 4px; display: none; }
     #msg.ok { background: #e6f4ea; color: #188038; display: block; }
     #msg.err { background: #fce8e6; color: #c5221f; display: block; }
@@ -36,20 +37,10 @@
   <label for="date">Date</label>
   <input type="date" id="date">
 
-  <label for="type">Type provende</label>
-  <select id="type"><option value="">Chargement...</option></select>
+  <label>Quantité donnée <span class="hint">(en grammes — laisser vide un type non donné)</span></label>
+  <table id="feeds"><tbody id="feedsBody"><tr><td>Chargement...</td></tr></tbody></table>
 
-  <label for="qty">Quantité donnée (g)</label>
-  <input type="number" id="qty" min="1" step="1" placeholder="ex: 1500">
-
-  <button id="addBtn" onclick="addRow()">+ Ajouter à la liste</button>
-
-  <table id="pending" style="display:none">
-    <thead><tr><th>Lot</th><th>Date</th><th>Type</th><th>Qté (g)</th><th></th></tr></thead>
-    <tbody id="pendingBody"></tbody>
-  </table>
-
-  <button id="submitBtn" onclick="submitAll()" disabled>Enregistrer (0)</button>
+  <button id="submitBtn" onclick="submitAll()" disabled>Enregistrer</button>
   <div id="loading">Enregistrement en cours...</div>
 
   <script>
@@ -58,70 +49,63 @@
     var b = document.getElementById('backLink');
     if (b) b.href = u;
   }).getWebAppUrl();
-    let pending = [];
-
     function todayISO() {
       const d = new Date();
       return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
     }
     document.getElementById('date').value = todayISO();
 
+    function esc(s) {
+      return String(s === undefined || s === null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
     function fillSelect(id, values) {
       const sel = document.getElementById(id);
       sel.innerHTML = '<option value="">-- choisir --</option>' +
-        values.map(v => '<option value="' + v + '">' + v + '</option>').join('');
+        values.map(v => '<option value="' + esc(v) + '">' + esc(v) + '</option>').join('');
     }
 
     google.script.run.withSuccessHandler(v => fillSelect('lot', v))
       .withFailureHandler(e => showMsg('err', 'Erreur chargement lots: ' + e.message))
       .getLotList();
 
-    google.script.run.withSuccessHandler(v => fillSelect('type', v))
+    google.script.run
+      .withSuccessHandler(feeds => {
+        const body = document.getElementById('feedsBody');
+        if (!feeds || !feeds.length) {
+          body.innerHTML = '<tr><td>Aucun type de provende trouvé.</td></tr>';
+          return;
+        }
+        body.innerHTML = feeds.map(f =>
+          '<tr><td>' + esc(f) + '</td>' +
+          '<td class="qty"><input type="number" min="0" step="1" data-feed="' + esc(f) + '" placeholder="g"></td></tr>'
+        ).join('');
+        document.getElementById('submitBtn').disabled = false;
+      })
       .withFailureHandler(e => showMsg('err', 'Erreur chargement types: ' + e.message))
       .getFeedTypes();
 
-    function addRow() {
+    function submitAll() {
       const lot = document.getElementById('lot').value;
       const date = document.getElementById('date').value;
-      const type = document.getElementById('type').value;
-      const qty = document.getElementById('qty').value;
+      if (!lot) { showMsg('err', 'Choisissez un lot.'); return; }
+      if (!date) { showMsg('err', 'Date obligatoire.'); return; }
 
-      if (!lot || !date || !type || !qty || Number(qty) <= 0) {
-        showMsg('err', 'Merci de remplir tous les champs (quantité > 0).');
-        return;
+      const inputs = document.querySelectorAll('input[data-feed]');
+      const entries = [];
+      for (let i = 0; i < inputs.length; i++) {
+        const v = inputs[i].value;
+        if (v === '') continue;
+        const q = Number(v);
+        if (!isFinite(q) || q <= 0) {
+          showMsg('err', 'Quantité invalide pour ' + inputs[i].getAttribute('data-feed') + ' (doit être > 0).');
+          return;
+        }
+        entries.push({ lot: lot, date: date, type: inputs[i].getAttribute('data-feed'), qty: q });
       }
+      if (!entries.length) { showMsg('err', 'Saisissez au moins une quantité.'); return; }
 
-      pending.push({ lot, date, type, qty });
-      document.getElementById('qty').value = '';
-      hideMsg();
-      renderPending();
-    }
-
-    function removeRow(i) {
-      pending.splice(i, 1);
-      renderPending();
-    }
-
-    function renderPending() {
-      const table = document.getElementById('pending');
-      const body = document.getElementById('pendingBody');
-      const submitBtn = document.getElementById('submitBtn');
-
-      if (pending.length === 0) {
-        table.style.display = 'none';
-      } else {
-        table.style.display = '';
-        body.innerHTML = pending.map((p, i) =>
-          '<tr><td>' + p.lot + '</td><td>' + p.date + '</td><td>' + p.type + '</td><td>' + p.qty + '</td>' +
-          '<td class="del" onclick="removeRow(' + i + ')">✕</td></tr>'
-        ).join('');
-      }
-      submitBtn.disabled = pending.length === 0;
-      submitBtn.textContent = 'Enregistrer (' + pending.length + ')';
-    }
-
-    function submitAll() {
-      if (!pending.length) return;
       document.getElementById('submitBtn').disabled = true;
       document.getElementById('loading').style.display = 'block';
       hideMsg();
@@ -129,16 +113,16 @@
       google.script.run
         .withSuccessHandler(res => {
           document.getElementById('loading').style.display = 'none';
-          showMsg('ok', res.written + ' entrée(s) enregistrée(s).');
-          pending = [];
-          renderPending();
+          document.getElementById('submitBtn').disabled = false;
+          showMsg('ok', res.written + ' entrée(s) enregistrée(s) pour ' + lot + '.');
+          for (let i = 0; i < inputs.length; i++) inputs[i].value = '';
         })
         .withFailureHandler(e => {
           document.getElementById('loading').style.display = 'none';
           document.getElementById('submitBtn').disabled = false;
           showMsg('err', e.message);
         })
-        .submitNourrissage(pending);
+        .submitNourrissage(entries);
     }
 
     function showMsg(cls, text) {
