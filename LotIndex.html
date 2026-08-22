@@ -3,35 +3,35 @@
 <head>
   <base target="_top">
   <style>
-    .tsaraLogo { position: fixed; top: 18px; right: 24px; height: 88px; width: auto; z-index: 500; }
+    .tsaraLogo { position: fixed; top: 18px; right: 24px; height: 56px; width: auto; z-index: 500; }
     body { font-family: Arial, sans-serif; max-width: 780px; margin: 24px auto; padding: 0 16px; color: #202124; }
-    h1 { font-size: 20px; margin-bottom: 4px; }
-    label { display: block; margin-top: 12px; font-weight: bold; font-size: 13px; }
-    select, input { padding: 8px; font-size: 15px; margin-top: 4px; box-sizing: border-box; }
+    h1 { font-size: 24px; margin-bottom: 4px; }
+    label { display: block; margin-top: 12px; font-weight: bold; font-size: 15px; }
+    select, input { padding: 8px; font-size: 17px; margin-top: 4px; box-sizing: border-box; }
     select, input[type=text], input[type=number], input[type=date] { width: 100%; }
-    button { padding: 9px 16px; font-size: 15px; cursor: pointer; border: none; border-radius: 4px; }
+    button { padding: 9px 16px; font-size: 17px; cursor: pointer; border: none; border-radius: 4px; }
     .primary { background: #1a73e8; color: #fff; }
     .go { background: #188038; color: #fff; margin-top: 18px; }
     .go:disabled { background: #999; cursor: not-allowed; }
-    .banner { margin-top: 14px; padding: 10px 12px; border-radius: 4px; background: #e8f0fe; font-size: 14px; }
-    .warn { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #fef7e0; color: #b06000; font-size: 13px; }
-    .err  { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #fce8e6; color: #c5221f; font-size: 14px; }
-    .ok   { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #e6f4ea; color: #188038; font-size: 14px; }
+    .banner { margin-top: 14px; padding: 10px 12px; border-radius: 4px; background: #e8f0fe; font-size: 16px; }
+    .warn { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #fef7e0; color: #b06000; font-size: 15px; }
+    .err  { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #fce8e6; color: #c5221f; font-size: 16px; }
+    .ok   { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #e6f4ea; color: #188038; font-size: 16px; }
     .card { border: 1px solid #dadce0; border-radius: 6px; padding: 12px 14px; margin-top: 14px; }
-    .card h3 { margin: 0 0 4px 0; font-size: 15px; }
-    .muted { color: #5f6368; font-size: 12px; font-weight: normal; }
-    .row { display: flex; gap: 12px; }
-    .row > div { flex: 1; }
+    .card h3 { margin: 0 0 4px 0; font-size: 17px; }
+    .muted { color: #5f6368; font-size: 14px; font-weight: normal; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap }
+    .row > div { flex: 1; min-width: 140px }
     .samples { margin-top: 8px; }
-    .chip { display: inline-block; background: #f1f3f4; border-radius: 12px; padding: 3px 8px; margin: 2px; font-size: 13px; }
+    .chip { display: inline-block; background: #f1f3f4; border-radius: 12px; padding: 3px 8px; margin: 2px; font-size: 15px; }
     .chip span { color: #c5221f; cursor: pointer; margin-left: 6px; font-weight: bold; }
-    #sampleInput { width: 140px; }
+    #sampleInput { width: 170px; }
     .hidden { display: none; }
-    table.diff { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+    table.diff { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 15px; }
     table.diff td { padding: 4px 6px; border-bottom: 1px solid #eee; }
     .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; }
     .modal { background: #fff; border-radius: 8px; padding: 20px; max-width: 520px; width: 90%; }
-    .backlink { display:inline-block; margin-bottom:10px; font-size:14px; color:#1a73e8;
+    .backlink { display:inline-block; margin-bottom:10px; font-size: 16px; color:#1a73e8;
                 text-decoration:none; }
     .backlink:hover { text-decoration:underline; }
   </style>
@@ -111,7 +111,7 @@
     function roField(label, value, dec) {
       const n = fmtNum(value, dec);
       return '<label>' + esc(label) + '</label>' +
-        '<div class="muted">' + esc(n === null ? '—' : n) + ' (calculé par la feuille)</div>';
+        '<div class="muted">' + esc(n === null ? '—' : n) + '</div>';
     }
 
     // ---------- lot list ----------
@@ -139,10 +139,7 @@
     function onLotLoaded(data) {
       loaded = data;
       if (data.stage === 'none') { setStatus('err', esc(data.reason)); return; }
-      const where = (data.stage === 'grossissement')
-        ? 'Grossissement · bloc du <b>' + esc(data.fields.date || '(date à saisir)') + '</b>'
-        : 'onglet <b>' + esc(data.tabName) + '</b>';
-      let banner = '<div class="banner"><b>' + esc(currentLotName()) + '</b> · ' + where + '</div>';
+      let banner = '<div class="banner"><b>' + esc(currentLotName()) + '</b></div>';
       if (data.mixedWarning) banner += '<div class="warn">' + esc(data.mixedWarning) + '</div>';
       el('status').innerHTML = banner;
 
@@ -180,7 +177,7 @@
         // ignores it elsewhere (LotWrite.js, commit 6fb1069). Rendering an
         // input there invited a worker to type a value that did nothing.
         html += '<div class="card"><h3>Mesures</h3>' +
-          field('B4', "Température de l'eau (°C)", f.B4, 'number') +
+          field('B4', "Température de l'eau", f.B4, 'number') +
           roField('Nombre', f.B11, 0) +
           roField('Poids moyen (g)', f.C11, 2) +
           (d.tabName === '1-5'
@@ -199,7 +196,7 @@
         // sample average (=K55), D11 is derived. Poids moyen changes only
         // through the sample cells below. Comments are H11 on S1, not G11.
         html += '<div class="card"><h3>Mesures</h3>' +
-          field('B4', "Température de l'eau (°C)", f.B4, 'number') +
+          field('B4', "Température de l'eau", f.B4, 'number') +
           roField('Nombre', f.B11, 0) +
           roField('Poids moyen (g)', f.C11, 2) +
           roField('Biomasse (g)', f.D11, 1) +
@@ -214,7 +211,7 @@
         // green with dropdowns, column F empty and not green.
         // The screen previously showed only sub-lot 1 (B2/B3).
         html += '<div class="card"><h3>Conditions</h3>' +
-          field('B4', "Température de l'eau (°C)", f.B4, 'number') +
+          field('B4', "Température de l'eau", f.B4, 'number') +
           '<div class="muted" style="margin-top:10px">Bassin / Happa par sous-lot :</div>' +
           '<div class="row">' +
             '<div>' + field('B2', 'Bassin 1', f.B2, 'text') + field('B3', 'Happa 1', f.B3, 'text') + '</div>' +
@@ -228,7 +225,7 @@
       else if (d.kind === 's2-tri') {
         html += '<div class="card"><h3>Tri</h3>' +
           field('B7', 'Date de tri', f.B7, 'date') +
-          field('B4', "Température de l'eau (°C)", f.B4, 'number') +
+          field('B4', "Température de l'eau", f.B4, 'number') +
           '<div class="muted" style="margin-top:10px">Bassin / Happa par sous-lot :</div>' +
           '<div class="row">' +
             '<div>' + field('B2', 'Bassin 1', f.B2, 'text') + field('B3', 'Happa 1', f.B3, 'text') + '</div>' +
@@ -244,12 +241,10 @@
         // so an edited date could only ever fail the whole save. Shown
         // read-only, like the other calculated fields.
         const dateShown = fmtDate(f.date);
-        html += '<div class="card"><h3>Bloc de pesée</h3>' +
-          '<label>Date de la pesée</label>' +
-          '<div class="muted">' + esc(dateShown === null ? '—' : dateShown) +
-          ' (calculé par la feuille)</div>' +
-          field('temperature', "Température de l'eau (°C)", f.temperature, 'number') +
-          '<div class="muted">La température s\'applique à tout le bloc.</div>' +
+        html += '<div class="card">' +
+          '<label>Pesée du</label>' +
+          '<div class="muted">' + esc(dateShown === null ? '—' : dateShown) + '</div>' +
+          field('temperature', "Température de l'eau", f.temperature, 'number') +
           '</div>';
         html += renderGrossSubLots(f.subLots);
       }
@@ -290,7 +285,7 @@
      */
     function renderSubLots(subLots, kind) {
       const live = (subLots || []).filter(s => String(s.label || '').trim() !== '');
-      if (!live.length) return '<div class="warn">Aucun sous-lot actif sur cet onglet.</div>';
+      if (!live.length) return '<div class="warn">Aucun sous-lot actif.</div>';
 
       return live.map(s => {
         let inner = '';
@@ -311,8 +306,7 @@
             subField(s.row, 'commentaire', 'Commentaires', s.commentaire, 'text') +
             '<div class="muted">Nombre (calculé) : ' + esc(s.nombre) + '</div>';
         }
-        return '<div class="card"><h3>' + esc(s.label) +
-          ' <span class="muted">ligne ' + s.row + '</span></h3>' + inner + '</div>';
+        return '<div class="card"><h3>' + esc(s.label) + '</h3>' + inner + '</div>';
       }).join('');
     }
 
@@ -354,8 +348,7 @@
 
     function grossCardsHtml() {
       return grossAll.slice(0, grossVisible).map((s, i) =>
-        '<div class="card"><h3>Sous-lot ' + (i + 1) +
-          ' <span class="muted">colonne ' + s.col + '</span></h3>' +
+        '<div class="card"><h3>Sous-lot ' + (i + 1) + '</h3>' +
           '<div class="row">' +
             '<div>' + grossField(s.col, 'bassin', 'Bassin/Cage', s.bassin, 'text') + '</div>' +
             '<div>' + grossField(s.col, 'happa', 'Happa/Carré/Rond', s.happa, 'text') + '</div>' +
@@ -640,7 +633,7 @@
       newSamples.push(v);
       inp.value = '';
       inp.focus();
-      setStatus('banner', '<b>' + esc(currentLotName()) + '</b> · onglet <b>' + esc(loaded.tabName) + '</b>');
+      setStatus('banner', '<b>' + esc(currentLotName()) + '</b>');
       renderSampleList();
     }
 

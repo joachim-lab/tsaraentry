@@ -3,12 +3,12 @@
 <head>
   <base target="_top">
   <style>
-    .tsaraLogo { position: fixed; top: 18px; right: 24px; height: 88px; width: auto; z-index: 500; }
+    .tsaraLogo { position: fixed; top: 18px; right: 24px; height: 56px; width: auto; z-index: 500; }
     body { font-family: Arial, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; }
-    h1 { font-size: 20px; }
-    label { display: block; margin-top: 12px; font-weight: bold; font-size: 14px; }
-    select, input { width: 100%; padding: 8px; font-size: 16px; margin-top: 4px; box-sizing: border-box; }
-    button { margin-top: 16px; padding: 10px 16px; font-size: 15px; cursor: pointer; }
+    h1 { font-size: 24px; }
+    label { display: block; margin-top: 12px; font-weight: bold; font-size: 16px; }
+    select, input { width: 100%; padding: 8px; font-size: 18px; margin-top: 4px; box-sizing: border-box; }
+    button { margin-top: 16px; padding: 10px 16px; font-size: 17px; cursor: pointer; }
     #addBtn { background: #1a73e8; color: white; border: none; border-radius: 4px; }
     #submitBtn, #recSubmitBtn { background: #188038; color: white; border: none; border-radius: 4px; }
     #submitBtn:disabled, #recSubmitBtn:disabled { background: #999; cursor: not-allowed; }
@@ -16,17 +16,17 @@
     .mode { background: #fff; border: 1px solid #dadce0; color: #5f6368; border-radius: 4px; margin-right: 8px; }
     .mode.active { background: #188038; border-color: #188038; color: #fff; }
     table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #ddd; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #ddd; font-size: 15px; }
     .del { color: #c00; cursor: pointer; font-weight: bold; }
     #msg { margin-top: 16px; padding: 10px; border-radius: 4px; display: none; }
     #msg.ok { background: #e6f4ea; color: #188038; display: block; }
     #msg.err { background: #fce8e6; color: #c5221f; display: block; }
     #loading { display: none; color: #666; margin-top: 8px; }
-    .backlink { display:inline-block; margin-bottom:10px; font-size:14px; color:#1a73e8; text-decoration:none; }
+    .backlink { display:inline-block; margin-bottom:10px; font-size: 16px; color:#1a73e8; text-decoration:none; }
     .backlink:hover { text-decoration:underline; }
-    .hint { font-weight: normal; font-size: 12px; color: #5f6368; }
-    .sep { margin-top: 22px; padding-top: 6px; border-top: 1px solid #dadce0; font-size: 13px; color: #5f6368; }
-    #reloadBtn { background: none; border: none; color: #1a73e8; padding: 0; margin-top: 6px; font-size: 13px; text-decoration: underline; }
+    .hint { font-weight: normal; font-size: 14px; color: #5f6368; }
+    .sep { margin-top: 22px; padding-top: 6px; border-top: 1px solid #dadce0; font-size: 15px; color: #5f6368; }
+    #reloadBtn { background: none; border: none; color: #1a73e8; padding: 0; margin-top: 6px; font-size: 15px; text-decoration: underline; }
   </style>
   <?!= include('Spinner'); ?>
 </head>
@@ -54,21 +54,10 @@
     <label for="nbreCommande">Nbre commandé</label>
     <input type="number" id="nbreCommande" min="0" step="any" placeholder="ex: 20">
 
-    <div class="sep">Réception &mdash; laisser vide si la livraison n&#39;est pas encore arrivée</div>
-
-    <label for="dateReception">Date réception <span class="hint">(optionnel)</span></label>
-    <input type="date" id="dateReception">
-
-    <label for="nbreRecu">Nbre reçu <span class="hint">(optionnel)</span></label>
-    <input type="number" id="nbreRecu" min="0" step="any" placeholder="ex: 20">
-
-    <label for="commentaire">Commentaire <span class="hint">(optionnel)</span></label>
-    <input type="text" id="commentaire" placeholder="ex: rupture de stock">
-
     <button id="addBtn" onclick="addRow()">+ Ajouter à la liste</button>
 
     <table id="pending" style="display:none">
-      <thead><tr><th>Type</th><th>Date cmd</th><th>Unité</th><th>Cmdé</th><th>Date réc</th><th>Reçu</th><th>Comm.</th><th></th></tr></thead>
+      <thead><tr><th>Type</th><th>Date cmd</th><th>Unité</th><th>Cmdé</th><th></th></tr></thead>
       <tbody id="pendingBody"></tbody>
     </table>
 
@@ -86,7 +75,7 @@
     <label for="recQty">Nbre reçu</label>
     <input type="number" id="recQty" min="0" step="any" placeholder="ex: 20">
 
-    <label for="recComment">Commentaire <span class="hint">(optionnel &mdash; remplace le commentaire existant)</span></label>
+    <label for="recComment">Commentaire <span class="hint">(optionnel)</span></label>
     <input type="text" id="recComment" placeholder="ex: 2 sacs abîmés">
 
     <button id="recSubmitBtn" onclick="submitReception()">Enregistrer la réception</button>
@@ -163,27 +152,17 @@
       const dateCommande = document.getElementById('dateCommande').value;
       const unite = document.getElementById('unite').value;
       const nbreCommande = document.getElementById('nbreCommande').value;
-      const dateReception = document.getElementById('dateReception').value;
-      const nbreRecu = document.getElementById('nbreRecu').value;
-      const commentaire = document.getElementById('commentaire').value;
+      const dateReception = '';
+      const nbreRecu = '';
+      const commentaire = '';
 
       if (!type || !dateCommande || !unite || !nbreCommande || Number(nbreCommande) <= 0) {
         showMsg('err', 'Type, date commande, unité et nbre commandé sont obligatoires (nbre > 0).');
         return;
       }
-      if (nbreRecu !== '' && Number(nbreRecu) < 0) {
-        showMsg('err', 'Le nbre reçu ne peut pas être négatif.');
-        return;
-      }
-      if (nbreRecu !== '' && Number(nbreRecu) > 0 && !dateReception) {
-        showMsg('err', 'Date réception obligatoire quand le nbre reçu est supérieur à zéro.');
-        return;
-      }
 
       pending.push({ type, dateCommande, unite, nbreCommande, dateReception, nbreRecu, commentaire });
       document.getElementById('nbreCommande').value = '';
-      document.getElementById('nbreRecu').value = '';
-      document.getElementById('commentaire').value = '';
       hideMsg();
       renderPending();
     }
@@ -209,8 +188,7 @@
         table.style.display = '';
         body.innerHTML = pending.map((p, i) =>
           '<tr><td>' + esc(p.type) + '</td><td>' + esc(p.dateCommande) + '</td><td>' + esc(p.unite) +
-          '</td><td>' + esc(p.nbreCommande) + '</td><td>' + esc(p.dateReception) + '</td><td>' + esc(p.nbreRecu) +
-          '</td><td>' + esc(p.commentaire) + '</td>' +
+          '</td><td>' + esc(p.nbreCommande) + '</td>' +
           '<td class="del" onclick="removeRow(' + i + ')">\u2715</td></tr>'
         ).join('');
       }
