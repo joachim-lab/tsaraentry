@@ -30,7 +30,8 @@ function doGet(e) {
     if (!p.lot || !p.op) throw new Error("Paramètres manquants (lot, op).");
     const html = LigneeUI.lu_dialogHtmlForLot(
       p.lot, p.op, tracCurrentOperatorEmail(),
-      getWebAppUrl() + "?screen=tracabilite");
+      getWebAppUrl() + "?screen=tracabilite",
+      String(p.src || ""));   // "26,30": lots absorbés (regroupement)
     return HtmlService.createHtmlOutput(withSpinner(html))
       .setTitle("Interface Tsara Tilapia")
       .addMetaTag("viewport", "width=device-width, initial-scale=1")

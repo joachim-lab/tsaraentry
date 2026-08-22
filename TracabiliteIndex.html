@@ -25,17 +25,28 @@
   <a class="backlink" id="backLink" href="#">&larr; Menu</a>
   <h1>Mouvements de lot</h1>
 
-  <label for="lot">Lot</label>
+  <label for="lot" id="lotLabel">Lot</label>
   <select id="lot" onchange="refresh()"><option value="">Chargement...</option></select>
 
   <label for="op">Opération</label>
   <select id="op" onchange="refresh()"><option value="">Chargement...</option></select>
+
+  <div id="srcBlock" style="display:none">
+    <label for="src1">Lot absorbé 1 — vidé à 100%, puis archivé</label>
+    <select id="src1" onchange="refresh()"><option value="">-- aucun --</option></select>
+    <label for="src2">Lot absorbé 2 (optionnel) — vidé à 100%, puis archivé</label>
+    <select id="src2" onchange="refresh()"><option value="">-- aucun --</option></select>
+    <div class="hint">Le lot choisi en haut est le LOT RECEVEUR : il absorbe les
+    poissons et continue. Les lots absorbés disparaissent de Stock Poisson.
+    Sans lot absorbé, le regroupement reste interne au lot receveur.</div>
+  </div>
 
   <button id="goBtn" onclick="openForm()" disabled>Ouvrir le formulaire</button>
   <div id="msg"></div>
 
   <script>
     var BASE = '';
+    var LOTS = [];
 
     function esc(s) {
       return String(s === null || s === undefined ? '' : s)
@@ -51,8 +62,10 @@
 
     google.script.run
       .withSuccessHandler(function (o) {
+        LOTS = o.lots;
         fill('lot', o.lots.map(function (x) { return { v: x.fileId, t: 'Lot-' + x.lotNumber }; }));
         fill('op',  o.ops.map(function (x) { return { v: x.key, t: x.label }; }));
+        fillSrc('src1'); fillSrc('src2');
         refresh();
       })
       .withFailureHandler(function (e) {
@@ -74,10 +87,45 @@
        here: if identity detection failed, tracGetOptions threw, the
        lists never filled, and the button can never enable. */
     function refresh() {
+      var op = document.getElementById('op').value;
+      var isMel = (op === 'melange');
+      document.getElementById('srcBlock').style.display = isMel ? '' : 'none';
+      document.getElementById('lotLabel').textContent =
+        isMel ? 'Lot receveur (absorbe les poissons)' : 'Lot';
+      var bad = '';
+      if (isMel) {
+        var recvNum = lotNumberFor(document.getElementById('lot').value);
+        var s1 = document.getElementById('src1').value;
+        var s2 = document.getElementById('src2').value;
+        if (s1 && s1 === recvNum) bad = 'Le lot absorbé 1 est le lot receveur.';
+        else if (s2 && s2 === recvNum) bad = 'Le lot absorbé 2 est le lot receveur.';
+        else if (s1 && s2 && s1 === s2) bad = 'Les deux lots absorbés sont identiques.';
+        else if (s2 && !s1) bad = 'Remplissez « Lot absorbé 1 » avant le 2.';
+      }
+      var m = document.getElementById('msg');
+      if (bad) { m.className = 'err'; m.innerHTML = esc(bad); }
+      else { m.className = ''; m.innerHTML = ''; }
       var ready = BASE &&
         document.getElementById('lot').value &&
-        document.getElementById('op').value;
+        op && !bad;
       document.getElementById('goBtn').disabled = !ready;
+    }
+
+    function lotNumberFor(fileId) {
+      for (var i = 0; i < LOTS.length; i++)
+        if (LOTS[i].fileId === fileId) return String(LOTS[i].lotNumber);
+      return '';
+    }
+
+    /* Source dropdowns carry LOT NUMBERS (the form and the engine work
+       by lot root), unlike the receiver dropdown which carries the
+       fileId the Router needs to open the receiving lot file. */
+    function fillSrc(id) {
+      document.getElementById(id).innerHTML =
+        '<option value="">-- aucun --</option>' +
+        LOTS.map(function (x) {
+          return '<option value="' + esc(String(x.lotNumber)) + '">Lot-' + esc(x.lotNumber) + '</option>';
+        }).join('');
     }
 
     /* Navigate rather than inject. The form is a complete HTML document
@@ -89,6 +137,14 @@
         '?screen=tracform' +
         '&lot=' + encodeURIComponent(document.getElementById('lot').value) +
         '&op='  + encodeURIComponent(document.getElementById('op').value);
+      if (document.getElementById('op').value === 'melange') {
+        var src = [];
+        var a = document.getElementById('src1').value;
+        var b = document.getElementById('src2').value;
+        if (a) src.push(a);
+        if (b) src.push(b);
+        if (src.length) url += '&src=' + encodeURIComponent(src.join(','));
+      }
       busyGo(url);
     }
 
