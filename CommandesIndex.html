@@ -237,7 +237,7 @@
     var type = cur ? cur.type : 'TOUT';
     el('resForm').innerHTML =
       '<h3 style="margin:0 0 10px">' +
-        (resEdit ? 'Modifier la r\u00e9servation (ligne ' + resEdit + ')' : 'Nouvelle r\u00e9servation') +
+        (resEdit ? 'Modifier la r\u00e9servation' : 'Nouvelle r\u00e9servation') +
       '</h3>' +
       '<div style="margin-bottom:10px"><label>Lot<br><select id="rLot">' + opts + '</select></label></div>' +
       '<div style="margin-bottom:10px"><label>Type<br>' +
@@ -293,7 +293,7 @@
     } else {
       google.script.run
         .withSuccessHandler(function (r) {
-          setStatusAndScroll('ok', 'R\u00e9servation ajout\u00e9e (ligne ' + r.row + ').');
+          setStatusAndScroll('ok', 'R\u00e9servation ajout\u00e9e.');
           loadRes();
         })
         .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
@@ -982,7 +982,7 @@
         lines = [{}];
         renderNew();
         const msg = 'Commande <b>' + esc(res.orderNumber) + '</b> enregistrée — ' +
-          res.rowCount + ' ligne(s), à partir de la ligne ' + res.firstRow + '.';
+          res.rowCount + ' ligne(s).';
         el('status').innerHTML =
           '<div class="ok">' + msg + '</div>' +
           (warns.length
@@ -1043,7 +1043,6 @@
               '<div class="hit" id="hit_'+esc(o.key)+'" data-key="'+esc(o.key)+'">' +
                 '<b>' + esc(o.orderNumber || '(sans numéro)') + '</b> · ' + esc(o.client) +
                 '<div class="muted">' + esc(o.dateCommande) + ' · lots : ' + esc(o.lots.join(', ') || '—') +
-                ' · ligne(s) ' + o.rows.join(',') +
                 (o.paiement ? ' · payé le ' + esc(o.paiement) : ' · non soldée') + '</div>' +
               '</div>').join('')
           : '<div class="warn">Aucune commande trouvée.</div>';
@@ -1064,8 +1063,7 @@
 
     el('fulForm').innerHTML =
       '<div class="card"><h3>' + esc(o.orderNumber || '(sans numéro)') + ' — ' + esc(o.client) + '</h3>' +
-        '<div class="muted">Ces valeurs seront appliquées à toutes les lignes de la commande (' +
-          o.rows.join(', ') + ').</div>' +
+        '<div class="muted">Ces valeurs seront appliquées à toute la commande.</div>' +
         '<div class="row">' +
           '<div><label>Paiement reçu le</label><input type="date" id="uPaiement" value="'+esc(toISO(o.paiement))+'"></div>' +
           '<div><label>Date livraison</label><input type="date" id="uLivraison" value="'+esc(toISO(o.dateLivraison))+'"></div>' +

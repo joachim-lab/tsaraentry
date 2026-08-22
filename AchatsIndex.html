@@ -142,7 +142,7 @@
           document.getElementById('loading').style.display = 'none';
           document.getElementById('submitBtn').disabled = false;
           showMsg('ok', 'Facture du ' + res.date + ' enregistrée : ' + res.filled +
-            ' type(s) de provende' + (res.created ? ', bloc ' + res.month + ' créé' : '') + '.');
+            ' type(s) de provende.');
           for (let i = 0; i < inputs.length; i++) inputs[i].value = '';
           loadContext();
         })

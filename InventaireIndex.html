@@ -136,7 +136,7 @@
           }
           document.getElementById('recSubmitBtn').disabled = false;
           sel.innerHTML = '<option value="">-- choisir --</option>' + pendingRows.map(r =>
-            '<option value="' + r.row + '">L' + r.row + ' · ' + esc(r.type) + ' · ' +
+            '<option value="' + r.row + '">' + esc(r.type) + ' · ' +
             esc(r.nbreCommande) + ' ' + esc(r.unite) + ' · commandé le ' + esc(r.dateCommande) + '</option>'
           ).join('');
         })

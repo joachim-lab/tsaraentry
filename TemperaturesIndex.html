@@ -119,7 +119,7 @@
           var link = el('pdfLink');
           link.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
           link.download = r.filename;
-          link.textContent = 'Ouvrir le PDF (' + Math.round(r.size / 1024) + ' Ko)';
+          link.textContent = 'Ouvrir le PDF';
           link.style.display = 'block';
         })
         .withFailureHandler(function (e) {
@@ -145,7 +145,7 @@
           var link = el('pdfLinkProgramme');
           link.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
           link.download = r.filename;
-          link.textContent = 'Ouvrir le PDF (' + Math.round(r.size / 1024) + ' Ko)';
+          link.textContent = 'Ouvrir le PDF';
           link.style.display = 'block';
         })
         .withFailureHandler(function (e) {

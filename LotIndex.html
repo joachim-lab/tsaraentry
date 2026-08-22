@@ -763,13 +763,13 @@
 
       google.script.run
         .withSuccessHandler(res => {
-          setStatus('ok', res.changeCount + ' cellule(s) enregistrée(s).');
+          setStatus('ok', 'Enregistré.');
 
           if (pendingCarry) {
             google.script.run
               .withSuccessHandler(r => {
                 if (r && r.ok) {
-                  setStatus('ok', res.changeCount + ' cellule(s) enregistrée(s). Reste ' +
+                  setStatus('ok', 'Enregistré. Reste ' +
                     splitFmt(Math.round(r.carry.remainingBiomasse), 0) + ' g pour ' +
                     r.carry.lotsRemaining + ' lot(s) — créer maintenant un nouveau lot ' +
                     'et cochez la continuation dans ce nouveau lot.');
@@ -786,7 +786,7 @@
               })
               .carrySet(pendingCarry);
           } else if (carrySkipReason) {
-            setStatus('warn', res.changeCount + ' cellule(s) enregistrée(s). Aucun report gardé : ' + esc(carrySkipReason) + '.');
+            setStatus('warn', 'Enregistré. Aucun report gardé : ' + esc(carrySkipReason) + '.');
           }
 
           newSamples = [];
@@ -798,7 +798,7 @@
             .withSuccessHandler(onLotLoaded)
             .withFailureHandler(function (err) {
               setStatus('warn',
-                'Enregistré (' + res.changeCount + ' cellule(s)), mais l\'écran n\'a pas pu ' +
+                'Enregistré, mais l\'écran n\'a pas pu ' +
                 'se recharger : ' + esc(err && err.message ? err.message : err) +
                 '. Les valeurs affichées ne sont plus à jour. Rechargez la page avant de continuer.');
             })

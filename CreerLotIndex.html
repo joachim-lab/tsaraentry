@@ -167,7 +167,7 @@
       if (!res || !res.carry) return '';
       if (res.carry.ok) {
         return 'Report appliqué : <b>' + fmt(res.carry.share) + ' g</b> et les mesures ' +
-          'ont été écrites dans ce lot (' + esc(res.carry.changeCount) + ' cellule(s)). ' +
+          'ont été écrites dans ce lot. ' +
           'Lots restants : ' + esc(res.carry.lotsRemaining) + '.<br><br>';
       }
       return '<b>Le lot a été créé, mais le report a échoué :</b> ' +
@@ -270,8 +270,6 @@
     function showCreated(res) {
       var h = carryOutcomeHtml(res) +
         'Lot créé : <b>' + esc(res.newName) + '</b>' +
-        '<br>Cohorte : ' + esc(res.cohortId ? res.cohortId : '—') +
-        '<br>Accès éditeur accordé à : ' + esc(res.editorEmail) +
         '<br><a href="' + esc(res.fileUrl) + '" target="_blank">Ouvrir le fichier</a>';
 
       if (res.mintWarning) {
