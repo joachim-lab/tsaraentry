@@ -117,6 +117,30 @@
     });
   }
 
+  // --- Page navigation -------------------------------------------------
+  // Not a server call, so the wrapper below never sees it. Shown and never
+  // hidden: the page is replaced.
+
+  window.busyGo = function (url) {
+    show();
+    window.top.location.href = url;
+  };
+
+  document.addEventListener('click', function (ev) {
+    if (ev.defaultPrevented) { return; }
+    if (ev.button !== 0) { return; }
+    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) { return; }
+    var a = ev.target;
+    while (a && a.tagName !== 'A') { a = a.parentElement; }
+    if (!a) { return; }
+    var href = a.getAttribute('href');
+    if (!href) { return; }
+    if (href.charAt(0) === '#') { return; }
+    if (href.indexOf('javascript:') === 0) { return; }
+    if (a.target && a.target !== '_top' && a.target !== '_self') { return; }
+    show();
+  }, true);
+
   google.script.run = wrap(google.script.run, false, false);
 }());
 </script>

@@ -94,7 +94,7 @@
         '?screen=tracform' +
         '&lot=' + encodeURIComponent(document.getElementById('lot').value) +
         '&op='  + encodeURIComponent(document.getElementById('op').value);
-      window.top.location.href = url;
+      busyGo(url);
     }
 
     function showErr(html) {
