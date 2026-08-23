@@ -69,9 +69,10 @@
       function fallback() {
         var link = el('pdfLink');
         link.href = url;
-        link.download = r.filename;
+        link.target = '_blank';
+        link.removeAttribute('download');
         link.style.display = 'block';
-        show('printMsg', "Impression directe impossible — ouvrez le PDF et imprimez-le.", 'err');
+        show('printMsg', "Impression directe bloquée par le navigateur — ouvrez le PDF : il s'imprime depuis l'onglet (Cmd+P).", 'err');
       }
 
       try {
