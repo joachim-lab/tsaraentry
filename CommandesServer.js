@@ -268,6 +268,16 @@ function cmdCreateOrder(payload) {
  * `query` matches order number, client or lot (case-insensitive).
  * onlyUnfulfilled = no payment date recorded on any of its rows.
  */
+/** Parse a fr-formatted display value ("1 500 000", "12,5") into a number; 0 if blank. */
+function cmdNumFromDisplay_(s) {
+  const t = String(s == null ? "" : s)
+    .replace(/[  \s]/g, "")
+    .replace(",", ".")
+    .replace(/[^\d.-]/g, "");
+  const n = Number(t);
+  return isFinite(n) ? n : 0;
+}
+
 function cmdFindOrders(query, onlyUnfulfilled) {
   const sh = cmdSheet();
   const C = CMD_CFG.COL;
@@ -305,7 +315,10 @@ function cmdFindOrders(query, onlyUnfulfilled) {
         facture: r[C.FACTURE - 1],
         bl: r[C.BL - 1],
         alevinsNb: [],
-        poissonKg: []
+        poissonKg: [],
+        alevinsTotal: 0,
+        poissonKgTotal: 0,
+        montantAr: 0
       };
       order.push(key);
     }
@@ -315,6 +328,10 @@ function cmdFindOrders(query, onlyUnfulfilled) {
     if (r[C.LOT - 1]) g.lots.push(r[C.LOT - 1]);
     if (r[C.ALEVINS_NB - 1]) g.alevinsNb.push(r[C.ALEVINS_NB - 1]);
     if (r[C.POISSON_KG - 1]) g.poissonKg.push(r[C.POISSON_KG - 1]);
+    g.alevinsTotal += cmdNumFromDisplay_(r[C.ALEVINS_NB - 1]);
+    g.poissonKgTotal += cmdNumFromDisplay_(r[C.POISSON_KG - 1]);
+    g.montantAr += cmdNumFromDisplay_(r[C.ARGENT_ALEVINS - 1]) +
+                   cmdNumFromDisplay_(r[C.ARGENT_POISSON - 1]);
     // Any row carrying fulfilment data represents the order's state.
     if (!g.paiement && r[C.PAIEMENT - 1]) g.paiement = r[C.PAIEMENT - 1];
     if (!g.dateLivraison && r[C.DATE_LIVRAISON - 1]) g.dateLivraison = r[C.DATE_LIVRAISON - 1];
