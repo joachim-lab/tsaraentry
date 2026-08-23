@@ -1012,6 +1012,7 @@
       '<div id="fulForm"></div>' +
       '<div id="hits"></div>';
     el('ficherche').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
+    el('fOnlyUnpaid').addEventListener('change', () => doSearch());
 
     // One delegated listener on the container: survives every re-render
     // of the results list, so nothing has to be re-attached.
