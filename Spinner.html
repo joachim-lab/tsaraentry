@@ -137,6 +137,8 @@
     if (!href) { return; }
     if (href.charAt(0) === '#') { return; }
     if (href.indexOf('javascript:') === 0) { return; }
+    if (href.indexOf('blob:') === 0) { return; }
+    if (a.hasAttribute('download')) { return; }
     if (a.target && a.target !== '_top' && a.target !== '_self') { return; }
     show();
   }, true);

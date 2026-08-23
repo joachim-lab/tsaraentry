@@ -80,10 +80,17 @@
         printFrame = frame;
         frame.style.display = 'none';
         frame.onload = function () {
-          try {
+          function attempt() {
             frame.contentWindow.focus();
             frame.contentWindow.print();
-          } catch (err) { fallback(); }
+          }
+          try {
+            attempt();
+          } catch (err) {
+            window.setTimeout(function () {
+              try { attempt(); } catch (err2) { fallback(); }
+            }, 500);
+          }
         };
         frame.src = url;
         document.body.appendChild(frame);
