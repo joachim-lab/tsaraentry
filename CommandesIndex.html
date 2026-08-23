@@ -1006,13 +1006,16 @@
           '<div style="flex:0 0 220px"><label>&nbsp;</label>' +
             '<button class="primary" style="width:100%" onclick="doSearch()">Rechercher</button></div>' +
         '</div>' +
-        '<label style="font-weight:normal"><input type="checkbox" id="fOnlyUnpaid" checked style="width:auto"> ' +
-          'Seulement les commandes non soldées</label>' +
+        '<label style="font-weight:normal"><input type="checkbox" id="fDeliveredUnpaid" style="width:auto"> ' +
+          'Commandes livrées et non-payées</label>' +
+        '<label style="font-weight:normal"><input type="checkbox" id="fUndelivered" style="width:auto"> ' +
+          'Commandes non-livrées</label>' +
       '</div>' +
       '<div id="fulForm"></div>' +
       '<div id="hits"></div>';
     el('ficherche').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
-    el('fOnlyUnpaid').addEventListener('change', () => doSearch());
+    el('fDeliveredUnpaid').addEventListener('change', () => doSearch());
+    el('fUndelivered').addEventListener('change', () => doSearch());
 
     // One delegated listener on the container: survives every re-render
     // of the results list, so nothing has to be re-attached.
@@ -1045,12 +1048,14 @@
               '<div class="hit" id="hit_'+esc(o.key)+'" data-key="'+esc(o.key)+'">' +
                 '<b>' + esc(o.orderNumber || '(sans numéro)') + '</b> · ' + esc(o.client) +
                 '<div class="muted">' + esc(o.dateCommande) + ' · lots : ' + esc(o.lots.join(', ') || '—') +
-                (o.paiement ? ' · payé le ' + esc(o.paiement) : ' · non soldée') + '</div>' +
+                (o.dateLivraison ? ' · livrée le ' + esc(o.dateLivraison) : ' · non livrée') +
+                (o.paiement ? ' · payée le ' + esc(o.paiement) : ' · non payée') + '</div>' +
               '</div>').join('')
           : '<div class="warn">Aucune commande trouvée.</div>';
       })
       .withFailureHandler(e => setStatus('err', esc(e.message)))
-      .cmdFindOrders(el('ficherche').value, el('fOnlyUnpaid').checked);
+      .cmdFindOrders(el('ficherche').value,
+        el('fDeliveredUnpaid').checked, el('fUndelivered').checked);
   }
 
   function selectHit(key) {

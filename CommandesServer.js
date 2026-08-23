@@ -266,7 +266,6 @@ function cmdCreateOrder(payload) {
  * returned on its own, keyed by row.
  *
  * `query` matches order number, client or lot (case-insensitive).
- * onlyUnfulfilled = no payment date recorded on any of its rows.
  */
 /** Parse a fr-formatted display value ("1 500 000", "12,5") into a number; 0 if blank. */
 function cmdNumFromDisplay_(s) {
@@ -278,7 +277,16 @@ function cmdNumFromDisplay_(s) {
   return isFinite(n) ? n : 0;
 }
 
-function cmdFindOrders(query, onlyUnfulfilled) {
+/**
+ * Search open orders. An order is DELIVERED when it has a delivery date
+ * (col V) and PAID when it has a payment date (col U); "livré" (col W) is
+ * a formula from V, so V is the truth. Orders both delivered and paid are
+ * closed and never listed. The two flags narrow the rest:
+ *   wantDeliveredUnpaid — delivered, not paid
+ *   wantUndelivered     — not delivered
+ * Neither flag (or both) lists both groups.
+ */
+function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
   const sh = cmdSheet();
   const C = CMD_CFG.COL;
   const lastRow = findNextCommandeRow(sh) - 1;
@@ -348,7 +356,16 @@ function cmdFindOrders(query, onlyUnfulfilled) {
       const hay = (g.orderNumber + " " + g.client + " " + g.lots.join(" ")).toLowerCase();
       if (hay.indexOf(q) === -1) continue;
     }
-    if (onlyUnfulfilled && String(g.paiement || "").trim() !== "") continue;
+    const delivered = String(g.dateLivraison || "").trim() !== "";
+    const paid      = String(g.paiement || "").trim() !== "";
+
+    if (delivered && paid) continue;                 // closed order
+
+    const both = (wantDeliveredUnpaid === wantUndelivered);   // both or neither
+    if (!both) {
+      if (wantDeliveredUnpaid && !delivered) continue;
+      if (wantUndelivered && delivered) continue;
+    }
 
     out.push(g);
     if (out.length >= 25) break;
