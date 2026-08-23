@@ -1041,17 +1041,22 @@
     selectedKey = null;
     google.script.run
       .withSuccessHandler(res => {
-        hits = res;
+        hits = res.orders;
         if (keepMsg) setStatusAndScroll(keepMsg.cls, keepMsg.html); else setStatus('', '');
-        el('hits').innerHTML = res.length
-          ? res.map(o =>
+        const empty = res.closedMatches > 0
+          ? (res.closedMatches === 1
+              ? 'Commande livrée et payée.'
+              : res.closedMatches + ' commandes livrées et payées.')
+          : 'Aucune commande trouvée.';
+        el('hits').innerHTML = hits.length
+          ? hits.map(o =>
               '<div class="hit" id="hit_'+esc(o.key)+'" data-key="'+esc(o.key)+'">' +
                 '<b>' + esc(o.orderNumber || '(sans numéro)') + '</b> · ' + esc(o.client) +
                 '<div class="muted">' + esc(o.dateCommande) + ' · lots : ' + esc(o.lots.join(', ') || '—') +
                 (o.dateLivraison ? ' · livrée le ' + esc(o.dateLivraison) : ' · non livrée') +
                 (o.paiement ? ' · payée le ' + esc(o.paiement) : ' · non payée') + '</div>' +
               '</div>').join('')
-          : '<div class="warn">Aucune commande trouvée.</div>';
+          : '<div class="warn">' + esc(empty) + '</div>';
       })
       .withFailureHandler(e => setStatus('err', esc(e.message)))
       .cmdFindOrders(el('ficherche').value,

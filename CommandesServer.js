@@ -349,6 +349,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
   }
 
   const out = [];
+  let closedMatches = 0;
   for (let i = order.length - 1; i >= 0; i--) {              // newest first
     const g = groups[order[i]];
 
@@ -359,7 +360,9 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
     const delivered = String(g.dateLivraison || "").trim() !== "";
     const paid      = String(g.paiement || "").trim() !== "";
 
-    if (delivered && paid) continue;                 // closed order
+    // Closed. Counted so the screen can say WHY nothing is listed rather
+    // than reporting a search that found nothing.
+    if (delivered && paid) { closedMatches++; continue; }
 
     const both = (wantDeliveredUnpaid === wantUndelivered);   // both or neither
     if (!both) {
@@ -370,7 +373,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
     out.push(g);
     if (out.length >= 25) break;
   }
-  return out;
+  return { orders: out, closedMatches: closedMatches };
 }
 
 /**
