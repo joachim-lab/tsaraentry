@@ -47,7 +47,7 @@
 
     <hr>
     <h2>Impression stock poisson</h2>
-    <button id="print">Préparer PDF Stock poisson</button>
+    <button id="print">Imprimer stock poisson</button>
     <a class="pdf" id="pdfLink" download>Ouvrir le PDF</a>
     <div id="printMsg" class="panel"></div>
 
@@ -67,6 +67,44 @@
     }
 
     function hide(id) { el(id).style.display = 'none'; }
+
+    /**
+     * Load the PDF in a hidden iframe and open the browser's print
+     * dialog. A page cannot reach the printer silently; this removes
+     * the download-open-print detour. If the dialog cannot open, the
+     * fallback link appears instead. The iframe stays in the page:
+     * removing it (or revoking the URL) closes the print dialog.
+     */
+    var printFrames = {};
+    function printPdf(r, frameKey, linkId, msgId) {
+      var bin = atob(r.base64);
+      var bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
+      var url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+
+      function fallback() {
+        var link = el(linkId);
+        link.href = url;
+        link.download = r.filename;
+        link.style.display = 'block';
+        show(msgId, "Impression directe impossible — ouvrez le PDF et imprimez-le.", 'err');
+      }
+
+      try {
+        if (printFrames[frameKey]) { document.body.removeChild(printFrames[frameKey]); }
+        var frame = document.createElement('iframe');
+        printFrames[frameKey] = frame;
+        frame.style.display = 'none';
+        frame.onload = function () {
+          try {
+            frame.contentWindow.focus();
+            frame.contentWindow.print();
+          } catch (err) { fallback(); }
+        };
+        frame.src = url;
+        document.body.appendChild(frame);
+      } catch (err) { fallback(); }
+    }
 
     google.script.run.withSuccessHandler(function (url) {
       el('back').href = url;
@@ -113,19 +151,12 @@
       google.script.run
         .withSuccessHandler(function (r) {
           el('print').disabled = false;
-          el('print').textContent = 'Préparer PDF Stock poisson';
-          var bin = atob(r.base64);
-          var bytes = new Uint8Array(bin.length);
-          for (var i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
-          var link = el('pdfLink');
-          link.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-          link.download = r.filename;
-          link.textContent = 'Ouvrir le PDF';
-          link.style.display = 'block';
+          el('print').textContent = 'Imprimer stock poisson';
+          printPdf(r, 'stock', 'pdfLink', 'printMsg');
         })
         .withFailureHandler(function (e) {
           el('print').disabled = false;
-          el('print').textContent = 'Préparer PDF Stock poisson';
+          el('print').textContent = 'Imprimer stock poisson';
           show('printMsg', e.message, 'err');
         })
         .tempBuildPdf();
@@ -140,14 +171,7 @@
         .withSuccessHandler(function (r) {
           el('printProgramme').disabled = false;
           el('printProgramme').textContent = 'Imprimer Programme';
-          var bin = atob(r.base64);
-          var bytes = new Uint8Array(bin.length);
-          for (var i = 0; i < bin.length; i++) { bytes[i] = bin.charCodeAt(i); }
-          var link = el('pdfLinkProgramme');
-          link.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-          link.download = r.filename;
-          link.textContent = 'Ouvrir le PDF';
-          link.style.display = 'block';
+          printPdf(r, 'programme', 'pdfLinkProgramme', 'printProgrammeMsg');
         })
         .withFailureHandler(function (e) {
           el('printProgramme').disabled = false;
