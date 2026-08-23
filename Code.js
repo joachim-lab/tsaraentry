@@ -20,6 +20,8 @@ const CFG = {
   PROGRAMME_SS_ID: "1Ky1DKbNxeBnqTXUxgk8PedPSuwISgS4rvVhFMUHBdsM",
   PROGRAMME_SHEET: "planning",
 
+  DATA_BASSINS_SS_ID: "1n4Xj4hZnGthAsFig3ecK9TCzegYdyh-0y9ISWfU36D0",
+
   NOURRISSAGE_SS_ID: "1JBoH5c7BqZc2V5czcDAnEt-2hvkNKlJAxuDSupttTfs",
   CONSO_SHEET: "Consommation provende",
   CONSO_START_ROW: 2,

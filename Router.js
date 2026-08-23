@@ -14,6 +14,7 @@
  *   ?screen=inventaire   -> InventaireIndex.html  (screen 8a)
  *   ?screen=checkstock   -> CheckStockIndex.html  (screen 8b)
  *   ?screen=achats       -> AchatsIndex.html      (screen 8c)
+ *   ?screen=databassins  -> DataBassinsIndex.html (screen 9)
  *   no parameter         -> Menu.html            (chooser)
  ***************************************************************/
 
@@ -50,6 +51,7 @@ function doGet(e) {
   else if (screen === "inventaire") file = "InventaireIndex";
   else if (screen === "checkstock") file = "CheckStockIndex";
   else if (screen === "achats") file = "AchatsIndex";
+  else if (screen === "databassins") file = "DataBassinsIndex";
   else file = "Menu";
 
   return HtmlService.createTemplateFromFile(file).evaluate()
