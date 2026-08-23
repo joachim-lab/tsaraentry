@@ -34,6 +34,7 @@
     .backlink { display:inline-block; margin-bottom:10px; font-size: 16px; color:#1a73e8;
                 text-decoration:none; }
     .backlink:hover { text-decoration:underline; }
+      input[readonly], textarea[readonly], select[disabled] { background: #f1f3f4; color: #5f6368; }
   </style>
   <?!= include('Lists'); ?>
   <?!= include('Spinner'); ?>
@@ -139,7 +140,15 @@
     function onLotLoaded(data) {
       loaded = data;
       if (data.stage === 'none') { setStatus('err', esc(data.reason)); return; }
-      let banner = '<div class="banner"><b>' + esc(currentLotName()) + '</b></div>';
+      let bannerText = currentLotName();
+      if (data.stage === 'grossissement' && data.fields && data.fields.subLots) {
+        const lotNum = String(currentLotName()).replace(/^Lot-/i, '');
+        const keys = data.fields.subLots
+          .filter(s => String(s.bassin || '') !== '' && String(s.happa || '') !== '')
+          .map(s => lotNum + '-' + s.bassin + '-' + s.happa);
+        if (keys.length) bannerText = keys.join(' · ');
+      }
+      let banner = '<div class="banner"><b>' + esc(bannerText) + '</b></div>';
       if (data.mixedWarning) banner += '<div class="warn">' + esc(data.mixedWarning) + '</div>';
       el('status').innerHTML = banner;
 
@@ -240,10 +249,7 @@
         // one block every 14 days. addChange refuses to write a formula cell,
         // so an edited date could only ever fail the whole save. Shown
         // read-only, like the other calculated fields.
-        const dateShown = fmtDate(f.date);
         html += '<div class="card">' +
-          '<label>Pesée du</label>' +
-          '<div class="muted">' + esc(dateShown === null ? '—' : dateShown) + '</div>' +
           field('temperature', "Température de l'eau", f.temperature, 'number') +
           '</div>';
         html += renderGrossSubLots(f.subLots);
@@ -350,8 +356,8 @@
       return grossAll.slice(0, grossVisible).map((s, i) =>
         '<div class="card"><h3>Sous-lot ' + (i + 1) + '</h3>' +
           '<div class="row">' +
-            '<div>' + grossField(s.col, 'bassin', 'Bassin/Cage', s.bassin, 'text') + '</div>' +
-            '<div>' + grossField(s.col, 'happa', 'Happa/Carré/Rond', s.happa, 'text') + '</div>' +
+            '<div>' + grossField(s.col, 'bassin', 'Bassin/Cage', s.bassin, 'text', s.locked) + '</div>' +
+            '<div>' + grossField(s.col, 'happa', 'Happa/Carré/Rond', s.happa, 'text', s.locked) + '</div>' +
           '</div>' +
           '<div class="row">' +
             '<div>' + grossField(s.col, 'nombre', 'Nombre', s.nombre) + '</div>' +
@@ -388,12 +394,13 @@
         : '<div class="muted" style="margin-top:12px">Maximum de ' + grossAll.length + ' sous-lots atteint.</div>';
     }
 
-    function grossField(col, key, label, value, type) {
+    function grossField(col, key, label, value, type, locked) {
       let v = (value === null || value === undefined) ? '' : value;
       const t = type || 'number';
       if (t === 'number' && v !== '') { const p = num(v); if (p !== null) v = p; }
       return '<label>' + esc(label) + '</label>' +
         '<input type="' + t + '"' + (t === 'number' ? ' step="any"' : '') +
+        (locked ? ' readonly' : '') +
         ' data-gross-col="' + col + '" data-gross-key="' + key + '" value="' + esc(v) + '">';
     }
 

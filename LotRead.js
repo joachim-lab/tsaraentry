@@ -216,12 +216,28 @@ function readGrossissementFields_(ss, targetGroupStartCol) {
   const nombreRow  = gross.getRange(LOT_CFG.GROSS_ROW_NOMBRE, targetGroupStartCol, 1, g).getValues()[0];
   const pmRow      = gross.getRange(LOT_CFG.GROSS_ROW_PM, targetGroupStartCol, 1, g).getValues()[0];
 
+  // Pre-fill bassin/happa from the previous block: a simple échantillonnage
+  // does not move fish, so the sub-lot layout carries over unchanged. The
+  // screen shows these locked (read-only); Mouvements de lot is the only
+  // path that changes the layout. A column blank in BOTH blocks stays
+  // editable — that is a genuinely new sub-lot.
+  const prevCol = targetGroupStartCol - g;
+  let prevBassin = [], prevHappa = [];
+  if (prevCol >= LOT_CFG.GROSS_START_COL) {
+    prevBassin = gross.getRange(LOT_CFG.GROSS_ROW_BASSIN, prevCol, 1, g).getValues()[0];
+    prevHappa  = gross.getRange(LOT_CFG.GROSS_ROW_HAPPA,  prevCol, 1, g).getValues()[0];
+  }
+
   const subLots = [];
   for (let i = 0; i < g; i++) {
+    const own = String(bassinRow[i] || "") !== "" || String(happaRow[i] || "") !== "";
+    const bassin = own ? bassinRow[i] : (prevBassin[i] || "");
+    const happa  = own ? happaRow[i]  : (prevHappa[i]  || "");
     subLots.push({
       col: targetGroupStartCol + i,
-      bassin: bassinRow[i],
-      happa: happaRow[i],
+      bassin: bassin,
+      happa: happa,
+      locked: String(bassin || "") !== "" || String(happa || "") !== "",
       nombre: nombreRow[i],
       poidsMoyen: pmRow[i]
     });
