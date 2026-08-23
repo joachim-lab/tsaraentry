@@ -6,7 +6,7 @@
     .tsaraLogo { position: fixed; top: 18px; right: 24px; height: 56px; width: auto; z-index: 500; }
     body { font-family: Arial, sans-serif; max-width: 560px; margin: 32px auto; padding: 0 16px; color: #202124; }
     h1 { font-size: 26px; margin: 0 0 4px 0; }
-    h2 { font-size: 18px; margin: 28px 0 8px 0; }
+    h2 { font-size: 18px; margin: 20px 0 8px 0; }
     a.back { font-size: 15px; color: #1a73e8; text-decoration: none; }
     hr { border: 0; border-top: 1px solid #dadce0; margin: 26px 0 0 0; }
     label { display: block; font-size: 15px; color: #5f6368; margin: 14px 0 4px 0; }
@@ -44,6 +44,14 @@
   <h1>Data Bassins</h1>
   <a class="back" id="back" href="#">← Menu</a>
 
+  <h2>Consignes</h2>
+  <div class="note">
+    Mesurer une fois par semaine, toujours à la même heure (le matin avant 10h).<br>
+    Mesurer au milieu du bassin, pas près de l'arrivée d'eau fraîche.<br>
+    Un bassin non mesuré cette semaine peut rester vide.
+  </div>
+  <div class="legend">Noeud 1 = eau très trouble (changer l'eau urgemment) · 2 = eau trouble (changer l'eau) · 3 = OK · 4 = parfait (eau claire)</div>
+
   <div class="tabs">
     <button type="button" id="tabSaisie" class="tab on">Saisie</button>
     <button type="button" id="tabHist" class="tab">Historique</button>
@@ -54,19 +62,9 @@
     <input type="date" id="date">
 
     <div id="rows"></div>
-    <div class="legend">Noeud 1 = eau très trouble · 2 = eau trouble · 3 = OK · 4 = parfait (eau claire)</div>
 
     <button type="button" id="save">Enregistrer</button>
     <div id="saveMsg" class="panel"></div>
-
-    <hr>
-    <h2>Consignes</h2>
-    <div class="note">
-      Mesurer une fois par semaine, toujours à la même heure (le matin avant 10h).<br>
-      Mesurer au milieu du bassin, pas près de l'arrivée d'eau fraîche.<br>
-      Noeud 1 : changer l'eau urgemment. Noeud 2 : changer l'eau.<br>
-      Un bassin non mesuré cette semaine peut rester vide.
-    </div>
   </div>
 
   <div id="hist" style="display:none">
