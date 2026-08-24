@@ -1,0 +1,34 @@
+<!-- Theme.html - shared hover highlight for every TSARA Entry screen.
+     Each screen includes it once, immediately before the Spinner include:
+         <?!= include('Theme'); ?>
+     It comes after the screen's own <style>, so these rules win on equal
+     specificity. Green #146E3C is the green of the menu icons.
+
+     Buttons keep their own fill colour and take an outline only. Text and
+     rows take a soft green wash. Elements that carry an inline onclick are
+     treated as clickable text, except buttons, which are handled above. -->
+<style>
+  a, button, select, input, textarea, label, .tab, .del, .hit, .card, tbody tr {
+    transition: background-color .12s ease, outline-color .12s ease;
+  }
+  a:hover,
+  label:hover,
+  .del:hover,
+  tbody tr:hover,
+  [onclick]:not(button):hover {
+    background: #EAF3EE;
+  }
+  button:hover,
+  .tab:hover,
+  .hit:hover,
+  .card:hover,
+  select:hover,
+  input:hover,
+  textarea:hover {
+    outline: 2px solid #146E3C;
+    outline-offset: -2px;
+  }
+  button:disabled:hover { outline: none; }
+  input[readonly]:hover, textarea[readonly]:hover, select[disabled]:hover { outline: none; }
+  #busyOverlay:hover, #busyOverlay *:hover { background: none; outline: none; }
+</style>
