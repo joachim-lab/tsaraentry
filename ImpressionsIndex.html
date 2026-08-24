@@ -21,6 +21,7 @@
     .ok { background: #e6f4ea; color: #137333; }
     .err { background: #fce8e6; color: #c5221f; }
     .note { font-size: 15px; color: #5f6368; margin-top: 6px; }
+    .warn { font-size: 16px; font-weight: bold; color: #c5221f; margin: 18px 0 0 0; }
     a.pdf { display: none; margin-top: 14px; padding: 12px 14px; border: 1px solid #1a73e8;
             border-radius: 6px; font-size: 17px; color: #1a73e8; text-decoration: none; text-align: center; }
   </style>
@@ -33,6 +34,7 @@
   <h1>Impressions</h1>
   <a class="back" id="back" href="#">← Menu</a>
 
+  <p id="tempWarn" class="warn">Ne pas oublier de mettre à jour les températures avant d'imprimer stock poisson.</p>
   <h2>Températures</h2>
   <div id="tempLoading" class="note">Chargement…</div>
   <div id="tempForm" style="display:none">
