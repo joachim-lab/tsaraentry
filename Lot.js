@@ -213,6 +213,23 @@ function getLotStage(fileId) {
     };
   }
 
+  // GENITEUR LOT, NEVER STARTED (2026-08-21). Broodstock are adult
+  // fish, always over 20 g: they never pass through the fry tabs. The
+  // naming contract (2026-08-17) makes the lotId letters-only for
+  // broodstock and digits for growout, so B1 decides. Reached only
+  // when Grossissement is still empty - a started geniteur lot exits
+  // through scanGrossissement_ above, as Lot-Mirana always did.
+  const lotIdB1 = String(
+    (ss.getSheetByName(LOT_CFG.FIRST_TAB) || gross).getRange("B1").getValue() || ""
+  ).trim();
+  if (/^[A-Za-z]+$/.test(lotIdB1)) {
+    return {
+      stage: "grossissement",
+      targetGroupStartCol: LOT_CFG.GROSS_START_COL,
+      mixedWarning: null
+    };
+  }
+
   const tabName = findCurrentSTab_(ss);
   if (!tabName) {
     // UNSTARTED LOT (2026-08-21). Every tab's date chain anchors on
