@@ -1103,6 +1103,7 @@
               'value="'+esc(o.facture || '')+'"></div>' +
           '<div><label>Bon de livraison externe</label><input type="text" id="uBl" value="'+esc(o.bl || '')+'"></div>' +
         '</div>' +
+        '<label>Remarques</label><input type="text" id="uRemarques" value="'+esc(o.remarques || '')+'">' +
         '<button class="go" id="btnFul" onclick="doFulfil()">Enregistrer</button>' +
         '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #dadce0">' +
           '<button id="btnCancel" onclick="askCancel()" ' +
@@ -1146,7 +1147,8 @@
         dateLivraison: el('uLivraison').value,
         moyenPaiement: el('uMoyen').value,
         facture: el('uFacture').value,
-        bl: el('uBl').value
+        bl: el('uBl').value,
+        remarques: el('uRemarques').value
       });
   }
 

@@ -322,6 +322,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
         livre: r[C.LIVRE - 1],
         facture: r[C.FACTURE - 1],
         bl: r[C.BL - 1],
+        remarques: r[C.REMARQUES - 1],
         alevinsNb: [],
         poissonKg: [],
         alevinsTotal: 0,
@@ -346,6 +347,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
     if (!g.moyenPaiement && r[C.MOYEN_PAIEMENT - 1]) g.moyenPaiement = r[C.MOYEN_PAIEMENT - 1];
     if (!g.facture && r[C.FACTURE - 1]) g.facture = r[C.FACTURE - 1];
     if (!g.bl && r[C.BL - 1]) g.bl = r[C.BL - 1];
+    if (!g.remarques && r[C.REMARQUES - 1]) g.remarques = r[C.REMARQUES - 1];
   }
 
   const out = [];
@@ -411,6 +413,7 @@ function cmdRecordFulfilment(rows, payload) {
     // placed, and apply to the whole order (Kim, 2026-08-11).
     put(C.FACTURE, f.facture, "N° facture");
     put(C.BL, f.bl, "Bon de livraison");
+    put(C.REMARQUES, f.remarques, "Remarques");
   });
 
   SpreadsheetApp.flush();
