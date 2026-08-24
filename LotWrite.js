@@ -22,6 +22,13 @@
  * Field list is Kim's confirmed live list (2026-08-09).
  ***************************************************************/
 
+// Grossissement!U2 — "Date premiers poissons atteint 20g". A lot-level
+// anchor, not part of any 4-column block, so it does not belong in
+// LOT_CFG's block geometry. Cell confirmed identical across lot files
+// by Kim, 2026-08-24.
+const GROSS_ANCHOR_ROW = 2;
+const GROSS_ANCHOR_COL = 21;   // U
+
 const WRITE_CFG = {
   SUBLOT_FIRST_ROW: 11,
   SUBLOT_LAST_ROW: 16,
@@ -247,6 +254,23 @@ function planGrossissement(ss, targetGroupStartCol, payload, plan) {
     value: f.temperature,
     label: "Température de l'eau"
   }]);
+
+  // U2 "Date premiers poissons atteint 20g" — the lot-level anchor the
+  // Grossissement timeline chains from. Owned by no script until
+  // 2026-08-24, so a new géniteur lot arrived here with it blank and no
+  // way to fill it from the screen. Set to today ONLY when empty:
+  // addChange compares before writing, so a lot that already has an
+  // anchor is never re-dated.
+  //
+  // Today, not a typed field: Kim, 2026-08-24. A retrospective entry
+  // anchors the timeline on the typing date rather than the real one.
+  // Raised and accepted. The double-click picker still corrects it.
+  const anchorCell = sh.getRange(GROSS_ANCHOR_ROW, GROSS_ANCHOR_COL);
+  const anchorNow = anchorCell.getValue();
+  if (anchorNow === "" || anchorNow === null) {
+    addChange(sh, GROSS_ANCHOR_ROW, GROSS_ANCHOR_COL, new Date(),
+      "Date premiers poissons à 20g (fixée automatiquement)", plan);
+  }
 
   addChange(sh, LOT_CFG.GROSS_ROW_DATE, targetGroupStartCol, f.date,
     "Date du bloc (ré-ancre les dates suivantes)", plan);
