@@ -24,6 +24,7 @@
     a.pdf { display: none; margin-top: 14px; padding: 12px 14px; border: 1px solid #1a73e8;
             border-radius: 6px; font-size: 17px; color: #1a73e8; text-decoration: none; text-align: center; }
   </style>
+  <?!= include('Lists'); ?>
   <?!= include('Spinner'); ?>
 </head>
 <body>
@@ -32,6 +33,20 @@
   <h1>Impressions</h1>
   <a class="back" id="back" href="#">← Menu</a>
 
+  <h2>Températures</h2>
+  <div id="tempLoading" class="note">Chargement…</div>
+  <div id="tempForm" style="display:none">
+    <label for="bassin">Température bassin</label>
+    <select id="bassin"></select>
+
+    <label for="lac">Température lac</label>
+    <select id="lac"></select>
+
+    <button id="save">Enregistrer</button>
+    <div id="saveMsg" class="panel"></div>
+  </div>
+
+  <hr>
   <h2>Stock poisson</h2>
   <button id="printStock">Imprimer stock poisson</button>
   <a class="pdf" id="pdfLinkStock" download>Ouvrir le PDF</a>
@@ -130,6 +145,39 @@
     google.script.run.withSuccessHandler(function (url) {
       el('back').href = url;
     }).getWebAppUrl();
+
+    google.script.run
+      .withSuccessHandler(function (cur) {
+        // Fill and preselect in one step. A value already in R1/T1 that
+        // is not in the list (a decimal, or below 21) stays unselected,
+        // so the worker must choose a valid one before saving.
+        el('bassin').innerHTML = tsaraOptionsHtml('temp', cur.bassin);
+        el('lac').innerHTML = tsaraOptionsHtml('temp', cur.lac);
+        hide('tempLoading');
+        el('tempForm').style.display = 'block';
+      })
+      .withFailureHandler(function (e) {
+        el('tempLoading').textContent = e.message;
+      })
+      .tempGetCurrent();
+
+    el('save').onclick = function () {
+      hide('saveMsg');
+      el('save').disabled = true;
+      el('save').textContent = 'Enregistrement…';
+      google.script.run
+        .withSuccessHandler(function (r) {
+          el('save').disabled = false;
+          el('save').textContent = 'Enregistrer';
+          show('saveMsg', 'Enregistré — bassin ' + r.bassin + ' °C · lac ' + r.lac + ' °C', 'ok');
+        })
+        .withFailureHandler(function (e) {
+          el('save').disabled = false;
+          el('save').textContent = 'Enregistrer';
+          show('saveMsg', e.message, 'err');
+        })
+        .tempSave(el('bassin').value, el('lac').value);
+    };
 
     wirePrint('printStock', 'pdfLinkStock', 'printStockMsg', 'stock',
       'Imprimer stock poisson', function (ok, fail) {
