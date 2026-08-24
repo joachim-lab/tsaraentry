@@ -108,7 +108,14 @@ function submitNourrissage(entries) {
   });
 
   const startRow = findNextConsoRow(sh);
-  sh.getRange(startRow, CFG.CONSO_KEY_COL, rows.length, 4).setValues(rows); // C:F
+  try {
+    sh.getRange(startRow, CFG.CONSO_KEY_COL, rows.length, 4).setValues(rows); // C:F
+    SpreadsheetApp.flush(); // apply the write NOW: a rejected write must fail here, not later
+  } catch (err) {
+    throw new Error(
+      "NO rows were saved - the sheet rejected the write: " + err + ". Please tell Kim."
+    );
+  }
   const endRow = startRow + rows.length - 1;
 
   // Column I: copy the formula from the row above so the sheet's own
