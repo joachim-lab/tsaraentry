@@ -1163,16 +1163,25 @@ function cmdValidateOrderLines(lines, orderType) {
     // strict > : ordering exactly down to the reservation floor is legal,
     // because the engine blocks on next < reserved, not next <= reserved.
     if (wanted[k] > a.available) {
+      const isAlType = orderType &&
+                       String(orderType).toUpperCase().indexOf("AL") === 0;
       // Grossis only: the worker typed kg, so quote kg back. Rounded down.
-      const grKg = (orderType &&
-                    String(orderType).toUpperCase().indexOf("AL") !== 0 &&
+      const grKg = (!isAlType && orderType &&
                     a.pm != null && a.available != null)
         ? " (" + Math.floor(a.available * a.pm / 1000) + " kg)" : "";
+      // Tell the worker exactly how much to remove. Fish rounded UP
+      // (ceil), kg rounded UP: reducing by the stated amount must always
+      // bring the order back under the floor — never understate it.
+      const excess = Math.ceil(wanted[k] - a.available);
+      const reduire = (!isAlType && orderType && a.pm != null)
+        ? " → réduire de " + Math.ceil(excess * a.pm / 1000) + " kg"
+        : " → réduire de " + excess + " alevins";
       blocks.push(k + " : stock insuffisant — demandé " + Math.round(wanted[k]) +
                       ", disponible " + a.available + grKg +
                       " (stock " + a.count +
                       (a.reserved ? ", réservé " + a.reserved : "") +
-                      (a.pending ? ", en attente " + a.pending : "") + ")");
+                      (a.pending ? ", en attente " + a.pending : "") + ")" +
+                      reduire);
     }
     if (pmSeen[k] != null && a.pm != null && pmSeen[k] !== a.pm) {
       warnings.push(k + " : PM saisi " + pmSeen[k] + " ≠ PM du lot " + a.pm);

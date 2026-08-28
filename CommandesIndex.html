@@ -30,6 +30,14 @@
     .availWarn  { margin-top: 6px; padding: 8px 10px; border-radius: 4px;
                   background: #fef7e0; color: #b06000; font-size: 16px;
                   font-weight: bold; }
+    /* The normal readout (disponible / PM / kg). Was .muted — 14px grey,
+       the same style as a form hint, so the one number that decides the
+       order read as decoration (Kim 2026-08-28). A disponible of 0 or
+       less uses .availBlock instead: no quantity can be sold, which is a
+       block, not information. */
+    .availOk    { margin-top: 6px; padding: 8px 10px; border-radius: 4px;
+                  background: #e6f4ea; color: #188038; font-size: 18px;
+                  font-weight: bold; border-left: 4px solid #188038; }
     .row { display: flex; gap: 12px; flex-wrap: wrap }
     .row > div { flex: 1; min-width: 140px }
     .err  { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #fce8e6; color: #c5221f; font-size: 16px; }
@@ -613,7 +621,12 @@
           if (alSel2) setAuto(i, 'alevinsPrix', null);
           return;
         }
-        box.className = (verdict.level === 'warn') ? 'availWarn' : 'muted';
+        // A disponible of 0 or less refuses every quantity, so it is shown
+        // as a block, not as an informational readout. Otherwise: green
+        // bold, or amber when the lot/type gate warned.
+        const rien = (a.available == null || a.available <= 0);
+        box.className = rien ? 'availBlock'
+                            : (verdict.level === 'warn' ? 'availWarn' : 'availOk');
         // Grossis only: fish are sold by weight, so show the kg the lot
         // represents. Rounded down - never overstate what is available.
         var avKg = (!alSel2 && a.available != null && a.pm != null)
