@@ -27,6 +27,7 @@ const TEMP_CFG = {
   LAC_CELL: "T1",
   MIN_C: 0,               // refuse a typo, not a real reading
   MAX_C: 45,
+  SAVED_PROP: "TEMP_SAVED_DATE",   // Script Property: date of the last tempSave
   PRINT_FIRST_COL: 14,    // N
   PRINT_LAST_COL: 24      // X
 };
@@ -42,12 +43,37 @@ function tempSheet() {
   return sh;
 }
 
-/** Current values, as shown in the sheet. Used to fill the form. */
+/** Today as yyyy-MM-dd, in the script timezone. One definition. */
+function tempToday() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+}
+
+/**
+ * The date of the last tempSave, as yyyy-MM-dd, or "" when nobody has
+ * saved since this gate was installed.
+ *
+ * The date lives in a Script Property, NOT in the sheet. R1 and T1 are
+ * read by WARNINGSYSTEM (WS_CFG.TEMP) and by tsaracockpit (KPI_CFG.TEMP).
+ * Those two cells must hold a temperature and nothing else.
+ */
+function tempSavedDate() {
+  const v = PropertiesService.getScriptProperties().getProperty(TEMP_CFG.SAVED_PROP);
+  return v ? String(v) : "";
+}
+
+/**
+ * Current values, as shown in the sheet, plus the date they were saved.
+ * The screen shows them as text only. It does NOT preselect them: the
+ * worker must read the thermometer and choose both values again.
+ */
 function tempGetCurrent() {
   const sh = tempSheet();
+  const saved = tempSavedDate();
   return {
     bassin: sh.getRange(TEMP_CFG.BASSIN_CELL).getDisplayValue(),
-    lac: sh.getRange(TEMP_CFG.LAC_CELL).getDisplayValue()
+    lac: sh.getRange(TEMP_CFG.LAC_CELL).getDisplayValue(),
+    savedDate: saved,
+    savedToday: saved === tempToday()
   };
 }
 
@@ -61,6 +87,10 @@ function tempParseNumber(v) {
 
 /** Checks one reading and returns it, or throws a French message. */
 function tempCheckReading(label, raw) {
+  const s = String(raw === null || raw === undefined ? "" : raw).trim();
+  if (s === "") {
+    throw new Error("Température " + label + " : choisissez une valeur.");
+  }
   const n = tempParseNumber(raw);
   if (n === null) {
     throw new Error("Température " + label + " : valeur non numérique.");
@@ -84,7 +114,12 @@ function tempSave(bassinRaw, lacRaw) {
   sh.getRange(TEMP_CFG.LAC_CELL).setValue(lac);
   SpreadsheetApp.flush();
 
-  return { bassin: bassin, lac: lac };
+  // The save date is what the print gate reads. Write it only after both
+  // cells are written, so a failed write never opens the gate.
+  const today = tempToday();
+  PropertiesService.getScriptProperties().setProperty(TEMP_CFG.SAVED_PROP, today);
+
+  return { bassin: bassin, lac: lac, savedDate: today };
 }
 
 /**
@@ -144,6 +179,26 @@ function tempBuildPdf() {
   return tempFetchPdf(url, "Stock_poisson");
 }
 
+/**
+ * The Stock poisson print, as called by the Impressions screen.
+ *
+ * The temperatures must be saved on the same calendar day. That is the
+ * whole purpose of the gate: the printed sheet carries a water
+ * temperature, so that temperature must be today's reading.
+ *
+ * The build stays in tempBuildPdf, with no gate, so that
+ * testTemperaturesServer proves the export on any day.
+ */
+function tempPrintStockPdf() {
+  if (tempSavedDate() !== tempToday()) {
+    throw new Error(
+      "Températures pas à jour. Enregistrez la température bassin et la " +
+      "température lac aujourd'hui, avant d'imprimer le stock poisson."
+    );
+  }
+  return tempBuildPdf();
+}
+
 /** The Programme "planning" sheet. Throws if it is missing. */
 function tempProgrammeSheet() {
   const sh = SpreadsheetApp
@@ -201,6 +256,10 @@ function testTemperaturesServer() {
 
   const cur = tempGetCurrent();
   Logger.log("Valeurs lues — bassin : " + cur.bassin + " · lac : " + cur.lac);
+
+  Logger.log("Dernière saisie température : " + (tempSavedDate() || "(aucune)") +
+             " · aujourd'hui : " + tempToday() +
+             " · impression autorisée : " + (tempSavedDate() === tempToday()));
 
   const pdf = tempBuildPdf();
   Logger.log("PDF Stock poisson construit : " + pdf.size + " octets · " + pdf.filename);

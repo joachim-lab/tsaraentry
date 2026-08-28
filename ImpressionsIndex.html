@@ -39,6 +39,7 @@
   <h2>Températures</h2>
   <div id="tempLoading" class="note">Chargement…</div>
   <div id="tempForm" style="display:none">
+    <div id="lastTemp" class="note"></div>
     <label for="bassin">Température bassin</label>
     <select id="bassin"></select>
 
@@ -149,13 +150,29 @@
       el('back').href = url;
     }).getWebAppUrl();
 
+    /** "2026-08-27" -> "27/08". Anything else -> "". */
+    function shortDate(iso) {
+      var p = String(iso || '').split('-');
+      return p.length === 3 ? p[2] + '/' + p[1] : '';
+    }
+
+    /** The read-only reminder of what the sheet holds now. */
+    function showLastTemp(bassin, lac, savedDate) {
+      var d = shortDate(savedDate);
+      el('lastTemp').textContent =
+        'Dernière saisie : bassin ' + (bassin || '—') + ' °C · lac ' +
+        (lac || '—') + ' °C' + (d ? ' (' + d + ')' : ' (date inconnue)');
+    }
+
     google.script.run
       .withSuccessHandler(function (cur) {
-        // Fill and preselect in one step. A value already in R1/T1 that
-        // is not in the list (a decimal, or below 21) stays unselected,
-        // so the worker must choose a valid one before saving.
-        el('bassin').innerHTML = tsaraOptionsHtml('temp', cur.bassin);
-        el('lac').innerHTML = tsaraOptionsHtml('temp', cur.lac);
+        // NO preselect. Both lists open on "-- choisir --", so the worker
+        // must read the thermometer and choose both values before the
+        // Stock poisson print is allowed. The stored values stay visible
+        // as text above the lists.
+        el('bassin').innerHTML = tsaraOptionsHtml('temp', '');
+        el('lac').innerHTML = tsaraOptionsHtml('temp', '');
+        showLastTemp(cur.bassin, cur.lac, cur.savedDate);
         hide('tempLoading');
         el('tempForm').style.display = 'block';
       })
@@ -172,6 +189,7 @@
         .withSuccessHandler(function (r) {
           el('save').disabled = false;
           el('save').textContent = 'Enregistrer';
+          showLastTemp(r.bassin, r.lac, r.savedDate);
           show('saveMsg', 'Enregistré — bassin ' + r.bassin + ' °C · lac ' + r.lac + ' °C', 'ok');
         })
         .withFailureHandler(function (e) {
@@ -184,7 +202,7 @@
 
     wirePrint('printStock', 'pdfLinkStock', 'printStockMsg', 'stock',
       'Imprimer stock poisson', function (ok, fail) {
-        google.script.run.withSuccessHandler(ok).withFailureHandler(fail).tempBuildPdf();
+        google.script.run.withSuccessHandler(ok).withFailureHandler(fail).tempPrintStockPdf();
       });
 
     wirePrint('printProgramme', 'pdfLinkProgramme', 'printProgrammeMsg', 'programme',
