@@ -14,13 +14,13 @@
  *   row 2 = Bassin, row 3 = Happa, row 4 = Temperature de l'eau.
  *
  * The gross-harvest fields (Bassin/Cage, Happa/Carre/Rond) are NOT
- * in this map. They are built by grossField, they accept cage
- * values, and they stay free text.
+ * in this map. grossField reads the bassin and happa lists by
+ * name, so it shows the same values as the mapped fields.
  ***************************************************************/
 var TSARA_LISTS = {
   temp: (function () { var a = []; for (var i = 21; i <= 40; i++) a.push(String(i)); return a; })(),
   bassin: (function () { var a = []; for (var i = 1; i <= 10; i++) a.push(String(i)); return a; })(),
-  happa: ['A', 'B', 'C', 'L']
+  happa: ['A', 'B', 'C', 'L', 'Carré', 'Rond']
 };
 
 var TSARA_FIELD_LIST = {
@@ -55,7 +55,7 @@ function tsaraOptionsHtml(kind, current) {
   var html = '<option value="">-- choisir --</option>';
   for (var i = 0; i < values.length; i++) {
     var v = values[i];
-    html += '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + v + '</option>';
+    html += '<option value="' + v + '"' + (tsaraNorm(v) === cur ? ' selected' : '') + '>' + v + '</option>';
   }
   return html;
 }

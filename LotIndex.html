@@ -397,6 +397,18 @@
 
     function grossField(col, key, label, value, type, locked) {
       let v = (value === null || value === undefined) ? '' : value;
+
+      // Bassin/Cage and Happa/Carre/Rond come from the shared lists in
+      // Lists.html. The <select> carries data-gross-col and data-gross-key
+      // like the input it replaces, so no collector needs a change. A
+      // disabled select still exposes .value to those collectors.
+      if (key === 'bassin' || key === 'happa') {
+        return '<label>' + esc(label) + '</label>' +
+          '<select data-gross-col="' + col + '" data-gross-key="' + key + '"' +
+          (locked ? ' disabled' : '') + '>' +
+          tsaraOptionsHtml(key, v) + '</select>';
+      }
+
       const t = type || 'number';
       if (t === 'number' && v !== '') { const p = num(v); if (p !== null) v = p; }
       return '<label>' + esc(label) + '</label>' +
