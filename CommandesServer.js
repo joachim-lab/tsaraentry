@@ -366,11 +366,15 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
     // than reporting a search that found nothing.
     if (delivered && paid) { closedMatches++; continue; }
 
-    const both = (wantDeliveredUnpaid === wantUndelivered);   // both or neither
-    if (!both) {
-      if (wantDeliveredUnpaid && !delivered) continue;
-      if (wantUndelivered && delivered) continue;
-    }
+    // Each box INCLUDES a category. Fully closed orders (delivered and
+    // paid) were already dropped above, so "delivered" here always means
+    // delivered-and-unpaid. The two categories are therefore disjoint
+    // and together cover every open order: both ticked = the whole list.
+    // Nothing ticked selects nothing, and the client says so - it must
+    // not silently fall back to showing everything.
+    const keep = (wantDeliveredUnpaid && delivered) ||
+                 (wantUndelivered && !delivered);
+    if (!keep) continue;
 
     out.push(g);
     if (out.length >= 25) break;

@@ -1347,9 +1347,9 @@
           '<div style="flex:0 0 220px"><label>&nbsp;</label>' +
             '<button class="primary" style="width:100%" onclick="doSearch()">Rechercher</button></div>' +
         '</div>' +
-        '<label style="font-weight:normal"><input type="checkbox" id="fDeliveredUnpaid" style="width:auto"> ' +
+        '<label style="font-weight:normal"><input type="checkbox" id="fDeliveredUnpaid" checked style="width:auto"> ' +
           'Commandes livrées et non-payées</label>' +
-        '<label style="font-weight:normal"><input type="checkbox" id="fUndelivered" style="width:auto"> ' +
+        '<label style="font-weight:normal"><input type="checkbox" id="fUndelivered" checked style="width:auto"> ' +
           'Commandes non-livrées</label>' +
       '</div>' +
       '<div id="fulForm"></div>' +
@@ -1376,6 +1376,26 @@
    * doSearch() is wiped by this function's own status updates before
    * the user can read it.
    */
+  /** Montant in Ar, thousands-spaced. '—' when there is nothing. */
+  function fmtAr(v) {
+    const n = Number(v || 0);
+    if (!isFinite(n) || n === 0) return '—';
+    return fmtNum(n) + ' Ar';
+  }
+
+  /** Quantity of one order: alevins as a count, poisson in kg. Both are
+   *  shown when an order carries both, which a multi-lot order can. */
+  function hitQty(o) {
+    const bits = [];
+    if (Number(o.alevinsTotal || 0) > 0) {
+      bits.push(fmtNum(Number(o.alevinsTotal)) + ' alevins');
+    }
+    if (Number(o.poissonKgTotal || 0) > 0) {
+      bits.push(fmtNum(Number(o.poissonKgTotal)) + ' kg');
+    }
+    return bits.length ? ' · ' + esc(bits.join(' + ')) : '';
+  }
+
   function doSearch(keepMsg) {
     setStatus('banner', 'Recherche…');
     el('fulForm').innerHTML = '';
@@ -1384,18 +1404,24 @@
       .withSuccessHandler(res => {
         hits = res.orders;
         if (keepMsg) setStatusAndScroll(keepMsg.cls, keepMsg.html); else setStatus('', '');
-        const empty = res.closedMatches > 0
-          ? (res.closedMatches === 1
-              ? 'Commande livrée et payée.'
-              : res.closedMatches + ' commandes livrées et payées.')
-          : 'Aucune commande trouvée.';
+        // Nothing ticked selects nothing. Said plainly, because an
+        // empty list with no explanation reads as a broken search.
+        const empty = (!el('fDeliveredUnpaid').checked && !el('fUndelivered').checked)
+          ? 'Cocher au moins une case pour afficher des commandes.'
+          : (res.closedMatches > 0
+              ? (res.closedMatches === 1
+                  ? 'Commande livrée et payée.'
+                  : res.closedMatches + ' commandes livrées et payées.')
+              : 'Aucune commande trouvée.');
         el('hits').innerHTML = hits.length
           ? hits.map(o =>
               '<div class="hit" id="hit_'+esc(o.key)+'" data-key="'+esc(o.key)+'">' +
                 '<b>' + esc(o.orderNumber || '(sans numéro)') + '</b> · ' + esc(o.client) +
                 '<div class="muted">' + esc(o.dateCommande) + ' · lots : ' + esc(o.lots.join(', ') || '—') +
+                hitQty(o) +
                 (o.dateLivraison ? ' · livrée le ' + esc(o.dateLivraison) : ' · non livrée') +
-                (o.paiement ? ' · payée le ' + esc(o.paiement) : ' · non payée') + '</div>' +
+                (o.paiement ? ' · payée le ' + esc(o.paiement) : ' · non payée') +
+                ' · <b>' + fmtAr(o.montantAr) + '</b></div>' +
               '</div>').join('')
           : '<div class="warn">' + esc(empty) + '</div>';
       })
