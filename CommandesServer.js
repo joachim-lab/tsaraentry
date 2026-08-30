@@ -1703,3 +1703,156 @@ function buildAvailMap() {
   }
   return out;
 }
+
+
+/***************************************************************
+ * PRE-COMMANDE AVAILABILITY MAIL (2026-08-30)
+ *
+ * Once a night: run demCheckStock, and mail the pré-commandes that
+ * became servable SINCE THE LAST RUN. No flip, no mail.
+ *
+ * HOUR 7, one hour after refreshNotSellableMap at 6. demCheckStock
+ * reads that map, so running before it would judge against yesterday's
+ * "pas encore vendable" list. Both run after the engine (~04:53).
+ *
+ * IDENTITY IS NOT THE ROW NUMBER. Rows shift the moment anyone deletes
+ * a pré-commande, and a shifted row would look like a new one. The
+ * signature is client|contact|type|nombre|poids, which is what the
+ * farm actually means by "the same demande".
+ *
+ * THE STORED SET IS REPLACED, not merged: it holds exactly the
+ * pré-commandes servable at the end of the last run. A demande that
+ * becomes servable, then stops (the fish were sold), then becomes
+ * servable again is mailed again - correct, that is news each time.
+ *
+ * ADVISORY, like the screen. Stock Poisson can lag the lot files by
+ * up to 24 h, and the allocation is amount-only: weight is ignored by
+ * decision, so a 0,5 g demande can be flagged on 5 g fish. The mail
+ * says "à vérifier", never "confirmé".
+ *
+ * FAILURE IS SILENT BY DESIGN in one direction only: if the mail
+ * throws, the stored set is NOT updated, so the next run retries the
+ * same flips instead of losing them.
+ ***************************************************************/
+
+const DEM_MAIL_TO = "joachim@jdsresearch.com";
+const DEM_MAIL_PROP_KEY = "dem_servable_v1";
+const DEM_MAIL_TRIGGER_HOUR = 7;   // after refreshNotSellableMap at 6
+
+/** Stable identity for one pré-commande. Row numbers shift; this does not. */
+function demSignature(d) {
+  return [d.client, d.contact, d.type, d.nombre, d.poids].join("|");
+}
+
+/** The set of signatures servable at the end of the last run. */
+function demGetNotified() {
+  const raw = PropertiesService.getScriptProperties().getProperty(DEM_MAIL_PROP_KEY);
+  return raw ? JSON.parse(raw) : {};
+}
+
+/**
+ * RUN BY TRIGGER, and safe to run from the editor.
+ * tsaraentry -> CommandesServer.js -> demNotifyServable
+ * Mails the new flips, then stores the current servable set.
+ */
+function demNotifyServable() {
+  const check = demCheckStock();
+  const rows = demList();
+  const byRow = {};
+  rows.forEach(function (d) { byRow[d.row] = d; });
+
+  const known = demGetNotified();
+  const current = {};
+  const fresh = [];
+  check.rows.forEach(function (v) {
+    if (!v.ok) return;
+    const d = byRow[v.row];
+    if (!d) return;
+    const sig = demSignature(d);
+    current[sig] = true;
+    if (!known[sig]) fresh.push(d);
+  });
+
+  Logger.log("Servables : " + Object.keys(current).length +
+             "   nouvelles : " + fresh.length);
+
+  if (fresh.length) {
+    var body = "Ces pré-commandes peuvent maintenant être servies :\n\n";
+    fresh.forEach(function (d) {
+      body += "  • " + d.client + "  (" + d.contact + ")\n" +
+              "    " + d.nombre + " " + d.type + " de " + d.poids + " g\n" +
+              (d.commentaires ? "    " + d.commentaires + "\n" : "") +
+              "    demandé le " + d.date + "\n\n";
+    });
+    body += "Stock disponible : Alevins " + check.pool.Alevins +
+            "  —  Poisson " + check.pool.Poisson + "\n\n" +
+            "À VÉRIFIER avant de confirmer au client :\n" +
+            "  - le contrôle porte sur le NOMBRE seulement, pas sur le poids\n" +
+            "  - Stock Poisson peut avoir jusqu'à 24 h de retard\n" +
+            "  - le contrôle définitif se fait à l'enregistrement de la commande\n\n" +
+            "Onglet Pré-commandes de l'écran Commandes pour les traiter.";
+
+    // Mail first, store second. A throw here leaves the stored set
+    // untouched, so the next run retries these flips.
+    MailApp.sendEmail(DEM_MAIL_TO,
+      "Tsara — " + fresh.length + " pré-commande(s) disponible(s)", body);
+    Logger.log("Mail envoyé à " + DEM_MAIL_TO);
+  }
+
+  PropertiesService.getScriptProperties()
+    .setProperty(DEM_MAIL_PROP_KEY, JSON.stringify(current));
+  return { servable: Object.keys(current).length, nouvelles: fresh.length };
+}
+
+/**
+ * RUN FROM EDITOR ONCE. Installs the nightly mail trigger.
+ * Deletes any existing trigger for the same handler first, so running
+ * it twice cannot leave two triggers mailing the same flips.
+ */
+function installDemNotifyTrigger() {
+  var removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === "demNotifyServable") {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  ScriptApp.newTrigger("demNotifyServable")
+    .timeBased()
+    .everyDays(1)
+    .atHour(DEM_MAIL_TRIGGER_HOUR)
+    .create();
+  Logger.log("Anciens déclencheurs supprimés : " + removed);
+  Logger.log("Déclencheur quotidien installé vers " + DEM_MAIL_TRIGGER_HOUR + " h.");
+}
+
+/** RUN FROM EDITOR: what the next mail would contain. Sends NOTHING,
+ *  stores NOTHING. Use this before installing the trigger. */
+function testDemNotify() {
+  const check = demCheckStock();
+  const rows = demList();
+  const byRow = {};
+  rows.forEach(function (d) { byRow[d.row] = d; });
+  const known = demGetNotified();
+  Logger.log("Déjà notifiées : " + Object.keys(known).length);
+  Logger.log("Pool Alevins=" + check.pool.Alevins + "  Poisson=" + check.pool.Poisson);
+  var n = 0;
+  check.rows.forEach(function (v) {
+    if (!v.ok) return;
+    const d = byRow[v.row];
+    if (!d) return;
+    const sig = demSignature(d);
+    const tag = known[sig] ? "déjà notifiée" : ">>> NOUVELLE - serait dans le mail";
+    Logger.log("  " + d.client + "  " + d.nombre + " " + d.type +
+               " " + d.poids + " g   " + tag);
+    if (!known[sig]) n++;
+  });
+  Logger.log("Le mail contiendrait " + n + " ligne(s).");
+}
+
+/** RUN FROM EDITOR: forget every notification, so the next run mails
+ *  every servable pré-commande again. Use after testing. */
+function resetDemNotified() {
+  PropertiesService.getScriptProperties().deleteProperty(DEM_MAIL_PROP_KEY);
+  Logger.log("Historique des notifications effacé.");
+}
