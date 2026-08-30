@@ -1371,3 +1371,167 @@ function testReservations() {
                (r.note ? "   — " + r.note : ""));
   });
 }
+
+
+/***************************************************************
+ * PRE-COMMANDES - fourth tab on the Commandes screen.
+ *
+ * The Demandes tab lives in the SAME spreadsheet as the orders
+ * (CMD_CFG.SS_ID). Row 1 = title, row 2 = headers, data from row 3.
+ * Columns: A=date, B=client, C=contact, D=type (Alevins|Poisson),
+ * E=nombre, F=commentaires, G=poids (g).
+ * Column G was appended 2026-08-30. Legacy rows have it empty; an
+ * edit of such a row must fill it before it saves.
+ *
+ * These are requests the farm cannot serve yet. NOTHING else reads
+ * this tab - no engine, no other project. The Commander button on the
+ * client prefills the Nouvelle commande form; after that order saves,
+ * the client calls demDelete for the source row.
+ *
+ * ALL FIELDS MANDATORY except commentaires. The client checks first
+ * for an instant message; this server check is the authority.
+ *
+ * POIDS: Alevins must use one of DEM_POIDS_AL (the UI dropdown).
+ * Poisson takes any positive number of grams (free field).
+ *
+ * ROW NUMBERS ARE THE HANDLE, as in Réservations: every write
+ * re-reads the row and compares client+contact against what the
+ * browser last saw. Mismatch = stale screen, refuse.
+ *
+ * FUTURE (not built): nightly check of poids x nombre against stock,
+ * e-mail when a pre-commande becomes servable. The numeric poids and
+ * nombre columns exist for that purpose - keep them numeric.
+ ***************************************************************/
+
+const DEM_SHEET = "Demandes";
+const DEM_START = 3;                       // row 1 = title, row 2 = headers
+const DEM_TYPES = ["Alevins", "Poisson"];
+const DEM_POIDS_AL = [0.5, 1, 1.5, 2, 3, 4, 5, 10];
+
+function demSheet() {
+  const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
+  const sh = ss.getSheetByName(DEM_SHEET);
+  if (!sh) throw new Error('Onglet introuvable: "' + DEM_SHEET + '"');
+  return sh;
+}
+
+/** Every pre-commande, in sheet order. row is the handle for edit,
+ *  delete and Commander. Fully empty rows are skipped, part-filled
+ *  legacy rows are kept and shown as they are. */
+function demList() {
+  const sh = demSheet();
+  const lastRow = sh.getLastRow();
+  if (lastRow < DEM_START) return [];
+  const vals = sh.getRange(DEM_START, 1, lastRow - DEM_START + 1, 7).getValues();
+  const tz = Session.getScriptTimeZone();
+  const out = [];
+  for (var i = 0; i < vals.length; i++) {
+    var empty = true;
+    for (var j = 0; j < 7; j++) {
+      if (vals[i][j] !== "" && vals[i][j] != null) { empty = false; break; }
+    }
+    if (empty) continue;
+    const d = vals[i][0];
+    out.push({
+      row: DEM_START + i,
+      date: (d instanceof Date) ? Utilities.formatDate(d, tz, "yyyy-MM-dd")
+                                : String(d == null ? "" : d).trim(),
+      client: String(vals[i][1] == null ? "" : vals[i][1]).trim(),
+      contact: String(vals[i][2] == null ? "" : vals[i][2]).trim(),
+      type: String(vals[i][3] == null ? "" : vals[i][3]).trim(),
+      nombre: cmdToNum(vals[i][4]),
+      commentaires: String(vals[i][5] == null ? "" : vals[i][5]).trim(),
+      poids: cmdToNum(vals[i][6])
+    });
+  }
+  return out;
+}
+
+/** Validate one payload and return cleaned values, or throw. */
+function demClean(p) {
+  const dateStr = String(p && p.date != null ? p.date : "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) throw new Error("Date requise.");
+
+  const client = String(p && p.client != null ? p.client : "").trim();
+  if (!client) throw new Error("Client requis.");
+
+  const contact = String(p && p.contact != null ? p.contact : "").trim();
+  if (!contact) throw new Error("Contact requis.");
+
+  const type = String(p && p.type != null ? p.type : "").trim();
+  if (DEM_TYPES.indexOf(type) < 0) throw new Error("Type invalide : " + type);
+
+  var nombre = cmdToNum(p.nombre);
+  if (nombre == null || nombre <= 0) throw new Error("Nombre requis (entier positif).");
+  nombre = Math.round(nombre);
+
+  const poids = cmdToNum(p.poids);
+  if (poids == null || poids <= 0) throw new Error("Poids requis (grammes).");
+  if (type === "Alevins" && DEM_POIDS_AL.indexOf(poids) < 0) {
+    throw new Error("Poids alevins invalide : " + poids + " g. Choisir dans la liste.");
+  }
+
+  const m = dateStr.split("-");
+  return {
+    date: new Date(Number(m[0]), Number(m[1]) - 1, Number(m[2])),
+    client: client,
+    contact: contact,
+    type: type,
+    nombre: nombre,
+    commentaires: String(p && p.commentaires != null ? p.commentaires : "").trim(),
+    poids: poids
+  };
+}
+
+/** The row must still hold the client+contact the browser last saw. */
+function demCheckRow(sh, row, seenClient, seenContact) {
+  if (!(row >= DEM_START)) throw new Error("Ligne invalide.");
+  if (row > sh.getLastRow()) throw new Error("Ligne introuvable — recharger l'écran.");
+  const v = sh.getRange(row, 2, 1, 2).getValues()[0];
+  const client = String(v[0] == null ? "" : v[0]).trim();
+  const contact = String(v[1] == null ? "" : v[1]).trim();
+  if (client !== String(seenClient == null ? "" : seenClient).trim() ||
+      contact !== String(seenContact == null ? "" : seenContact).trim()) {
+    throw new Error("La liste a changé depuis l'affichage. Recharger l'écran.");
+  }
+}
+
+function demAdd(p) {
+  const c = demClean(p);
+  const sh = demSheet();
+  const row = Math.max(sh.getLastRow() + 1, DEM_START);
+  sh.getRange(row, 1, 1, 7).setValues(
+    [[c.date, c.client, c.contact, c.type, c.nombre, c.commentaires, c.poids]]);
+  return { row: row };
+}
+
+function demUpdate(p) {
+  const row = Number(p && p.row);
+  const sh = demSheet();
+  demCheckRow(sh, row, p && p.seenClient, p && p.seenContact);
+  const c = demClean(p);
+  sh.getRange(row, 1, 1, 7).setValues(
+    [[c.date, c.client, c.contact, c.type, c.nombre, c.commentaires, c.poids]]);
+  return { row: row };
+}
+
+function demDelete(p) {
+  const row = Number(p && p.row);
+  const sh = demSheet();
+  demCheckRow(sh, row, p && p.seenClient, p && p.seenContact);
+  sh.deleteRow(row);
+  return { row: row };
+}
+
+/** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> testDemandes
+ *  Read-only. Prints every pre-commande with its row handle. */
+function testDemandes() {
+  const rows = demList();
+  Logger.log("Pré-commandes : " + rows.length);
+  rows.forEach(function (r) {
+    Logger.log("  ligne " + r.row + "   " + r.date + "   " + r.client +
+               "   " + r.contact + "   " + r.type +
+               "   n=" + r.nombre + "   p=" + r.poids + " g" +
+               (r.commentaires ? "   — " + r.commentaires : ""));
+  });
+}

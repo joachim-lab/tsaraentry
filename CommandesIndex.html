@@ -67,12 +67,14 @@
     <div class="tab active" id="tabNew" onclick="switchMode('new')">Nouvelle commande</div>
     <div class="tab" id="tabFul" onclick="switchMode('ful')">Paiement &amp; livraison</div>
     <div class="tab" id="tabRes" onclick="switchMode('res')">R&eacute;servations</div>
+    <div class="tab" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
   </div>
 
   <div id="status"></div>
   <div id="paneNew"></div>
   <div id="paneFul" style="display:none"></div>
   <div id="paneRes" style="display:none"></div>
+  <div id="paneDem" style="display:none"></div>
 
 <script>
 
@@ -154,14 +156,19 @@
     el('tabNew').className = 'tab' + (m === 'new' ? ' active' : '');
     el('tabFul').className = 'tab' + (m === 'ful' ? ' active' : '');
     el('tabRes').className = 'tab' + (m === 'res' ? ' active' : '');
+    el('tabDem').className = 'tab' + (m === 'dem' ? ' active' : '');
     el('paneNew').style.display = (m === 'new' ? '' : 'none');
     el('paneFul').style.display = (m === 'ful' ? '' : 'none');
     el('paneRes').style.display = (m === 'res' ? '' : 'none');
+    el('paneDem').style.display = (m === 'dem' ? '' : 'none');
     setStatus('', '');
     if (m === 'ful' && !el('ficherche')) renderFul();
     // Rebuilt on every visit, never cached: the tab is shared and a stale
     // list is exactly what would let two people fight over one hold.
     if (m === 'res') renderRes();
+    if (m === 'dem') renderDem();
+    // Leaving the order form abandons any pending Commander hand-off.
+    if (m !== 'new') pendingDem = null;
   }
 
   // ---------- MODE C: réservations ----------
@@ -326,6 +333,267 @@
         setStatusAndScroll('err', esc(e.message));
       })
       .resDelete({ row: row, seenLot: cur ? cur.lot : '' });
+  }
+
+  // ---------- MODE D: pré-commandes ----------
+  //
+  // Demandes the farm cannot serve yet. Same pattern as Réservations:
+  // list + form, row-number handles, deletion arms on the first click
+  // and acts on the second. Commander prefills the Nouvelle commande
+  // form and jumps there; the source row is deleted only after that
+  // order SAVES (demAfterOrder), so abandoning costs nothing.
+  //
+  // All fields mandatory except Commentaires. Poids: dropdown for
+  // Alevins, free grams field for Poisson. Server re-checks everything.
+
+  const DEM_POIDS_AL = ['0.5', '1', '1.5', '2', '3', '4', '5', '10'];
+
+  let demRows = [];    // last list from the server
+  let demEdit = 0;     // row being edited; 0 = adding
+  let demArmed = 0;    // row armed for deletion; 0 = none
+
+  // Set by demCommander, cleared when the user leaves the order tab.
+  let pendingDem = null;
+
+  function renderDem() {
+    el('paneDem').innerHTML =
+      '<div id="demList">Chargement…</div>' +
+      '<div id="demForm"></div>';
+    loadDem();
+  }
+
+  function loadDem() {
+    google.script.run
+      .withSuccessHandler(function (rows) {
+        demRows = rows; demArmed = 0; drawDemList(); drawDemForm();
+      })
+      .withFailureHandler(function (e) {
+        el('demList').innerHTML = '<div class="err">Erreur : ' + esc(e.message) + '</div>';
+      })
+      .demList();
+  }
+
+  function drawDemList() {
+    if (!demRows.length) {
+      el('demList').innerHTML = '<div class="warn">Aucune pré-commande.</div>';
+      return;
+    }
+    var h = '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
+      '<tr style="text-align:left;border-bottom:2px solid #dadce0">' +
+      '<th style="padding:6px 8px">Date</th>' +
+      '<th style="padding:6px 8px">Client</th>' +
+      '<th style="padding:6px 8px">Contact</th>' +
+      '<th style="padding:6px 8px">Type</th>' +
+      '<th style="padding:6px 8px">Nombre</th>' +
+      '<th style="padding:6px 8px">Poids (g)</th>' +
+      '<th style="padding:6px 8px">Commentaires</th>' +
+      '<th style="padding:6px 8px"></th></tr>';
+    demRows.forEach(function (r) {
+      var armed = (demArmed === r.row);
+      h += '<tr style="border-bottom:1px solid #e8eaed">' +
+        '<td style="padding:6px 8px">' + esc(r.date) + '</td>' +
+        '<td style="padding:6px 8px"><b>' + esc(r.client) + '</b></td>' +
+        '<td style="padding:6px 8px">' + esc(r.contact) + '</td>' +
+        '<td style="padding:6px 8px">' + esc(r.type) + '</td>' +
+        '<td style="padding:6px 8px">' + (r.nombre == null ? '' : fmtNum(r.nombre)) + '</td>' +
+        '<td style="padding:6px 8px">' + (r.poids == null ? '' : esc(r.poids)) + '</td>' +
+        '<td style="padding:6px 8px">' + esc(r.commentaires) + '</td>' +
+        '<td style="padding:6px 8px;white-space:nowrap">' +
+          '<button onclick="demCommander(' + r.row + ')">Commander</button> ' +
+          '<button onclick="demStartEdit(' + r.row + ')">Modifier</button> ' +
+          '<button onclick="demAskDelete(' + r.row + ')"' +
+            (armed ? ' style="background:#d93025;color:#fff;border-color:#d93025"' : '') +
+            '>' + (armed ? 'Confirmer — définitif' : 'Supprimer') + '</button>' +
+        '</td></tr>';
+    });
+    el('demList').innerHTML = h + '</table>';
+  }
+
+  function drawDemForm() {
+    var cur = null;
+    demRows.forEach(function (r) { if (r.row === demEdit) cur = r; });
+    if (demEdit && !cur) demEdit = 0;          // row vanished under us
+
+    var type = cur ? cur.type : 'Alevins';
+    el('demForm').innerHTML =
+      '<h3 style="margin:0 0 10px">' +
+        (demEdit ? 'Modifier la pré-commande' : 'Nouvelle pré-commande') +
+      '</h3>' +
+      '<div style="margin-bottom:10px"><label>Date<br>' +
+        '<input id="dDate" type="date" value="' +
+        esc(cur && cur.date ? cur.date : todayISO()) + '"></label></div>' +
+      '<div style="margin-bottom:10px"><label>Client<br>' +
+        '<input id="dClient" type="text" size="30" value="' + esc(cur ? cur.client : '') + '"></label></div>' +
+      '<div style="margin-bottom:10px"><label>Contact<br>' +
+        '<input id="dContact" type="text" size="30" value="' + esc(cur ? cur.contact : '') + '"></label></div>' +
+      '<div style="margin-bottom:10px"><label>Type<br>' +
+        '<select id="dType" onchange="demTypeChanged()">' +
+        '<option value="Alevins"' + (type === 'Alevins' ? ' selected' : '') + '>Alevins</option>' +
+        '<option value="Poisson"' + (type === 'Poisson' ? ' selected' : '') + '>Poisson</option>' +
+        '</select></label></div>' +
+      '<div style="margin-bottom:10px"><label>Nombre<br>' +
+        '<input id="dNombre" type="number" min="1" step="1" value="' +
+        (cur && cur.nombre != null ? cur.nombre : '') + '"></label></div>' +
+      '<div style="margin-bottom:10px" id="dPoidsWrap"></div>' +
+      '<div style="margin-bottom:12px"><label>Commentaires (facultatif)<br>' +
+        '<input id="dComm" type="text" size="50" value="' + esc(cur ? cur.commentaires : '') + '"></label></div>' +
+      '<button onclick="demSave()">' + (demEdit ? 'Enregistrer' : 'Ajouter') + '</button>' +
+      (demEdit ? ' <button onclick="demCancelEdit()">Annuler</button>' : '');
+    demTypeChanged();
+  }
+
+  /** Alevins: fixed dropdown. Poisson: free grams field. */
+  function demTypeChanged() {
+    var cur = null;
+    demRows.forEach(function (r) { if (r.row === demEdit) cur = r; });
+    var poids = (cur && cur.poids != null) ? String(cur.poids) : '';
+    var w = el('dPoidsWrap');
+    if (el('dType').value === 'Alevins') {
+      var opts = '<option value="">— choisir —</option>';
+      DEM_POIDS_AL.forEach(function (v) {
+        opts += '<option value="' + v + '"' + (poids === v ? ' selected' : '') + '>' + v + '</option>';
+      });
+      w.innerHTML = '<label>Poids (g)<br><select id="dPoids">' + opts + '</select></label>';
+    } else {
+      w.innerHTML = '<label>Poids (g)<br>' +
+        '<input id="dPoids" type="number" min="1" step="any" value="' + esc(poids) + '"></label>';
+    }
+  }
+
+  function demStartEdit(row) {
+    demEdit = row; demArmed = 0;
+    drawDemList(); drawDemForm();
+  }
+
+  function demCancelEdit() {
+    demEdit = 0; drawDemForm();
+  }
+
+  function demSave() {
+    var p = {
+      date: el('dDate').value,
+      client: el('dClient').value.trim(),
+      contact: el('dContact').value.trim(),
+      type: el('dType').value,
+      nombre: el('dNombre').value,
+      commentaires: el('dComm').value,
+      poids: el('dPoids') ? el('dPoids').value : ''
+    };
+    // All fields mandatory except Commentaires. The server re-checks;
+    // this check exists so the refusal is instant and names the fields.
+    var missing = [];
+    if (!p.date) missing.push('Date');
+    if (!p.client) missing.push('Client');
+    if (!p.contact) missing.push('Contact');
+    if (num(p.nombre) === null || !(num(p.nombre) > 0)) missing.push('Nombre');
+    if (num(p.poids) === null || !(num(p.poids) > 0)) missing.push('Poids (g)');
+    if (missing.length) {
+      setStatusAndScroll('err',
+        'Pré-commande NON enregistrée — remplir : ' + missing.join(', ') + '.');
+      return;
+    }
+    setStatus('banner', 'Enregistrement…');
+    if (demEdit) {
+      var cur = null;
+      demRows.forEach(function (r) { if (r.row === demEdit) cur = r; });
+      p.row = demEdit;
+      p.seenClient = cur ? cur.client : '';
+      p.seenContact = cur ? cur.contact : '';
+      google.script.run
+        .withSuccessHandler(function () {
+          demEdit = 0;
+          setStatusAndScroll('ok', 'Pré-commande modifiée.');
+          loadDem();
+        })
+        .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+        .demUpdate(p);
+    } else {
+      google.script.run
+        .withSuccessHandler(function () {
+          setStatusAndScroll('ok', 'Pré-commande ajoutée.');
+          loadDem();
+        })
+        .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+        .demAdd(p);
+    }
+  }
+
+  function demAskDelete(row) {
+    if (demArmed !== row) { demArmed = row; drawDemList(); return; }
+    var cur = null;
+    demRows.forEach(function (r) { if (r.row === row) cur = r; });
+    setStatus('banner', 'Suppression…');
+    google.script.run
+      .withSuccessHandler(function () {
+        setStatusAndScroll('ok', 'Pré-commande supprimée.');
+        loadDem();
+      })
+      .withFailureHandler(function (e) {
+        demArmed = 0; drawDemList();
+        setStatusAndScroll('err', esc(e.message));
+      })
+      .demDelete({ row: row, seenClient: cur ? cur.client : '', seenContact: cur ? cur.contact : '' });
+  }
+
+  /**
+   * Hand one pré-commande to the order form. Client, contact, type and
+   * remarques are prefilled; for Alevins the first line also gets the
+   * nombre, the +5% livrer default and the poids as PM. Picking a lot
+   * may overwrite that PM with the lot's real PM - correct: the desired
+   * weight stays in the Remarques.
+   */
+  function demCommander(row) {
+    var cur = null;
+    demRows.forEach(function (r) { if (r.row === row) cur = r; });
+    if (!cur) return;
+    if (cur.nombre == null || cur.poids == null) {
+      setStatusAndScroll('err',
+        'Pré-commande incomplète (nombre ou poids manquant) — la modifier d’abord.');
+      return;
+    }
+    var wantAL = (cur.type === 'Alevins');
+    var typeVal = '';
+    OPTS.types.forEach(function (t) {
+      var k = String(t).trim().toUpperCase();
+      if (k.indexOf('GROUP') !== -1) return;
+      if (wantAL && k.indexOf('AL') === 0) typeVal = t;
+      if (!wantAL && k.indexOf('GR') === 0) typeVal = t;
+    });
+    switchMode('new');
+    pendingDem = { row: cur.row, client: cur.client, contact: cur.contact };
+    el('fType').value = typeVal;
+    lines = wantAL
+      ? [{ alevinsNb: cur.nombre, alevinsPm: cur.poids,
+           alevinsLivrer: Math.round(cur.nombre * 1.05) }]
+      : [{}];
+    renderLines();
+    el('fClient').value = cur.client;
+    el('fContact').value = cur.contact;
+    el('fRemarques').value = 'Pré-commande ' + cur.poids + ' g' +
+      (cur.commentaires ? ' — ' + cur.commentaires : '');
+    setStatusAndScroll('banner', 'Pré-commande de <b>' + esc(cur.client) +
+      '</b> chargée — choisir le lot puis Enregistrer la commande.');
+  }
+
+  /**
+   * After a successful order save: delete the source pré-commande, but
+   * ONLY if the saved client still matches. A user who abandons the
+   * hand-off and types an unrelated order must not delete the demande.
+   */
+  function demAfterOrder(payload) {
+    if (!pendingDem) return;
+    var p = pendingDem; pendingDem = null;
+    if (String(payload.client).trim() !== p.client) return;
+    google.script.run
+      .withSuccessHandler(function () {
+        el('status').innerHTML += '<div class="ok">Pré-commande de ' +
+          esc(p.client) + ' retirée de la liste.</div>';
+      })
+      .withFailureHandler(function (e) {
+        el('status').innerHTML += '<div class="warn">Pré-commande NON retirée (' +
+          esc(e.message) + ') — la supprimer à la main dans l’onglet Pré-commandes.</div>';
+      })
+      .demDelete({ row: p.row, seenClient: p.client, seenContact: p.contact });
   }
 
   // ---------- MODE A: new order ----------
@@ -996,6 +1264,7 @@
       .withSuccessHandler(res => {
         lines = [{}];
         renderNew();
+        demAfterOrder(payload);
         const msg = 'Commande <b>' + esc(res.orderNumber) + '</b> enregistrée — ' +
           res.rowCount + ' ligne(s).';
         el('status').innerHTML =
