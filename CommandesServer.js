@@ -1739,7 +1739,7 @@ function buildAvailMap() {
  * same flips instead of losing them.
  ***************************************************************/
 
-const DEM_MAIL_TO = "joachim@jdsresearch.com";
+const DEM_MAIL_TO = "joachim@tilapia4food.com";
 const DEM_MAIL_PROP_KEY = "dem_servable_v1";
 const DEM_MAIL_TRIGGER_HOUR = 7;   // after refreshNotSellableMap at 6
 
