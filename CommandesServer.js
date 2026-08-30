@@ -251,7 +251,12 @@ function cmdCreateOrder(payload) {
       ") mais le numéro de commande n'a pas pu être généré : " + err + ". Prévenir Kim.");
   }
 
-  return { firstRow: firstRow, lastRow: lastRow, orderNumber: orderNumber, rowCount: lines.length };
+  // warnings: from the validation this function ran above. The browser
+  // no longer makes its own cmdValidateOrderLines round trip (2026-08-30,
+  // it doubled the save time), so this is how PM-mismatch and lot/type
+  // warnings reach the screen.
+  return { firstRow: firstRow, lastRow: lastRow, orderNumber: orderNumber,
+           rowCount: lines.length, warnings: verdict.warnings || [] };
 }
 
 /**

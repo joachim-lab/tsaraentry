@@ -1422,22 +1422,12 @@
       return { lot: ln.lot || '', qty: q, pm: linePm(ln, al) };
     });
 
-    setStatus('banner', 'Vérification du stock…');
-    google.script.run
-      .withSuccessHandler(v => {
-        if (v.blocks && v.blocks.length) {
-          btn.disabled = false;
-          setStatusAndScroll('err', 'Commande NON enregistrée :<ul><li>' +
-            v.blocks.map(esc).join('</li><li>') + '</li></ul>');
-          return;
-        }
-        saveOrder(payload, (v.warnings || []).map(esc).concat(localWarn), btn);
-      })
-      .withFailureHandler(e => {
-        btn.disabled = false;
-        setStatusAndScroll('err', 'Vérification du stock impossible : ' + esc(e.message));
-      })
-      .cmdValidateOrderLines(vLines, el('fType').value);
+    // 2026-08-30: no separate cmdValidateOrderLines round trip any more.
+    // cmdCreateOrder runs the same validation server-side and refuses a
+    // bad order with the same messages; doubling it here doubled the
+    // save time. vLines above is kept only to build localWarn.
+    // Server warnings come back in res.warnings — see saveOrder.
+    saveOrder(payload, localWarn, btn);
   }
 
   /** Write the order, then show any warnings next to the confirmation. */
@@ -1450,11 +1440,14 @@
         demAfterOrder(payload);
         const msg = 'Commande <b>' + esc(res.orderNumber) + '</b> enregistrée — ' +
           res.rowCount + ' ligne(s).';
+        // Server warnings (PM mismatch, lot/type) now arrive with the
+        // save result instead of from a separate pre-check (2026-08-30).
+        const allWarns = (res.warnings || []).map(esc).concat(warns);
         el('status').innerHTML =
           '<div class="ok">' + msg + '</div>' +
-          (warns.length
+          (allWarns.length
             ? '<div class="warn">Attention :<ul><li>' +
-              warns.join('</li><li>') + '</li></ul></div>'
+              allWarns.join('</li><li>') + '</li></ul></div>'
             : '');
         window.scrollTo({ top: 0, behavior: 'smooth' });
       })
