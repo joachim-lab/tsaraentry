@@ -166,7 +166,14 @@
     el('paneDem').style.display = (m === 'dem' ? '' : 'none');
     el('paneHist').style.display = (m === 'hist' ? '' : 'none');
     setStatus('', '');
-    if (m === 'ful' && !el('ficherche')) renderFul();
+    // 2026-08-30: refresh on EVERY visit, not only the first. The list
+    // was built once and then only unhidden, so an order saved in the
+    // Nouvelle commande tab did not appear here until a manual search.
+    // Same rule as the Réservations tab below, for the same reason.
+    if (m === 'ful') {
+      if (!el('ficherche')) renderFul();
+      else doSearch();
+    }
     // Rebuilt on every visit, never cached: the tab is shared and a stale
     // list is exactly what would let two people fight over one hold.
     if (m === 'res') renderRes();
