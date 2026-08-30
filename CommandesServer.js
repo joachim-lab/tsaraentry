@@ -422,16 +422,30 @@ function cmdRecordFulfilment(rows, payload) {
 
   SpreadsheetApp.flush();
 
-  // Mint the invoice number, exactly as a manual edit to Date livraison
-  // would. Apps Script edit triggers do NOT fire on programmatic writes,
-  // so AutoCommandes' own onEdit never sees the date this function just
-  // wrote — the same reason cmdCreateOrder has to call
-  // generateOrderNumbersForRows explicitly.
+  // Mint the invoice number. THIS IS THE ONLY PLACE IT HAPPENS
+  // (2026-08-30, Kim). AutoCommandes no longer mints from onEdit: that
+  // made DELIVERY the trigger, so an order delivered and not paid
+  // already carried a number, and opening it on this screen looked like
+  // the click had invoiced it.
   //
-  // Calls the library's own function, so manual edits and app writes
-  // share one numbering rule. It skips any order that already holds a
-  // value in column C, which makes this safe to call every time, and
-  // keeps finance's override (typed above) untouched.
+  // THE RULE IS PAYMENT, NOT DELIVERY. A number is minted only when the
+  // user records a payment date with the Enregistrer button. Opening an
+  // order, reading it and leaving writes nothing, because nothing but
+  // this button reaches this function.
+  //
+  // Both conditions are needed, and each for its own reason:
+  //   paiement      — the rule itself. No payment, no invoice.
+  //   dateLivraison — acFillFactureForRows skips any row with an empty
+  //                   col V, so without it the call would do nothing
+  //                   and the "généré" report would be a lie.
+  // A prepayment (paid, not yet delivered) is therefore NOT invoiced
+  // here. It stays listed as non-livrée and is invoiced on the save
+  // that records its delivery.
+  //
+  // Calls the library's own function, so the numbering rule lives in
+  // one place. It skips any order that already holds a value in column
+  // C, which makes this safe to call every time, and keeps finance's
+  // override (typed above) untouched.
   //
   // AFTER the flush: the function reads Date livraison back from the
   // sheet, so the write must have landed first.
@@ -439,15 +453,35 @@ function cmdRecordFulfilment(rows, payload) {
   // Never fatal. The fulfilment is already saved and correct; a missing
   // invoice number is recorded and reported, not raised as an error that
   // would suggest the save failed.
-  if (!cmdParseDate(f.dateLivraison)) {
-    return { rows: targets, changed: changed };
+  //
+  // THREE fields are returned, not one, so the screen can state the
+  // invoice position after EVERY save instead of going quiet:
+  //   facture     — the number minted BY THIS SAVE, or null.
+  //   factureNow  — the number on the order after this save, minted now
+  //                 or already there. null when the order has none.
+  //   factureWhy  — why nothing was minted. null when one was.
+  // Returned as their own fields, never dug out of `changed`: a message
+  // this important must not depend on parsing a log line.
+  const anyRow = Math.min.apply(null, targets);
+
+  if (!cmdParseDate(f.paiement) || !cmdParseDate(f.dateLivraison)) {
+    return {
+      rows: targets, changed: changed, facture: null,
+      factureNow: sh.getRange(anyRow, C.FACTURE).getDisplayValue() || null,
+      factureWhy: !cmdParseDate(f.paiement)
+        ? "la commande n'est pas encore payée"
+        : "la commande n'est pas encore livrée"
+    };
   }
+
+  var facture = null;
   try {
-    // ONE row, not the span. The library mints for every row sharing that
-    // row's order number, so a single row is enough — while a span would
-    // sweep every delivered-but-uninvoiced order that happens to sit
-    // between the first and last row of this one, and invoice those too.
-    const anyRow = Math.min.apply(null, targets);
+    // acFillFactureForRows is given ONE row, not the span. The library
+    // mints for every row sharing that row's order number, so a single
+    // row is enough — while a span would sweep every delivered-but-
+    // uninvoiced order that happens to sit between the first and last
+    // row of this one, and invoice those too.
+    //
     // Before/after, so a number finance typed above is not reported as
     // "généré". The library leaves such an order alone, and this says so.
     const before = targets.map(r => sh.getRange(r, C.FACTURE).getDisplayValue());
@@ -457,13 +491,24 @@ function cmdRecordFulfilment(rows, payload) {
       const after = sh.getRange(r, C.FACTURE).getDisplayValue();
       if (after && after !== before[i]) {
         changed.push("L" + r + " N° facture (généré): " + after);
+        facture = after;
       }
     });
   } catch (err) {
     changed.push("N° facture non généré : " + err + ". Prévenir Kim.");
   }
 
-  return { rows: targets, changed: changed };
+  // Read back, so factureNow reports the sheet and not what this
+  // function hoped it wrote.
+  const factureNow = sh.getRange(anyRow, C.FACTURE).getDisplayValue() || null;
+
+  return {
+    rows: targets, changed: changed, facture: facture,
+    factureNow: factureNow,
+    factureWhy: facture ? null
+      : (factureNow ? "cette commande a déjà un numéro"
+                    : "numéro non généré — prévenir Kim")
+  };
 }
 
 /**
@@ -1972,4 +2017,49 @@ function testHistorique() {
     Logger.log("  " + k + " : " + byStat[k]);
   });
   Logger.log("Montant total : " + Math.round(total) + " Ar");
+}
+
+
+/***************************************************************
+ * LEGACY FACTURES — READ ONLY, WRITES NOTHING. (2026-08-30)
+ *
+ * Until 2026-08-30 the invoice number was minted when a Date livraison
+ * was entered, so every order delivered and NOT paid was given a
+ * number before any payment existed. This lists those orders, so Kim
+ * can decide whether to clear them by hand.
+ *
+ * Nothing in the code reads this list. Run it, read the log, delete
+ * this function when the clean-up is done.
+ *
+ * RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> testLegacyFactures
+ ***************************************************************/
+function testLegacyFactures() {
+  const sh = cmdSheet();
+  const C = CMD_CFG.COL;
+  const lastRow = findNextCommandeRow(sh) - 1;
+  if (lastRow < CMD_CFG.START_ROW) { Logger.log("Aucune commande."); return; }
+
+  const n = lastRow - CMD_CFG.START_ROW + 1;
+  const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.ANNULE).getDisplayValues();
+
+  const seen = {};
+  var count = 0;
+  Logger.log("Commandes LIVREES, NON PAYEES, avec un n° facture :");
+  for (var i = 0; i < n; i++) {
+    const r = vals[i];
+    if (String(r[C.ANNULE - 1] || "").trim()) continue;
+    if (!String(r[C.DATE_LIVRAISON - 1] || "").trim()) continue;
+    if (String(r[C.PAIEMENT - 1] || "").trim()) continue;
+    const fact = String(r[C.FACTURE - 1] || "").trim();
+    if (!fact) continue;
+
+    const key = String(r[C.ORDER_NO - 1] || "").trim() || ("__row" + (CMD_CFG.START_ROW + i));
+    if (seen[key]) continue;
+    seen[key] = true;
+    count++;
+    Logger.log("  ligne " + (CMD_CFG.START_ROW + i) + "   " + key +
+               "   " + r[C.CLIENT - 1] + "   facture " + fact +
+               "   livrée le " + r[C.DATE_LIVRAISON - 1]);
+  }
+  Logger.log("Total : " + count + " commande(s).");
 }

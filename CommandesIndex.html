@@ -1618,11 +1618,31 @@
 
     google.script.run
       .withSuccessHandler(res => {
+        // The invoice number leads, and it is the only thing in bold.
+        // The count of changed cells stays underneath: a save that
+        // records a payment also writes the moyen de paiement and the
+        // remarques, and dropping that line would hide them.
+        //
+        // THE FIRST LINE IS ALWAYS THERE. An earlier version showed it
+        // only when a number was minted, so a save that minted nothing
+        // fell back to the bare count and the user could not tell
+        // whether the invoice had been handled. Every save now states
+        // the invoice position, including "no number, and why".
+        const count = res.changed.length
+          ? res.changed.length + ' modification(s) enregistrée(s) sur ' +
+            res.rows.length + ' ligne(s).'
+          : 'Aucun changement.';
+
+        const line = res.facture
+          ? 'Numéro facture enregistré : <b>' + esc(res.facture) + '</b>'
+          : (res.factureNow
+              ? 'Numéro facture : <b>' + esc(res.factureNow) + '</b> — ' +
+                esc(res.factureWhy || '')
+              : 'Pas de numéro facture — ' + esc(res.factureWhy || ''));
+
         doSearch({
           cls: 'ok',
-          html: res.changed.length
-            ? res.changed.length + ' modification(s) enregistrée(s) sur ' + res.rows.length + ' ligne(s).'
-            : 'Aucun changement.'
+          html: line + '<div class="muted">' + count + '</div>'
         });
       })
       .withFailureHandler(e => { btn.disabled = false; setStatusAndScroll('err', esc(e.message)); })
