@@ -1625,21 +1625,22 @@
 
     google.script.run
       .withSuccessHandler(res => {
-        // The invoice number leads, and it is the only thing in bold.
-        // The count of changed cells stays underneath: a save that
-        // records a payment also writes the moyen de paiement and the
-        // remarques, and dropping that line would hide them.
+        // The invoice message is the whole confirmation.
         //
-        // THE FIRST LINE IS ALWAYS THERE. An earlier version showed it
-        // only when a number was minted, so a save that minted nothing
-        // fell back to the bare count and the user could not tell
-        // whether the invoice had been handled. Every save now states
-        // the invoice position, including "no number, and why".
-        const count = res.changed.length
-          ? res.changed.length + ' modification(s) enregistrée(s) sur ' +
-            res.rows.length + ' ligne(s).'
-          : 'Aucun changement.';
-
+        // THE LINE IS ALWAYS THERE. An earlier version showed it only
+        // when a number was minted, so a save that minted nothing left
+        // the user unable to tell whether the invoice had been handled.
+        // Every save states the invoice position, including "no number,
+        // and why".
+        //
+        // 2026-08-30 (Kim): the muted "N modification(s) enregistrée(s)"
+        // line that used to sit under this was removed on request.
+        // KNOWN CONSEQUENCE, accepted, do not re-add without asking:
+        // a save that writes only the moyen de paiement or the remarques
+        // now shows an invoice line identical to the one before it, so
+        // there is no on-screen proof that such a save landed.
+        // res.changed is still returned by the server and still carries
+        // the detail — nothing reads it here any more.
         const line = res.facture
           ? 'Numéro facture enregistré : <b>' + esc(res.facture) + '</b>'
           : (res.factureNow
@@ -1647,10 +1648,7 @@
                 esc(res.factureWhy || '')
               : 'Pas de numéro facture — ' + esc(res.factureWhy || ''));
 
-        doSearch({
-          cls: 'ok',
-          html: line + '<div class="muted">' + count + '</div>'
-        });
+        doSearch({ cls: 'ok', html: line });
       })
       .withFailureHandler(e => { btn.disabled = false; setStatusAndScroll('err', esc(e.message)); })
       .cmdRecordFulfilment(o.rows, {
