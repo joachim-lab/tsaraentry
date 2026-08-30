@@ -756,7 +756,13 @@
       }
       if (pm === undefined) return '<option value="'+esc(l)+'">'+esc(l)+'</option>';
       const v = lotTypeVerdict(alSel, pm);
+      // Available count from the load-time gate data: the number the
+      // save check will accept, not the raw Stock Poisson count. Hidden
+      // on blocked lots - a count next to "incompatible" invites a
+      // fight with a greyed option.
+      const av = (GATE && GATE.avail) ? GATE.avail[key] : undefined;
       const tag = ' \u00b7 ' + fmtNum(pm) + ' g' +
+        (av === undefined || v.level === 'block' ? '' : ' \u00b7 ' + fmtNum(av) + ' poissons') +
         (v.level === 'block' ? ' \u2014 incompatible' : (v.level === 'warn' ? ' \u2014 \u00e0 confirmer' : ''));
       return '<option value="'+esc(l)+'"' + (v.level === 'block' ? ' disabled' : '') + '>' +
              esc(l) + tag + '</option>';

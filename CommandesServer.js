@@ -938,6 +938,7 @@ function installNotSellableTrigger() {
 function cmdGetLotGateData() {
   return {
     pm: cmdGetLotPmMap(),
+    avail: buildAvailMap(),
     reservedAll: buildReservedAllMap(),
     notSellable: getNotSellableMap(),
     fryMax: cmdFryMaxPm(),
@@ -1668,4 +1669,37 @@ function testDemCheckStock() {
     Logger.log("  ligne " + v.row + "  " +
       (v.ok ? "DISPONIBLE" : (v.manque != null ? "manque " + v.manque : "—")));
   });
+}
+
+
+/**
+ * {canonKey: available fish} for the lot dropdown.
+ * available = Stock Poisson count - NOMBRE reservation - orders
+ * entered but not yet deducted. The same arithmetic the save check
+ * enforces, so the number in the label is the number that will be
+ * accepted. TOUT lots are omitted - the dropdown already greys them
+ * via reservedAll, and a count would contradict the "réservé" label.
+ * Advisory: Stock Poisson can lag the lot files by up to 24 h; the
+ * per-selection readout and the save check remain the authority.
+ */
+function buildAvailMap() {
+  const ss = SpreadsheetApp.openById(STOCK_PM_CFG.SS_ID);
+  const sh = ss.getSheetByName(STOCK_PM_CFG.SHEET);
+  const out = {};
+  if (!sh) return out;
+  const lastRow = sh.getLastRow();
+  if (lastRow < STOCK_PM_CFG.START_ROW) return out;
+  const vals = sh.getRange(STOCK_PM_CFG.START_ROW, 14,
+                           lastRow - STOCK_PM_CFG.START_ROW + 1, 3).getValues();
+  const resv = demResMap();
+  const pend = demPendingMap();
+  for (var i = 0; i < vals.length; i++) {
+    const key = cmdCanonKey(vals[i][0]);
+    if (!key) continue;
+    if (resv[key] === "TOUT") continue;
+    const count = cmdToNum(vals[i][1]);
+    if (count == null) continue;
+    out[key] = Math.round(count - (resv[key] || 0) - (pend[key] || 0));
+  }
+  return out;
 }
