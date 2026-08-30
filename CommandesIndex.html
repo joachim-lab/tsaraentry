@@ -68,6 +68,7 @@
     <div class="tab" id="tabFul" onclick="switchMode('ful')">Paiement &amp; livraison</div>
     <div class="tab" id="tabRes" onclick="switchMode('res')">R&eacute;servations</div>
     <div class="tab" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
+    <div class="tab" id="tabHist" onclick="switchMode('hist')">Historique</div>
   </div>
 
   <div id="status"></div>
@@ -75,6 +76,7 @@
   <div id="paneFul" style="display:none"></div>
   <div id="paneRes" style="display:none"></div>
   <div id="paneDem" style="display:none"></div>
+  <div id="paneHist" style="display:none"></div>
 
 <script>
 
@@ -157,16 +159,19 @@
     el('tabFul').className = 'tab' + (m === 'ful' ? ' active' : '');
     el('tabRes').className = 'tab' + (m === 'res' ? ' active' : '');
     el('tabDem').className = 'tab' + (m === 'dem' ? ' active' : '');
+    el('tabHist').className = 'tab' + (m === 'hist' ? ' active' : '');
     el('paneNew').style.display = (m === 'new' ? '' : 'none');
     el('paneFul').style.display = (m === 'ful' ? '' : 'none');
     el('paneRes').style.display = (m === 'res' ? '' : 'none');
     el('paneDem').style.display = (m === 'dem' ? '' : 'none');
+    el('paneHist').style.display = (m === 'hist' ? '' : 'none');
     setStatus('', '');
     if (m === 'ful' && !el('ficherche')) renderFul();
     // Rebuilt on every visit, never cached: the tab is shared and a stale
     // list is exactly what would let two people fight over one hold.
     if (m === 'res') renderRes();
     if (m === 'dem') renderDem();
+    if (m === 'hist') renderHist();
     // Leaving the order form abandons any pending Commander hand-off.
     if (m !== 'new') pendingDem = null;
   }
@@ -646,6 +651,107 @@
           esc(e.message) + ') — la supprimer à la main dans l’onglet Pré-commandes.</div>';
       })
       .demDelete({ row: p.row, seenClient: p.client, seenContact: p.contact });
+  }
+
+  // ---------- MODE E: historique ----------
+  //
+  // Read-only table of every order of the year, newest first. No
+  // editing, no deletion: fulfilment is recorded on Paiement &
+  // livraison and nowhere else. Rebuilt on every visit - a history
+  // that lags the tab next to it would be worse than none.
+  //
+  // The client filter is local, over the rows already fetched: the
+  // list is a few hundred rows, so a round trip per keystroke would
+  // buy nothing.
+
+  let histRows = [];
+
+  const HIST_COLOR = {
+    'Ouvert':        '#1a73e8',
+    'Livré':         '#e37400',
+    'Payé':          '#e37400',
+    'Livré et payé': '#188038',
+    'Annulé':        '#80868b'
+  };
+
+  function renderHist() {
+    el('paneHist').innerHTML =
+      '<div style="margin-bottom:10px">' +
+        '<input type="text" id="hSearch" placeholder="Filtrer : n° commande, client ou statut" ' +
+          'style="max-width:420px" oninput="drawHist()">' +
+      '</div>' +
+      '<div id="histInfo" class="muted" style="margin-bottom:8px">Chargement…</div>' +
+      '<div id="histTable"></div>';
+    google.script.run
+      .withSuccessHandler(function (h) {
+        histRows = h.orders;
+        el('histInfo').textContent = 'Année ' + h.annee + ' — ' +
+          fmtNum(histRows.length) + ' commandes';
+        drawHist();
+      })
+      .withFailureHandler(function (e) {
+        el('histTable').innerHTML = '<div class="err">Erreur : ' + esc(e.message) + '</div>';
+      })
+      .histList();
+  }
+
+  /** Quantity ordered: alevins as a count, grossis as a fish count. */
+  function histQty(o) {
+    const bits = [];
+    if (Number(o.alevinsTotal || 0) > 0) {
+      bits.push(fmtNum(Number(o.alevinsTotal)) + ' alevins');
+    }
+    if (Number(o.poissonNbTotal || 0) > 0) {
+      bits.push(fmtNum(Math.round(Number(o.poissonNbTotal))) + ' grossis');
+    }
+    return bits.join(' + ');
+  }
+
+  function drawHist() {
+    const q = (el('hSearch') ? el('hSearch').value : '').trim().toLowerCase();
+    const rows = q
+      ? histRows.filter(function (o) {
+          return (o.orderNumber + ' ' + o.client + ' ' + o.statut)
+                 .toLowerCase().indexOf(q) !== -1;
+        })
+      : histRows;
+
+    if (!rows.length) {
+      el('histTable').innerHTML = '<div class="warn">Aucune commande.</div>';
+      return;
+    }
+
+    const cell = 'padding:6px 8px;border:1px solid #dadce0';
+    var total = 0;
+    var h = '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
+      '<tr style="text-align:left;border-bottom:2px solid #dadce0">' +
+      '<th style="' + cell + '">N° commande</th>' +
+      '<th style="' + cell + '">Date</th>' +
+      '<th style="' + cell + '">Client</th>' +
+      '<th style="' + cell + '">Quantité</th>' +
+      '<th style="' + cell + '">Montant</th>' +
+      '<th style="' + cell + '">Statut</th></tr>';
+
+    rows.forEach(function (o) {
+      total += Number(o.montantAr || 0);
+      const col = HIST_COLOR[o.statut] || '#3c4043';
+      h += '<tr>' +
+        '<td style="' + cell + '"><b>' + esc(o.orderNumber || '(sans numéro)') + '</b></td>' +
+        '<td style="' + cell + ';white-space:nowrap">' + esc(o.dateCommande) + '</td>' +
+        '<td style="' + cell + '">' + esc(o.client) + '</td>' +
+        '<td style="' + cell + '">' + esc(histQty(o)) + '</td>' +
+        '<td style="' + cell + ';white-space:nowrap">' + fmtAr(o.montantAr) + '</td>' +
+        '<td style="' + cell + ';color:' + col + ';font-weight:bold">' + esc(o.statut) + '</td>' +
+        '</tr>';
+    });
+
+    // Total of what is LISTED, so a filtered view totals the filter.
+    h += '<tr style="border-top:2px solid #dadce0">' +
+      '<td style="' + cell + '" colspan="4"><b>Total (' + fmtNum(rows.length) + ')</b></td>' +
+      '<td style="' + cell + ';white-space:nowrap"><b>' + fmtAr(total) + '</b></td>' +
+      '<td style="' + cell + '"></td></tr>';
+
+    el('histTable').innerHTML = h + '</table>';
   }
 
   // ---------- MODE A: new order ----------

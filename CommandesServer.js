@@ -1860,3 +1860,116 @@ function resetDemNotified() {
   PropertiesService.getScriptProperties().deleteProperty(DEM_MAIL_PROP_KEY);
   Logger.log("Historique des notifications effacé.");
 }
+
+
+/***************************************************************
+ * HISTORIQUE - fifth tab on the Commandes screen. READ ONLY.
+ *
+ * Every order of the CMD_CFG.SHEET year, newest first. Rows are
+ * grouped by order number exactly as cmdFindOrders groups them: a
+ * commercial order spans one row per lot, and the FIRST row carries
+ * the number while the others say "commande groupée". Rows with no
+ * number at all stay separate, keyed by row.
+ *
+ * NOT cmdFindOrders. That one is a work list: it drops orders that
+ * are delivered AND paid, drops cancelled ones, and stops at 25 hits.
+ * A history that hides finished business is not a history.
+ *
+ * STATUT - "ouvert / livré / payé" is three words for two independent
+ * facts, delivery (col V) and payment (col U), which give four states.
+ * All four are reported rather than collapsed, plus Annulé:
+ *   Annulé          col AA filled
+ *   Livré et payé   both dates present
+ *   Livré           delivered, not yet paid
+ *   Payé            paid, not yet delivered (prepayment)
+ *   Ouvert          neither
+ *
+ * QUANTITY is the number ORDERED: col F for alevins, col N for
+ * grossis (N = (L*1000)/M, the fish count behind the kg). Col H, the
+ * +5% the engine actually deducts, is a delivery figure and is not
+ * what this screen was asked for.
+ *
+ * DISPLAY VALUES, not raw values: dates and money arrive already
+ * formatted by the sheet, so the table shows what the sheet shows.
+ ***************************************************************/
+
+function histList() {
+  const sh = cmdSheet();
+  const C = CMD_CFG.COL;
+  const lastRow = findNextCommandeRow(sh) - 1;
+  if (lastRow < CMD_CFG.START_ROW) return { orders: [], annee: CMD_CFG.SHEET };
+
+  const n = lastRow - CMD_CFG.START_ROW + 1;
+  const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.ANNULE).getDisplayValues();
+
+  const groups = {};
+  const order = [];
+
+  for (var i = 0; i < n; i++) {
+    const r = vals[i];
+    const rowNum = CMD_CFG.START_ROW + i;
+    const orderNo = String(r[C.ORDER_NO - 1] || "").trim();
+    const key = orderNo || ("__row" + rowNum);
+
+    if (!groups[key]) {
+      groups[key] = {
+        orderNumber: orderNo,
+        key: key,
+        client: r[C.CLIENT - 1],
+        dateCommande: r[C.DATE_CMD - 1],
+        paiement: r[C.PAIEMENT - 1],
+        dateLivraison: r[C.DATE_LIVRAISON - 1],
+        annule: String(r[C.ANNULE - 1] || "").trim(),
+        alevinsTotal: 0,
+        poissonNbTotal: 0,
+        montantAr: 0
+      };
+      order.push(key);
+    }
+
+    const g = groups[key];
+    g.alevinsTotal   += cmdNumFromDisplay_(r[C.ALEVINS_NB - 1]);
+    g.poissonNbTotal += cmdNumFromDisplay_(r[C.POISSON_NB - 1]);
+    g.montantAr      += cmdNumFromDisplay_(r[C.ARGENT_ALEVINS - 1]) +
+                        cmdNumFromDisplay_(r[C.ARGENT_POISSON - 1]);
+    // Any row of the order can carry the state or the identity.
+    if (!g.client && r[C.CLIENT - 1]) g.client = r[C.CLIENT - 1];
+    if (!g.dateCommande && r[C.DATE_CMD - 1]) g.dateCommande = r[C.DATE_CMD - 1];
+    if (!g.paiement && r[C.PAIEMENT - 1]) g.paiement = r[C.PAIEMENT - 1];
+    if (!g.dateLivraison && r[C.DATE_LIVRAISON - 1]) g.dateLivraison = r[C.DATE_LIVRAISON - 1];
+    if (!g.annule && String(r[C.ANNULE - 1] || "").trim()) {
+      g.annule = String(r[C.ANNULE - 1]).trim();
+    }
+  }
+
+  const out = [];
+  for (var j = order.length - 1; j >= 0; j--) {     // newest first
+    const g = groups[order[j]];
+    const delivered = String(g.dateLivraison || "").trim() !== "";
+    const paid      = String(g.paiement || "").trim() !== "";
+    g.statut = g.annule ? "Annulé"
+             : (delivered && paid) ? "Livré et payé"
+             : delivered ? "Livré"
+             : paid ? "Payé"
+             : "Ouvert";
+    out.push(g);
+  }
+  return { orders: out, annee: CMD_CFG.SHEET };
+}
+
+/** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> testHistorique
+ *  Read-only. Prints the count per status and the money total. */
+function testHistorique() {
+  const h = histList();
+  const byStat = {};
+  var total = 0;
+  h.orders.forEach(function (o) {
+    byStat[o.statut] = (byStat[o.statut] || 0) + 1;
+    total += o.montantAr;
+  });
+  Logger.log("Année " + h.annee + " : " + h.orders.length + " commandes");
+  Object.keys(byStat).sort().forEach(function (k) {
+    Logger.log("  " + k + " : " + byStat[k]);
+  });
+  Logger.log("Montant total : " + Math.round(total) + " Ar");
+}
