@@ -374,19 +374,26 @@
 
   function renderDem() {
     el('paneDem').innerHTML =
-      '<div style="margin-bottom:10px"><button onclick="demVerifStock()">Vérifier le stock</button> ' +
+      '<div style="margin-bottom:10px">' +
+        '<button onclick="demVerifStock()" ' +
+          'style="background:#188038;color:#fff;border-color:#188038">' +
+          'Actualiser le stock</button> ' +
         '<span id="demPool" class="muted"></span></div>' +
       '<div id="demList">Chargement…</div>' +
       '<div id="demForm"></div>';
-    loadDem();
+    // The verdict is what the tab is opened FOR, so it is not left
+    // behind a click. The button stays, as a refresh: the pools move
+    // whenever an order is saved elsewhere in the same session.
+    loadDem(demVerifStock);
   }
 
-  function loadDem() {
+  function loadDem(then) {
     google.script.run
       .withSuccessHandler(function (rows) {
         demRows = rows; demArmed = 0; demStock = null;
         if (el('demPool')) el('demPool').textContent = '';
         drawDemList(); drawDemForm();
+        if (typeof then === 'function') then();
       })
       .withFailureHandler(function (e) {
         el('demList').innerHTML = '<div class="err">Erreur : ' + esc(e.message) + '</div>';
@@ -403,17 +410,22 @@
    * real block stays at order entry, against the lot file.
    */
   function demVerifStock() {
-    setStatus('banner', 'Vérification du stock…');
+    // The pool line carries the progress message. setStatus is left
+    // alone: this now runs after every load, including the one that
+    // follows a save, and it must not wipe "Pré-commande ajoutée".
+    if (el('demPool')) el('demPool').textContent = 'Vérification du stock…';
     google.script.run
       .withSuccessHandler(function (res) {
         demStock = {};
         res.rows.forEach(function (v) { demStock[v.row] = v; });
         el('demPool').textContent = 'Disponible : Alevins ' + fmtNum(res.pool.Alevins) +
           ' — Poisson ' + fmtNum(res.pool.Poisson);
-        setStatus('', '');
         drawDemList();
       })
-      .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+      .withFailureHandler(function (e) {
+        el('demPool').textContent = '';
+        setStatusAndScroll('err', 'Stock non vérifié : ' + esc(e.message));
+      })
       .demCheckStock();
   }
 
