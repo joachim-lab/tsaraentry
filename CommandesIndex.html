@@ -369,6 +369,8 @@
 
   function renderDem() {
     el('paneDem').innerHTML =
+      '<div style="margin-bottom:10px"><button onclick="demVerifStock()">Vérifier le stock</button> ' +
+        '<span id="demPool" class="muted"></span></div>' +
       '<div id="demList">Chargement…</div>' +
       '<div id="demForm"></div>';
     loadDem();
@@ -377,12 +379,48 @@
   function loadDem() {
     google.script.run
       .withSuccessHandler(function (rows) {
-        demRows = rows; demArmed = 0; drawDemList(); drawDemForm();
+        demRows = rows; demArmed = 0; demStock = null;
+        if (el('demPool')) el('demPool').textContent = '';
+        drawDemList(); drawDemForm();
       })
       .withFailureHandler(function (e) {
         el('demList').innerHTML = '<div class="err">Erreur : ' + esc(e.message) + '</div>';
       })
       .demList();
+  }
+
+  let demStock = null;   // row -> verdict from the last stock check
+
+  /**
+   * Amount-only check, on demand. Pool per type = available fish
+   * (Stock Poisson - réservations - commandes non déduites), allocated
+   * to the pré-commandes in list order, oldest first. Advisory: the
+   * real block stays at order entry, against the lot file.
+   */
+  function demVerifStock() {
+    setStatus('banner', 'Vérification du stock…');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        demStock = {};
+        res.rows.forEach(function (v) { demStock[v.row] = v; });
+        el('demPool').textContent = 'Disponible : Alevins ' + fmtNum(res.pool.Alevins) +
+          ' — Poisson ' + fmtNum(res.pool.Poisson);
+        setStatus('', '');
+        drawDemList();
+      })
+      .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+      .demCheckStock();
+  }
+
+  function demDispoCell(r) {
+    var base = 'padding:6px 8px;border:1px solid #dadce0';
+    var v = demStock[r.row];
+    if (!v) return '<td style="' + base + '">—</td>';
+    if (v.ok) return '<td style="' + base + ';color:#188038;font-weight:bold">Disponible</td>';
+    if (v.manque != null) {
+      return '<td style="' + base + ';color:#d93025">Manque ' + fmtNum(v.manque) + '</td>';
+    }
+    return '<td style="' + base + '">—</td>';
   }
 
   function drawDemList() {
@@ -399,6 +437,7 @@
       '<th style="padding:6px 8px;border:1px solid #dadce0">Nombre</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Poids (g)</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Commentaires</th>' +
+      (demStock ? '<th style="padding:6px 8px;border:1px solid #dadce0">Disponibilité</th>' : '') +
       '<th style="padding:6px 8px;border:1px solid #dadce0"></th></tr>';
     demRows.forEach(function (r) {
       var armed = (demArmed === r.row);
@@ -410,6 +449,7 @@
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + (r.nombre == null ? '' : fmtNum(r.nombre)) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + (r.poids == null ? '' : esc(r.poids)) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.commentaires) + '</td>' +
+        (demStock ? demDispoCell(r) : '') +
         '<td style="padding:6px 8px;border:1px solid #dadce0;white-space:nowrap">' +
           '<button onclick="demCommander(' + r.row + ')">Commander</button> ' +
           '<button onclick="demStartEdit(' + r.row + ')">Modifier</button> ' +

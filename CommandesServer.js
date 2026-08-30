@@ -1535,3 +1535,137 @@ function testDemandes() {
                (r.commentaires ? "   — " + r.commentaires : ""));
   });
 }
+
+
+/***************************************************************
+ * PRE-COMMANDES STOCK CHECK - amount only, on demand.
+ *
+ * Question answered: "is there enough fish of this TYPE, all lots
+ * together, to serve each pré-commande?" Weight is deliberately
+ * ignored (decision 2026-08-30); the poids column stays in the sheet
+ * so a weight filter can be added later.
+ *
+ * available per lot = Stock Poisson count
+ *                     - réservation (TOUT excludes the lot)
+ *                     - commandes entered but not yet deducted
+ * Same arithmetic as cmdGetLotAvailability, but from Stock Poisson in
+ * ONE read instead of opening every lot file. ADVISORY by design:
+ * Stock Poisson can lag the lot files by up to 24 h, and the real
+ * block still runs at order entry against the lot file itself.
+ *
+ * Lots are pooled per type with the same verdict the order dropdown
+ * uses (cmdLotTypeVerdict); "warn" lots count - the sale is possible.
+ * A lot with no PM in Stock Poisson counts in BOTH pools, mirroring
+ * the dropdown, which leaves such lots selectable for either type.
+ *
+ * The pool is ALLOCATED to the pré-commandes in sheet order (oldest
+ * at the top): two demandes are never both told OK on the strength
+ * of the same fish.
+ *
+ * FUTURE: the nightly e-mail trigger calls this same function and
+ * mails when a row's verdict flips to OK. One function, two uses.
+ ***************************************************************/
+
+/** {canonKey: "TOUT"|number} - every reservation in one read. */
+function demResMap() {
+  const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
+  const sh = ss.getSheetByName(RES_SHEET);
+  const out = {};
+  if (!sh) return out;
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return out;
+  const vals = sh.getRange(2, 1, lastRow - 1, 3).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    const key = cmdCanonKey(vals[i][0]);
+    if (!key) continue;
+    const type = String(vals[i][1] || "").trim().toUpperCase();
+    if (type === "TOUT") { out[key] = "TOUT"; continue; }
+    if (type === "NOMBRE" && out[key] !== "TOUT") {
+      const n = cmdToNum(vals[i][2]);
+      if (n != null && n > 0) out[key] = n;
+    }
+  }
+  return out;
+}
+
+/** {canonKey: pending fish} - ONE scan of the orders sheet.
+ *  Same row eligibility as cmdGetPendingQty: Y, Z, AA all empty. */
+function demPendingMap() {
+  const sh = cmdSheet();
+  const lastRow = findNextCommandeRow(sh) - 1;
+  const out = {};
+  if (lastRow < CMD_CFG.START_ROW) return out;
+  const data = sh.getRange(CMD_CFG.START_ROW, 1,
+                           lastRow - CMD_CFG.START_ROW + 1, 27).getValues();
+  for (var i = 0; i < data.length; i++) {
+    const r = data[i];
+    const key = cmdCanonKey(r[CMD_CFG.COL.LOT - 1]);
+    if (!key) continue;
+    if (String(r[CMD_CFG.COL.LOG - 1]    || "").trim() !== "") continue;
+    if (String(r[CMD_CFG.COL.ERROR - 1]  || "").trim() !== "") continue;
+    if (String(r[CMD_CFG.COL.ANNULE - 1] || "").trim() !== "") continue;
+    const ded = cmdDeduction(r[CMD_CFG.COL.ALEVINS_LIVRER - 1],
+                             r[CMD_CFG.COL.POISSON_NB - 1]);
+    if (ded == null) continue;
+    out[key] = (out[key] || 0) + ded;
+  }
+  return out;
+}
+
+function demCheckStock() {
+  // Stock Poisson lot block: N=id, O=nombre, P=PM - the block
+  // updateStockPoisson rewrites each night (same read as buildLotPmMap).
+  const ss = SpreadsheetApp.openById(STOCK_PM_CFG.SS_ID);
+  const sh = ss.getSheetByName(STOCK_PM_CFG.SHEET);
+  if (!sh) throw new Error('Onglet introuvable: "' + STOCK_PM_CFG.SHEET + '"');
+  const lastRow = sh.getLastRow();
+  const pool = { Alevins: 0, Poisson: 0 };
+  if (lastRow >= STOCK_PM_CFG.START_ROW) {
+    const vals = sh.getRange(STOCK_PM_CFG.START_ROW, 14,
+                             lastRow - STOCK_PM_CFG.START_ROW + 1, 3).getValues();
+    const resv = demResMap();
+    const pend = demPendingMap();
+    const notSellable = getNotSellableMap();
+    const fryMax = cmdFryMaxPm();
+    for (var i = 0; i < vals.length; i++) {
+      const key = cmdCanonKey(vals[i][0]);
+      if (!key || notSellable[key]) continue;
+      const r = resv[key];
+      if (r === "TOUT") continue;
+      const count = cmdToNum(vals[i][1]);
+      if (count == null || count <= 0) continue;
+      const avail = count - (r || 0) - (pend[key] || 0);
+      if (avail <= 0) continue;
+      const pm = cmdToNum(vals[i][2]);
+      if (cmdLotTypeVerdict(true,  pm, fryMax).level !== "block") pool.Alevins += avail;
+      if (cmdLotTypeVerdict(false, pm, fryMax).level !== "block") pool.Poisson += avail;
+    }
+  }
+
+  const remain = { Alevins: pool.Alevins, Poisson: pool.Poisson };
+  const out = { pool: pool, rows: [] };
+  demList().forEach(function (d) {
+    const v = { row: d.row, ok: false, manque: null };
+    if (d.nombre != null && d.nombre > 0 && remain.hasOwnProperty(d.type)) {
+      if (remain[d.type] >= d.nombre) {
+        v.ok = true;
+        remain[d.type] -= d.nombre;
+      } else {
+        v.manque = Math.ceil(d.nombre - Math.max(remain[d.type], 0));
+      }
+    }
+    out.rows.push(v);
+  });
+  return out;
+}
+
+/** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> testDemCheckStock
+ *  Read-only. Prints the pools and the verdict per pré-commande. */
+function testDemCheckStock() {
+  const r = demCheckStock();
+  Logger.log("Pool Alevins=" + r.pool.Alevins + "  Poisson=" + r.pool.Poisson);
+  r.rows.forEach(function (v) {
+    Logger.log("  ligne " + v.row + "  " +
+      (v.ok ? "DISPONIBLE" : (v.manque != null ? "manque " + v.manque : "—")));
+  });
+}
