@@ -348,6 +348,18 @@
 
   const DEM_POIDS_AL = ['0.5', '1', '1.5', '2', '3', '4', '5', '10'];
 
+  const DEM_MOIS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin',
+                    'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
+
+  /** '2026-08-19' -> '19 Août'. Year appended only when not current. */
+  function demFmtDate(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''));
+    if (!m) return String(s || '');
+    var out = Number(m[3]) + ' ' + DEM_MOIS[Number(m[2]) - 1];
+    if (Number(m[1]) !== (new Date()).getFullYear()) out += ' ' + m[1];
+    return out;
+  }
+
   let demRows = [];    // last list from the server
   let demEdit = 0;     // row being edited; 0 = adding
   let demArmed = 0;    // row armed for deletion; 0 = none
@@ -380,25 +392,25 @@
     }
     var h = '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
       '<tr style="text-align:left;border-bottom:2px solid #dadce0">' +
-      '<th style="padding:6px 8px">Date</th>' +
-      '<th style="padding:6px 8px">Client</th>' +
-      '<th style="padding:6px 8px">Contact</th>' +
-      '<th style="padding:6px 8px">Type</th>' +
-      '<th style="padding:6px 8px">Nombre</th>' +
-      '<th style="padding:6px 8px">Poids (g)</th>' +
-      '<th style="padding:6px 8px">Commentaires</th>' +
-      '<th style="padding:6px 8px"></th></tr>';
+      '<th style="padding:6px 8px;border:1px solid #dadce0">Date</th>' +
+      '<th style="padding:6px 8px;border:1px solid #dadce0">Client</th>' +
+      '<th style="padding:6px 8px;border:1px solid #dadce0">Contact</th>' +
+      '<th style="padding:6px 8px;border:1px solid #dadce0">Type</th>' +
+      '<th style="padding:6px 8px;border:1px solid #dadce0">Nombre</th>' +
+      '<th style="padding:6px 8px;border:1px solid #dadce0">Poids (g)</th>' +
+      '<th style="padding:6px 8px;border:1px solid #dadce0">Commentaires</th>' +
+      '<th style="padding:6px 8px;border:1px solid #dadce0"></th></tr>';
     demRows.forEach(function (r) {
       var armed = (demArmed === r.row);
       h += '<tr style="border-bottom:1px solid #e8eaed">' +
-        '<td style="padding:6px 8px">' + esc(r.date) + '</td>' +
-        '<td style="padding:6px 8px"><b>' + esc(r.client) + '</b></td>' +
-        '<td style="padding:6px 8px">' + esc(r.contact) + '</td>' +
-        '<td style="padding:6px 8px">' + esc(r.type) + '</td>' +
-        '<td style="padding:6px 8px">' + (r.nombre == null ? '' : fmtNum(r.nombre)) + '</td>' +
-        '<td style="padding:6px 8px">' + (r.poids == null ? '' : esc(r.poids)) + '</td>' +
-        '<td style="padding:6px 8px">' + esc(r.commentaires) + '</td>' +
-        '<td style="padding:6px 8px;white-space:nowrap">' +
+        '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(demFmtDate(r.date)) + '</td>' +
+        '<td style="padding:6px 8px;border:1px solid #dadce0"><b>' + esc(r.client) + '</b></td>' +
+        '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.contact) + '</td>' +
+        '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.type) + '</td>' +
+        '<td style="padding:6px 8px;border:1px solid #dadce0">' + (r.nombre == null ? '' : fmtNum(r.nombre)) + '</td>' +
+        '<td style="padding:6px 8px;border:1px solid #dadce0">' + (r.poids == null ? '' : esc(r.poids)) + '</td>' +
+        '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.commentaires) + '</td>' +
+        '<td style="padding:6px 8px;border:1px solid #dadce0;white-space:nowrap">' +
           '<button onclick="demCommander(' + r.row + ')">Commander</button> ' +
           '<button onclick="demStartEdit(' + r.row + ')">Modifier</button> ' +
           '<button onclick="demAskDelete(' + r.row + ')"' +
