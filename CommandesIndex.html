@@ -14,9 +14,18 @@
     .go { background: #188038; color: #fff; margin-top: 18px; }
     .go:disabled { background: #999; cursor: not-allowed; }
     .ghost { background: #f1f3f4; color: #202124; }
-    .tabs { display: flex; gap: 8px; border-bottom: 2px solid #dadce0; margin-bottom: 8px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 2px solid #dadce0; margin-bottom: 8px; }
     .tab { padding: 10px 18px; cursor: pointer; font-size: 17px; border-bottom: 3px solid transparent; margin-bottom: -2px; }
     .tab.active { border-bottom-color: #1a73e8; color: #1a73e8; font-weight: bold; }
+    /* Prix poisson tab: a read-only price list. Horizontal scroll on the
+       wrapper, never on the page body - the fry grid is 7 columns. */
+    .prixWrap { overflow-x: auto; }
+    .prixTbl { border-collapse: collapse; width: 100%; font-size: 15px; }
+    .prixTbl th, .prixTbl td { border: 1px solid #dadce0; padding: 6px 8px;
+                               text-align: right; white-space: nowrap; }
+    .prixTbl th { background: #f1f3f4; text-align: center; font-size: 13px; }
+    .prixTbl td.cal { text-align: left; font-weight: bold; }
+    .prixTbl td.pro { text-align: left; }
     .card { border: 1px solid #dadce0; border-radius: 6px; padding: 12px 14px; margin-top: 14px; }
     .card h3 { margin: 0 0 4px 0; font-size: 17px; }
     .totalAmount { font-size: 26px; font-weight: bold; color: #188038; }
@@ -69,6 +78,7 @@
     <div class="tab" id="tabRes" onclick="switchMode('res')">R&eacute;servations</div>
     <div class="tab" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
     <div class="tab" id="tabHist" onclick="switchMode('hist')">Historique</div>
+    <div class="tab" id="tabPrix" onclick="switchMode('prix')">Prix poisson</div>
   </div>
 
   <div id="status"></div>
@@ -77,6 +87,7 @@
   <div id="paneRes" style="display:none"></div>
   <div id="paneDem" style="display:none"></div>
   <div id="paneHist" style="display:none"></div>
+  <div id="panePrix" style="display:none"></div>
 
 <script>
 
@@ -160,11 +171,13 @@
     el('tabRes').className = 'tab' + (m === 'res' ? ' active' : '');
     el('tabDem').className = 'tab' + (m === 'dem' ? ' active' : '');
     el('tabHist').className = 'tab' + (m === 'hist' ? ' active' : '');
+    el('tabPrix').className = 'tab' + (m === 'prix' ? ' active' : '');
     el('paneNew').style.display = (m === 'new' ? '' : 'none');
     el('paneFul').style.display = (m === 'ful' ? '' : 'none');
     el('paneRes').style.display = (m === 'res' ? '' : 'none');
     el('paneDem').style.display = (m === 'dem' ? '' : 'none');
     el('paneHist').style.display = (m === 'hist' ? '' : 'none');
+    el('panePrix').style.display = (m === 'prix' ? '' : 'none');
     setStatus('', '');
     // 2026-08-30: refresh on EVERY visit, not only the first. The list
     // was built once and then only unhidden, so an order saved in the
@@ -179,8 +192,92 @@
     if (m === 'res') renderRes();
     if (m === 'dem') renderDem();
     if (m === 'hist') renderHist();
+    if (m === 'prix') renderPrix();
     // Leaving the order form abandons any pending Commander hand-off.
     if (m !== 'new') pendingDem = null;
+  }
+
+  /* ---------- MODE F: Prix poisson (lecture seule) ----------
+   *
+   * Renders the SAME object the order form prices from, so the
+   * displayed price and the charged price cannot disagree. No input,
+   * no button: the price list belongs to Kim and a worker must never
+   * be able to change it from this screen.
+   *
+   * Re-fetched on every visit, not read from the boot copy: a worker
+   * opening this tab wants today's price, and the boot copy is as old
+   * as the page. The refreshed TARIFS also benefits the order form.
+   * The 5 min server cache makes the extra call nearly free.
+   *
+   * The Ambohimangakely transport rates are NOT shown here. They are
+   * hardcoded in transportAmount() rather than read from the sheet,
+   * so printing them would create a third home for the same number.
+   */
+  function renderPrix() {
+    const pane = el('panePrix');
+    pane.innerHTML = '<div class="banner">Chargement des tarifs…</div>';
+    google.script.run
+      .withSuccessHandler(t => { TARIFS = t; pane.innerHTML = prixHtml(t); })
+      .withFailureHandler(e => {
+        pane.innerHTML = '<div class="err">Tarifs indisponibles : ' +
+                         esc(e.message) + '</div>';
+      })
+      .cmdGetTarifs();
+  }
+
+  /** A price, or an em dash. Never a bare 0 - a 0 price is not a price. */
+  function prixAr(n) {
+    return (n === null || n === undefined || !isFinite(n) || n <= 0)
+      ? '\u2014' : fmtNum(n);
+  }
+
+  /** Build the read-only price tables from a cmdGetTarifs() result. */
+  function prixHtml(t) {
+    if (!t || !t.bands || !t.bands.length) {
+      return '<div class="err">Liste de prix vide.</div>';
+    }
+    const g = n => String(n).replace('.', ',');
+    let h = '';
+
+    h += '<div class="card"><h3>Alevins &mdash; tilapia monosexe ' +
+         '<span class="muted">(Ar / pi&egrave;ce)</span></h3>' +
+         '<div class="prixWrap"><table class="prixTbl">' +
+         '<tr><th>Calibre</th><th>Provende</th>' +
+         '<th>Enl&egrave;vement<br>&agrave; la ferme</th>' +
+         '<th>Environs ferme<br>&lt; 5000</th>' +
+         '<th>Environs ferme<br>&gt; 5000</th>' +
+         '<th>Ambohimangakely<br>&lt; 5000</th>' +
+         '<th>Ambohimangakely<br>&gt; 5000</th></tr>';
+    t.bands.forEach(b => {
+      const cal = g(b.min) + ' - ' + g(b.max) + ' g';
+      [['avec', 'Avec'], ['sans', 'Sans']].forEach((p, i) => {
+        const v = b[p[0]] || {};
+        h += '<tr>' +
+             (i === 0 ? '<td rowspan="2" class="cal">' + esc(cal) + '</td>' : '') +
+             '<td class="pro">' + p[1] + '</td>' +
+             '<td>' + prixAr(v.enlevement) + '</td>' +
+             '<td>' + prixAr(v.environsLe) + '</td>' +
+             '<td>' + prixAr(v.environsGt) + '</td>' +
+             '<td>' + prixAr(v.ambohimLe) + '</td>' +
+             '<td>' + prixAr(v.ambohimGt) + '</td></tr>';
+      });
+    });
+    h += '</table></div></div>';
+
+    const f = t.fish || {};
+    h += '<div class="card"><h3>Poisson grossi ' +
+         '<span class="muted">(Ar / kg)</span></h3>' +
+         '<div class="prixWrap"><table class="prixTbl">' +
+         '<tr><th>D&eacute;tail</th><th>Gros</th></tr>' +
+         '<tr><td>' + prixAr(f.detail) + '</td>' +
+         '<td>' + prixAr(f.gros) + '</td></tr>' +
+         '</table></div></div>';
+
+    h += '<div class="muted" style="margin-top:14px">' +
+         'Liste de prix en lecture seule. Les prix sont modifi&eacute;s ' +
+         'uniquement par Kim, dans l\'onglet Tarifs du fichier Commandes.' +
+         '</div>';
+    return h;
   }
 
   // ---------- MODE C: réservations ----------
