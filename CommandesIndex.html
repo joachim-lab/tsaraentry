@@ -744,8 +744,9 @@
     var total = 0;
     var h = '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
       '<tr style="text-align:left;border-bottom:2px solid #dadce0">' +
-      '<th style="' + cell + '">N° commande</th>' +
       '<th style="' + cell + '">Date</th>' +
+      '<th style="' + cell + '">N° commande</th>' +
+      '<th style="' + cell + '">N° facture</th>' +
       '<th style="' + cell + '">Client</th>' +
       '<th style="' + cell + '">Quantité</th>' +
       '<th style="' + cell + '">Montant</th>' +
@@ -755,8 +756,10 @@
       total += Number(o.montantAr || 0);
       const col = HIST_COLOR[o.statut] || '#3c4043';
       h += '<tr>' +
-        '<td style="' + cell + '"><b>' + esc(o.orderNumber || '(sans numéro)') + '</b></td>' +
         '<td style="' + cell + ';white-space:nowrap">' + esc(o.dateCommande) + '</td>' +
+        '<td style="' + cell + '"><b>' + esc(o.orderNumber || '(sans numéro)') + '</b></td>' +
+        '<td style="' + cell + ';white-space:nowrap">' +
+          esc(String(o.facture || '').trim() || '—') + '</td>' +
         '<td style="' + cell + '">' + esc(o.client) + '</td>' +
         '<td style="' + cell + '">' + esc(histQty(o)) + '</td>' +
         '<td style="' + cell + ';white-space:nowrap">' + fmtAr(o.montantAr) + '</td>' +
@@ -766,7 +769,7 @@
 
     // Total of what is LISTED, so a filtered view totals the filter.
     h += '<tr style="border-top:2px solid #dadce0">' +
-      '<td style="' + cell + '" colspan="4"><b>Total (' + fmtNum(rows.length) + ')</b></td>' +
+      '<td style="' + cell + '" colspan="5"><b>Total (' + fmtNum(rows.length) + ')</b></td>' +
       '<td style="' + cell + ';white-space:nowrap"><b>' + fmtAr(total) + '</b></td>' +
       '<td style="' + cell + '"></td></tr>';
 

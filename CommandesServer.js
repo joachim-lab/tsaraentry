@@ -1969,6 +1969,7 @@ function histList() {
         dateCommande: r[C.DATE_CMD - 1],
         paiement: r[C.PAIEMENT - 1],
         dateLivraison: r[C.DATE_LIVRAISON - 1],
+        facture: r[C.FACTURE - 1],
         annule: String(r[C.ANNULE - 1] || "").trim(),
         alevinsTotal: 0,
         poissonNbTotal: 0,
@@ -1983,6 +1984,7 @@ function histList() {
     g.montantAr      += cmdNumFromDisplay_(r[C.ARGENT_ALEVINS - 1]) +
                         cmdNumFromDisplay_(r[C.ARGENT_POISSON - 1]);
     // Any row of the order can carry the state or the identity.
+    if (!g.facture && r[C.FACTURE - 1]) g.facture = r[C.FACTURE - 1];
     if (!g.client && r[C.CLIENT - 1]) g.client = r[C.CLIENT - 1];
     if (!g.dateCommande && r[C.DATE_CMD - 1]) g.dateCommande = r[C.DATE_CMD - 1];
     if (!g.paiement && r[C.PAIEMENT - 1]) g.paiement = r[C.PAIEMENT - 1];
