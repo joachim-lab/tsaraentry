@@ -1592,6 +1592,14 @@
         '</div>' +
         '<label>Remarques</label><input type="text" id="uRemarques" value="'+esc(o.remarques || '')+'">' +
         '<button class="go" id="btnFul" onclick="doFulfil()">Enregistrer</button>' +
+        (o.dateLivraison ? '' :
+        '<div style="margin-top:14px">' +
+          '<button id="btnMod" onclick="loadModify()" ' +
+            'style="background:#fff;color:#1a73e8;border:1px solid #1a73e8;' +
+            'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
+            'Modifier la commande</button>' +
+          '<div id="modZone"></div>' +
+        '</div>') +
         '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #dadce0">' +
           '<button id="btnCancel" onclick="askCancel()" ' +
             'style="background:#fff;color:#c5221f;border:1px solid #c5221f;' +
@@ -1655,6 +1663,82 @@
         bl: el('uBl').value,
         remarques: el('uRemarques').value
       });
+  }
+
+  /**
+   * MODIFIER LA COMMANDE. Only quantities and PM are editable; the
+   * money columns are sheet formulas and recompute on their own. The
+   * server refuses delivered/cancelled orders and validates any stock
+   * increase; if the engine already deducted, it corrects the lot file
+   * by the delta at once. res.stock is the proof, shown line by line.
+   */
+  var modLines = [];
+
+  function loadModify() {
+    const o = hits.filter(h => h.key === selectedKey)[0];
+    if (!o) return;
+    el('btnMod').disabled = true;
+    setStatus('banner', 'Chargement\u2026');
+    google.script.run
+      .withSuccessHandler(lines => {
+        setStatus('', '');
+        modLines = lines;
+        el('modZone').innerHTML =
+          lines.map((ln, i) =>
+            '<div class="row" style="margin-top:8px">' +
+              '<div style="align-self:center;font-weight:600;padding-top:14px">' +
+                esc(ln.lot) + '</div>' +
+              (ln.isAlevins
+                ? '<div><label>Nombre d\'alevins</label>' +
+                    '<input type="text" inputmode="decimal" id="modQ' + i + '" value="' +
+                    (ln.nombre == null ? '' : ln.nombre) + '"></div>'
+                : '<div><label>Poisson (kg)</label>' +
+                    '<input type="text" inputmode="decimal" id="modQ' + i + '" value="' +
+                    (ln.kg == null ? '' : ln.kg) + '"></div>') +
+              '<div><label>PM (g)</label>' +
+                '<input type="text" inputmode="decimal" id="modP' + i + '" value="' +
+                ((ln.isAlevins ? ln.pmAl : ln.pmGr) == null ? ''
+                  : (ln.isAlevins ? ln.pmAl : ln.pmGr)) + '"></div>' +
+            '</div>').join('') +
+          '<button class="go" id="btnModSave" onclick="doModify()">' +
+            'Enregistrer les modifications</button>';
+      })
+      .withFailureHandler(e => {
+        el('btnMod').disabled = false;
+        setStatusAndScroll('err', esc(e.message));
+      })
+      .cmdGetOrderLines(o.rows);
+  }
+
+  function doModify() {
+    if (!modLines.length) return;
+    const lines = modLines.map((ln, i) => {
+      const q = el('modQ' + i).value;
+      const p = el('modP' + i).value;
+      return ln.isAlevins
+        ? { row: ln.row, nombre: q, pm: p }
+        : { row: ln.row, kg: q, pm: p };
+    });
+    const btn = el('btnModSave');
+    btn.disabled = true;
+    setStatus('banner', 'Enregistrement\u2026');
+    google.script.run
+      .withSuccessHandler(res => {
+        // The stock lines ARE the confirmation: they state, per lot,
+        // whether the correction happened now, happens tonight, or
+        // FAILED and needs Kim. Never swallowed into a generic "OK".
+        const parts = []
+          .concat(res.stock || [])
+          .concat(res.warnings || []);
+        doSearch({ cls: 'ok',
+          html: 'Commande modifi\u00e9e.' +
+                (parts.length ? '<br>' + parts.map(esc).join('<br>') : '') });
+      })
+      .withFailureHandler(e => {
+        btn.disabled = false;
+        setStatusAndScroll('err', esc(e.message));
+      })
+      .cmdModifyOrder({ lines: lines });
   }
 
   /**

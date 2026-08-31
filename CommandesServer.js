@@ -553,6 +553,250 @@ function cmdCancelOrder(rows) {
   return { rows: targets, alreadyCancelled: already };
 }
 
+/***************************************************************
+ * MODIFIER LA COMMANDE (2026-08-31)
+ *
+ * Editable fields, per Kim: alevins -> nombre (F) + PM (G);
+ * grossis -> kg (L) + PM (M). Nothing else. Money is NEVER written:
+ * K, N, Q, W are sheet formulas (verified in the formula bar
+ * 2026-08-31: K3 =(F3*I3)+J3, N3 =IFERROR((L3*1000)/M3;0),
+ * Q3 =(O3*L3)+P3, W3 =IF(V3<>"";"x";"")), so the totals recompute
+ * on their own. Writing K or Q would kill the formula for good.
+ *
+ * GATE: every row must have V (Date livraison) empty and AA empty.
+ * Delivered or cancelled orders are refused.
+ *
+ * H IS REWRITTEN. Alevins "à livrer" (H) is a typed value, not a
+ * formula; the browser seeds it as round(F*1.05) at order time. On
+ * modify it is ALWAYS reset to round(newF*1.05) — a manual H
+ * override typed at order time does not survive a modify. One rule.
+ *
+ * STOCK, at click time, not at night:
+ *   Y empty        -> nothing to correct. The engine deducts the NEW
+ *                     quantity tonight (H/N is the new value). If Z
+ *                     holds a sticky error the row stays skipped until
+ *                     Kim clears Z — reported, not touched.
+ *   Y has [qty=X]  -> the engine deducted X. Apply (X - newDed) to the
+ *                     exact cell the engine used (same resolver:
+ *                     findSubLotColumnByOrderKey), then rewrite the
+ *                     stamp's [qty=] IN PLACE to newDed and append an
+ *                     "Ajusté" note.
+ *
+ * WHY THE STAMP IS REWRITTEN IN PLACE: tt_recreditQty in
+ * engine_core.js reads the FIRST [qty=] with a non-global regex. A
+ * second [qty=] token would make a later cancellation re-credit the
+ * PRE-edit quantity. The stamp must always carry the amount currently
+ * deducted. tsaracockpit matches "Processed on" with indexOf >= 0,
+ * so the appended note is safe there.
+ *
+ * WRITE ORDER mirrors the engine: lot-file stock first, stamp after,
+ * each flushed. Two spreadsheets, no transaction — a failure between
+ * the two writes leaves an error THE SIZE OF THE EDIT, exactly the
+ * exposure the nightly deduction already carries. There is no nightly
+ * retry pass, deliberately: one path (Kim's rule). A failure is
+ * reported on screen with "Prévenir Kim".
+ *
+ * STOCK GUARD on increases only: the DELTA is validated with
+ * cmdValidateOrderLines, same verdict as order creation. Delta is
+ * correct in both states: Y empty -> the old quantity already sits in
+ * cmdGetPendingQty; Y stamped -> the lot count is already reduced by
+ * the old quantity. Reductions are never blocked — lines with
+ * delta <= 0 are not sent to the validator, because its found/reserved
+ * checks fire before the quantity check and would block a legitimate
+ * reduction on a lot that has since been reserved.
+ ***************************************************************/
+
+/** Per-row editable data for one order. rows comes from cmdFindOrders. */
+function cmdGetOrderLines(rows) {
+  const sh = cmdSheet();
+  const C = CMD_CFG.COL;
+  const lastRow = findNextCommandeRow(sh) - 1;
+  const targets = (rows || []).map(Number).filter(function (r) {
+    return isFinite(r) && r >= CMD_CFG.START_ROW && r <= lastRow;
+  });
+  if (!targets.length) throw new Error("Aucune ligne de commande valide.");
+
+  return targets.map(function (r) {
+    const v = sh.getRange(r, 1, 1, C.ANNULE).getValues()[0];
+    const isAl = cmdToNum(v[C.ALEVINS_NB - 1]) != null;
+    return {
+      row: r,
+      lot: String(v[C.LOT - 1] || ""),
+      isAlevins: isAl,
+      nombre: cmdToNum(v[C.ALEVINS_NB - 1]),
+      pmAl: cmdToNum(v[C.ALEVINS_PM - 1]),
+      kg: cmdToNum(v[C.POISSON_KG - 1]),
+      pmGr: cmdToNum(v[C.POISSON_PM - 1])
+    };
+  });
+}
+
+/** payload.lines = [{row, nombre, pm}] (alevins) or [{row, kg, pm}]. */
+function cmdModifyOrder(payload) {
+  const f = payload || {};
+  const lines = f.lines || [];
+  if (!lines.length) throw new Error("Aucune modification re\u00e7ue.");
+
+  const sh = cmdSheet();
+  const C = CMD_CFG.COL;
+  const lastRow = findNextCommandeRow(sh) - 1;
+
+  // ---- read current state, gate, plan the jobs ----
+  const jobs = [];
+  var isAlevinsOrder = null;
+  lines.forEach(function (ln) {
+    const r = Number(ln.row);
+    if (!isFinite(r) || r < CMD_CFG.START_ROW || r > lastRow) {
+      throw new Error("Ligne " + ln.row + " invalide.");
+    }
+    const v = sh.getRange(r, 1, 1, C.ANNULE).getValues()[0];
+    if (String(v[C.ANNULE - 1] || "").trim() !== "") {
+      throw new Error("Commande annul\u00e9e \u2014 modification impossible.");
+    }
+    if (String(v[C.DATE_LIVRAISON - 1] || "").trim() !== "") {
+      throw new Error("Commande d\u00e9j\u00e0 livr\u00e9e \u2014 modification impossible.");
+    }
+
+    const key = cmdCanonKey(v[C.LOT - 1]);
+    if (!key) throw new Error("Ligne " + r + " : cl\u00e9 de lot vide.");
+    const y = String(v[C.LOG - 1] || "");
+    const m = /\[qty=([0-9][0-9.,]*)\]/.exec(y);
+    const stampQty = m ? cmdToNum(m[1]) : null;
+    const isAl = cmdToNum(v[C.ALEVINS_NB - 1]) != null;
+    if (isAlevinsOrder === null) isAlevinsOrder = isAl;
+
+    const pm = cmdToNum(ln.pm);
+    if (pm == null || pm <= 0) throw new Error("Ligne " + r + " : PM invalide.");
+
+    var job = {
+      row: r, key: key, isAl: isAl, pm: pm, y: y, stampQty: stampQty,
+      zFilled: String(v[C.ERROR - 1] || "").trim() !== ""
+    };
+    if (isAl) {
+      const nombre = cmdToNum(ln.nombre);
+      if (nombre == null || nombre <= 0) throw new Error("Ligne " + r + " : nombre invalide.");
+      job.nombre = nombre;
+      job.newDed = Math.round(nombre * 1.05);
+      job.oldDed = cmdDeduction(v[C.ALEVINS_LIVRER - 1], null);
+    } else {
+      const kg = cmdToNum(ln.kg);
+      if (kg == null || kg <= 0) throw new Error("Ligne " + r + " : kg invalide.");
+      job.kg = kg;
+      job.newDed = kg * 1000 / pm;
+      job.oldDed = cmdDeduction(null, v[C.POISSON_NB - 1]);
+    }
+    jobs.push(job);
+  });
+
+  // ---- stock guard: validate the INCREASE only ----
+  const incLines = jobs
+    .map(function (j) {
+      const base = (j.stampQty != null) ? j.stampQty : (j.oldDed || 0);
+      return { lot: j.key, qty: j.newDed - base, pm: j.pm };
+    })
+    .filter(function (l) { return l.qty > 0; });
+  var warnings = [];
+  if (incLines.length) {
+    const verdict = cmdValidateOrderLines(incLines, isAlevinsOrder ? "AL" : "GR");
+    if (!verdict.ok) {
+      throw new Error("Modification refus\u00e9e : " + verdict.blocks.join(" ; "));
+    }
+    warnings = verdict.warnings || [];
+  }
+
+  // ---- write the new order values ----
+  const changed = [];
+  jobs.forEach(function (j) {
+    function put(col, value, label) {
+      const cell = sh.getRange(j.row, col);
+      const before = cell.getDisplayValue();
+      cell.setValue(value);
+      const after = cell.getDisplayValue();
+      if (before !== after) {
+        changed.push("L" + j.row + " " + label + ": " + (before || "(vide)") + " -> " + after);
+      }
+    }
+    if (j.isAl) {
+      put(C.ALEVINS_NB, j.nombre, "Nombre alevins");
+      put(C.ALEVINS_PM, j.pm, "PM");
+      put(C.ALEVINS_LIVRER, j.newDed, "\u00c0 livrer (+5%)");
+    } else {
+      put(C.POISSON_KG, j.kg, "Kg poisson");
+      put(C.POISSON_PM, j.pm, "PM");
+    }
+  });
+  SpreadsheetApp.flush();
+
+  // ---- stock reconcile, per row, stamped rows only ----
+  const stock = [];
+  jobs.forEach(function (j) {
+    if (j.stampQty == null) {
+      stock.push(j.key + " : pas encore d\u00e9duit \u2014 le moteur d\u00e9duira la nouvelle quantit\u00e9 cette nuit.");
+      if (j.zFilled) {
+        stock.push("\u26a0 " + j.key + " : la colonne Z contient une erreur \u2014 le moteur ignorera cette ligne tant que Kim ne l'a pas effac\u00e9e.");
+      }
+      return;
+    }
+
+    // Grossis: N is a formula — read it back so the stamp and the
+    // stock move carry EXACTLY what the sheet now says, not what this
+    // function computed. Alevins: H was just written, newDed is exact.
+    var newDed = j.newDed;
+    if (!j.isAl) {
+      const nBack = cmdToNum(sh.getRange(j.row, C.POISSON_NB).getValue());
+      if (nBack != null && nBack > 0) newDed = nBack;
+    }
+    const adjust = j.stampQty - newDed;
+    if (Math.abs(adjust) < 0.001) {
+      stock.push(j.key + " : quantit\u00e9 d\u00e9duite inchang\u00e9e.");
+      return;
+    }
+
+    // Locate the exact cell the engine deducted from.
+    const lotNum = j.key.split("-")[0];
+    const list = getLotFileList();
+    var fileId = null;
+    for (var i = 0; i < list.length; i++) {
+      if (cmdCanonKey(list[i].lotNumber) === lotNum) { fileId = list[i].fileId; break; }
+    }
+    if (!fileId) {
+      stock.push("\u26a0 " + j.key + " : fichier lot introuvable \u2014 stock NON ajust\u00e9. Pr\u00e9venir Kim.");
+      return;
+    }
+    const lotSS = SpreadsheetApp.openById(fileId);
+    const hit = findSubLotColumnByOrderKey(lotSS, j.key);
+    if (!hit.found) {
+      stock.push("\u26a0 " + j.key + " : cl\u00e9 introuvable dans le fichier lot \u2014 stock NON ajust\u00e9. Pr\u00e9venir Kim.");
+      return;
+    }
+
+    // Stock first, stamp after — same order as the engine.
+    const newCount = (Number(hit.count) || 0) + adjust;
+    if (hit.source === "GROSS") {
+      lotSS.getSheetByName(LOT_CFG.GROSS_SHEET)
+           .getRange(LOT_CFG.GROSS_ROW_NOMBRE, hit.col).setValue(newCount);
+    } else {
+      lotSS.getSheetByName(hit.source).getRange(hit.row, 2).setValue(newCount);
+    }
+    SpreadsheetApp.flush();
+
+    const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(),
+                                       "yyyy-MM-dd HH:mm");
+    const newY = j.y.replace(/\[qty=[0-9][0-9.,]*\]/, "[qty=" + newDed + "]") +
+                 " | Ajust\u00e9 le " + stamp +
+                 " (" + j.stampQty + " -> " + newDed + ")";
+    sh.getRange(j.row, C.LOG).setValue(newY);
+    SpreadsheetApp.flush();
+
+    stock.push(j.key + " : stock " +
+      (adjust > 0 ? "recr\u00e9dit\u00e9 de " + Math.round(adjust)
+                  : "d\u00e9duit de " + Math.round(-adjust) + " en plus") +
+      " poisson(s) dans le fichier lot.");
+  });
+
+  return { changed: changed, stock: stock, warnings: warnings };
+}
+
 /** RUN FROM EDITOR: read-only checks of the screen-3 server side. */
 function testCommandesServer() {
   const sh = cmdSheet();
