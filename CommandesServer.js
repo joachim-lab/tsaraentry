@@ -1978,7 +1978,11 @@ function demCheckStock() {
       if (r === "TOUT") continue;
       const count = cmdToNum(vals[i][1]);
       if (count == null || count <= 0) continue;
-      const avail = count - (r || 0) - (pend[key] || 0);
+      // Math.round, mirroring buildAvailMap. The "en attente" term is
+      // fractional (Commandes N = kg*1000/PM), so this expression is not
+      // a whole number of fish. Rounded HERE, not at the display: pool
+      // feeds the allocation loop and the "manque N" figure below.
+      const avail = Math.round(count - (r || 0) - (pend[key] || 0));
       if (avail <= 0) continue;
       const pm = cmdToNum(vals[i][2]);
       if (cmdLotTypeVerdict(true,  pm, fryMax).level !== "block") pool.Alevins += avail;
