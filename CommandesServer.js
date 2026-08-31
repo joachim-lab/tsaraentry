@@ -1333,15 +1333,20 @@ function testLotGate() {
  *   r+3  "Sans provende" label (B) ; C..G = sans provende prices
  * Verified live 2026-08-12 against all 5 bands.
  *
- * Fish: B35 "Prix poisson grossi" ; B37/C37 = Detail/Gros (MGA/kg).
- * Rows 27-32 (poisson frais sur glace) are NOT used (Kim, 2026-08-12).
+ * Fish: the block is found by the LABEL "Prix poisson grossi" in
+ * column B. Label row r, headers Detail/Gros at r+1, the two
+ * MGA/kg prices at r+2. Never pin this to a literal row number.
+ * Rows 27-32 (poisson frais sur glace) were deleted 2026-08-31;
+ * the old hardcoded constant then read empty cells and returned 0,
+ * which under-billed every GR order in silence.
  * ============================================================= */
 
 const TARIFS_CFG = {
   SS_ID: CMD_CFG.SS_ID,
   SHEET: "Tarifs",
   BAND_START_ROWS: [3, 8, 12, 17, 22],
-  FISH_ROW: 37
+  FISH_LABEL: "Prix poisson grossi",
+  FISH_SCAN_ROWS: 60
 };
 
 /* Stock Poisson, "lot" tab: the nightly output of updateStockPoisson
@@ -1406,11 +1411,51 @@ function buildTarifs() {
     };
   });
 
-  const fishRow = sh.getRange(TARIFS_CFG.FISH_ROW, 2, 1, 2).getValues()[0]; // B37/C37
   return {
     bands: bands,
-    fish: { detail: Number(fishRow[0]) || 0, gros: Number(fishRow[1]) || 0 }
+    fish: tarifsFishPrices(sh)
   };
+}
+
+/**
+ * Grossis Detail/Gros prices (MGA/kg), found by LABEL in column B.
+ *
+ * Layout:  r    "Prix poisson grossi"
+ *          r+1  "Detail" | "Gros"      (headers)
+ *          r+2   <detail> | <gros>     (the prices)
+ *
+ * Throws rather than returning 0. A 0 here is not a missing price,
+ * it is a wrong invoice: the client leaves Prix/kg blank, put()
+ * skips the null, and Q = (O*L)+P books the order at the frais
+ * only. Fail loudly instead.
+ *
+ * @param {Sheet} sh  the Tarifs sheet
+ * @return {{detail: number, gros: number}}
+ */
+function tarifsFishPrices(sh) {
+  const colB = sh.getRange(1, 2, TARIFS_CFG.FISH_SCAN_ROWS, 1).getValues();
+  const want = TARIFS_CFG.FISH_LABEL.toLowerCase();
+  let r = 0;
+  for (let i = 0; i < colB.length; i++) {
+    if (String(colB[i][0] || "").trim().toLowerCase() === want) {
+      r = i + 1;   // getValues is 0-based, sheet rows are 1-based
+      break;
+    }
+  }
+  if (!r) {
+    throw new Error('Tarifs : libelle "' + TARIFS_CFG.FISH_LABEL +
+                    '" introuvable en colonne B (lignes 1-' +
+                    TARIFS_CFG.FISH_SCAN_ROWS + ')');
+  }
+
+  const row = sh.getRange(r + 2, 2, 1, 2).getValues()[0];
+  const detail = Number(row[0]) || 0;
+  const gros = Number(row[1]) || 0;
+  if (!detail || !gros) {
+    throw new Error("Tarifs : prix poisson grossi vide ligne " + (r + 2) +
+                    " (Detail=" + row[0] + ", Gros=" + row[1] + ")");
+  }
+  return { detail: detail, gros: gros };
 }
 
 /** RUN FROM EDITOR: sanity-check the parsed price list. */
