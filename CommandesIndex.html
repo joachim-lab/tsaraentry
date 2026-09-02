@@ -112,6 +112,7 @@
   // selection that reveals one the map did not have - a lot file created
   // or emptied since the last rebuild. One set, two sources of entries.
   const NOT_SELLABLE = {};
+  let GATE_FAILED = false;     // true once cmdGetLotGateData has thrown
   let lines = [{}];            // create mode: one line per lot
   let mode = 'new';
   let hits = [];               // fulfilment search results
@@ -159,18 +160,50 @@
     .cmdGetTarifs();
 
   // Lot/type gate data: one read of Stock Poisson, all lots at once.
-  // If it fails the dropdown simply stays unfiltered - the per-lot check
-  // at selection and the server check at save both still run.
+  // If it fails the dropdown stays unfiltered AND says so - the per-lot
+  // check at selection and the server check at save both still run.
+  // Called at boot and again after every successful save.
+  loadGateData();
+
+  function loadGateData() {
   google.script.run
     .withSuccessHandler(g => {
       GATE = g;
+      GATE_FAILED = false;
+      showGateMsg();
       if (g && g.notSellable) {
         Object.keys(g.notSellable).forEach(k => { NOT_SELLABLE[k] = true; });
       }
       if (el('linesWrap')) renderLines();
     })
-    .withFailureHandler(() => { GATE = null; })
+    .withFailureHandler(() => {
+      GATE = null;
+      GATE_FAILED = true;
+      showGateMsg();
+      if (el('linesWrap')) renderLines();
+    })
     .cmdGetLotGateData();
+  }
+
+  /**
+   * Say so when the gate data is missing. The form stays usable by
+   * design - the per-lot readout and the server check at save both
+   * still run - but a screen that drops its safety data silently
+   * looks exactly like a screen that never had any. 2026-09-02.
+   *
+   * Written into its own line, not setStatus: a reload after a save
+   * must not overwrite the order confirmation.
+   */
+  function showGateMsg() {
+    const m = el('gateMsg');
+    if (!m) return;                      // renderNew has not run yet
+    if (!GATE_FAILED) { m.innerHTML = ''; return; }
+    m.innerHTML = '<div class="warn">Donn\u00e9es de contr\u00f4le des lots ' +
+      'indisponibles \u2014 poids, quantit\u00e9s et r\u00e9servations ne ' +
+      'sont pas affich\u00e9s. La commande reste possible : le stock est ' +
+      'v\u00e9rifi\u00e9 \u00e0 la s\u00e9lection du lot et \u00e0 ' +
+      'l\'enregistrement. Pr\u00e9venir Kim.</div>';
+  }
 
   function switchMode(m) {
     mode = m;
@@ -990,6 +1023,7 @@
             '<input type="text" inputmode="decimal" id="fKm" oninput="recomputeTransport()"></div>' +
         '</div>' +
       '</div>' +
+      '<div id="gateMsg"></div>' +
       '<div id="linesWrap"></div>' +
       '<button class="primary" style="margin-top:12px" onclick="addLine()">+ Ajouter un lot</button>' +
       '<button class="ghost" style="margin-top:12px;margin-left:8px" id="btnRefreshLots" ' +
@@ -1602,6 +1636,9 @@
       .withSuccessHandler(res => {
         lines = [{}];
         renderNew();
+        // The counts were read at boot. Without this the fish just
+        // sold stay on offer for the next order on the same page.
+        loadGateData();
         demAfterOrder(payload);
         const msg = 'Commande <b>' + esc(res.orderNumber) + '</b> enregistrée — ' +
           res.rowCount + ' ligne(s).';
