@@ -1804,7 +1804,7 @@ function demList() {
   const sh = demSheet();
   const lastRow = sh.getLastRow();
   if (lastRow < DEM_START) return [];
-  const vals = sh.getRange(DEM_START, 1, lastRow - DEM_START + 1, 8).getValues();
+  const vals = sh.getRange(DEM_START, 1, lastRow - DEM_START + 1, 11).getValues();
   const tz = Session.getScriptTimeZone();
   const out = [];
   for (var i = 0; i < vals.length; i++) {
@@ -1824,7 +1824,10 @@ function demList() {
       nombre: cmdToNum(vals[i][4]),
       commentaires: String(vals[i][5] == null ? "" : vals[i][5]).trim(),
       poids: cmdToNum(vals[i][6]),
-      rang: cmdToNum(vals[i][7])
+      rang: cmdToNum(vals[i][7]),
+      categorie: String(vals[i][8] == null ? "" : vals[i][8]).trim(),
+      livraison: String(vals[i][9] == null ? "" : vals[i][9]).trim(),
+      prix: cmdToNum(vals[i][10])
     });
   }
   // Manual priority (column H) decides the queue, and the queue decides
@@ -1921,6 +1924,26 @@ function demClean(p) {
     throw new Error("Poids alevins invalide : " + poids + " g. Choisir dans la liste.");
   }
 
+  // The commercial choices behind the price. Alevins price the grid by
+  // provende and delivery; Poisson is flat Détail/Gros with no delivery
+  // choice - livraison is forced blank so a stale value cannot survive
+  // a type change.
+  const categorie = String(p && p.categorie != null ? p.categorie : "").trim();
+  const catOk = (type === "Alevins") ? ["avec", "sans"] : ["detail", "gros"];
+  if (catOk.indexOf(categorie) < 0) {
+    throw new Error((type === "Alevins" ? "Type de client" : "Qualité") +
+                    " invalide : " + categorie);
+  }
+  var livraison = "";
+  if (type === "Alevins") {
+    livraison = String(p && p.livraison != null ? p.livraison : "").trim();
+    if (["enlevement", "environs", "ambohim"].indexOf(livraison) < 0) {
+      throw new Error("Livraison invalide : " + livraison);
+    }
+  }
+  const prix = cmdToNum(p.prix);
+  if (prix == null || prix <= 0) throw new Error("Prix requis (Ar).");
+
   const m = dateStr.split("-");
   return {
     date: new Date(Number(m[0]), Number(m[1]) - 1, Number(m[2])),
@@ -1929,7 +1952,10 @@ function demClean(p) {
     type: type,
     nombre: nombre,
     commentaires: String(p && p.commentaires != null ? p.commentaires : "").trim(),
-    poids: poids
+    poids: poids,
+    categorie: categorie,
+    livraison: livraison,
+    prix: prix
   };
 }
 
@@ -1954,8 +1980,9 @@ function demAdd(p) {
   // has been waiting. Kim re-ranks with the arrows when it is urgent.
   var rang = 0;
   demList().forEach(function (d) { if (d.rang != null && d.rang > rang) rang = d.rang; });
-  sh.getRange(row, 1, 1, 8).setValues(
-    [[c.date, c.client, c.contact, c.type, c.nombre, c.commentaires, c.poids, rang + 1]]);
+  sh.getRange(row, 1, 1, 11).setValues(
+    [[c.date, c.client, c.contact, c.type, c.nombre, c.commentaires, c.poids,
+      rang + 1, c.categorie, c.livraison, c.prix]]);
   return { row: row };
 }
 
@@ -1964,8 +1991,11 @@ function demUpdate(p) {
   const sh = demSheet();
   demCheckRow(sh, row, p && p.seenClient, p && p.seenContact);
   const c = demClean(p);
+  // Two writes around column H: rang belongs to the queue, not to the
+  // record, and an edit must not move the line in the queue.
   sh.getRange(row, 1, 1, 7).setValues(
     [[c.date, c.client, c.contact, c.type, c.nombre, c.commentaires, c.poids]]);
+  sh.getRange(row, 9, 1, 3).setValues([[c.categorie, c.livraison, c.prix]]);
   return { row: row };
 }
 

@@ -508,16 +508,20 @@
 
   const DEM_POIDS_AL = ['0.5', '1', '1.5', '2', '3', '4', '5', '10'];
 
-  const DEM_MOIS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin',
-                    'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
-
-  /** '2026-08-19' -> '19 Août'. Year appended only when not current. */
+  /** '2026-08-19' -> '19/8'. Year appended only when not current. */
   function demFmtDate(s) {
     var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''));
     if (!m) return String(s || '');
-    var out = Number(m[3]) + ' ' + DEM_MOIS[Number(m[2]) - 1];
-    if (Number(m[1]) !== (new Date()).getFullYear()) out += ' ' + m[1];
+    var out = Number(m[3]) + '/' + Number(m[2]);
+    if (Number(m[1]) !== (new Date()).getFullYear()) out += '/' + m[1].slice(2);
     return out;
+  }
+
+  /** Column is narrow; the data keeps the full word. */
+  function demTypeShort(t) {
+    if (t === 'Alevins') return 'Alv';
+    if (t === 'Poisson') return 'Gro';
+    return t;
   }
 
   let demRows = [];    // last list from the server
@@ -625,14 +629,15 @@
           'style="background:#188038;color:#fff;border-color:#188038">Enregistrer l’ordre</button> ' +
         '<button onclick="demCancelOrder()">Annuler</button></div>';
     }
-    h += '<div class="demWrap"><table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
+    h += '<div class="demWrap"><table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:14px">' +
       '<tr style="text-align:left;border-bottom:2px solid #dadce0">' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Date</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Client</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Contact</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Type</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Nombre</th>' +
-      '<th style="padding:6px 8px;border:1px solid #dadce0">Poids (g)</th>' +
+      '<th style="padding:6px 8px;border:1px solid #dadce0">Prix</th>' +
+      '<th style="padding:6px 8px;border:1px solid #dadce0">(g)</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Commentaires</th>' +
       (demStock ? '<th style="padding:6px 8px;border:1px solid #dadce0">Disponibilité</th>' : '') +
       '<th style="padding:6px 8px;border:1px solid #dadce0"></th></tr>';
@@ -647,10 +652,11 @@
       var demEditRowBg = (demEdit === r.row) ? ';background:#fef7e0' : '';
       h += '<tr style="border-bottom:1px solid #e8eaed' + demEditRowBg + '">' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(demFmtDate(r.date)) + '</td>' +
-        '<td style="padding:6px 8px;border:1px solid #dadce0"><b>' + esc(r.client) + '</b></td>' +
+        '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.client) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.contact) + '</td>' +
-        '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.type) + '</td>' +
+        '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(demTypeShort(r.type)) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + (r.nombre == null ? '' : fmtNum(r.nombre)) + '</td>' +
+        '<td style="padding:6px 8px;border:1px solid #dadce0">' + (r.prix == null ? '' : fmtNum(r.prix)) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + (r.poids == null ? '' : esc(r.poids)) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.commentaires) + '</td>' +
         (demStock ? demDispoCell(r) : '') +
@@ -668,6 +674,8 @@
     });
     el('demList').innerHTML = h + '</table></div>';
   }
+
+  let demPrixUser = false;   // the user typed the price; stop recomputing it
 
   function drawDemForm() {
     var cur = null;
@@ -692,32 +700,108 @@
         '<option value="Poisson"' + (type === 'Poisson' ? ' selected' : '') + '>Poisson</option>' +
         '</select></label></div>' +
       '<div style="margin-bottom:10px"><label>Nombre<br>' +
-        '<input id="dNombre" type="number" min="1" step="1" value="' +
+        '<input id="dNombre" type="number" min="1" step="1" oninput="demRecalcPrix()" value="' +
         (cur && cur.nombre != null ? cur.nombre : '') + '"></label></div>' +
       '<div style="margin-bottom:10px" id="dPoidsWrap"></div>' +
+      '<div style="margin-bottom:10px" id="dCatWrap"></div>' +
+      '<div style="margin-bottom:10px" id="dLivWrap"></div>' +
+      '<div style="margin-bottom:10px"><label>Prix (Ar)<br>' +
+        '<input id="dPrix" type="text" inputmode="decimal" oninput="demPrixTyped()" value="' +
+        (cur && cur.prix != null ? cur.prix : '') + '"></label>' +
+        '<div class="muted" id="dPrixNote"></div></div>' +
       '<div style="margin-bottom:12px"><label>Commentaires (facultatif)<br>' +
         '<input id="dComm" type="text" size="50" value="' + esc(cur ? cur.commentaires : '') + '"></label></div>' +
       '<button onclick="demSave()">' + (demEdit ? 'Enregistrer' : 'Ajouter') + '</button>' +
       (demEdit ? ' <button onclick="demCancelEdit()">Annuler</button>' : '');
+    // A stored price is a decision and is kept; a blank one (new form,
+    // legacy row) is computed. Emptying the field returns it to the tarif.
+    demPrixUser = !!(cur && cur.prix != null);
     demTypeChanged();
   }
 
-  /** Alevins: fixed dropdown. Poisson: free grams field. */
+  /**
+   * Type-dependent fields, mirroring Nouvelle commande exactly:
+   * Alevins - poids dropdown, Type de client, Livraison.
+   * Poisson - free grams, Qualité, no livraison.
+   */
   function demTypeChanged() {
     var cur = null;
     demRows.forEach(function (r) { if (r.row === demEdit) cur = r; });
     var poids = (cur && cur.poids != null) ? String(cur.poids) : '';
+    var al = (el('dType').value === 'Alevins');
+
     var w = el('dPoidsWrap');
-    if (el('dType').value === 'Alevins') {
+    if (al) {
       var opts = '<option value="">— choisir —</option>';
       DEM_POIDS_AL.forEach(function (v) {
         opts += '<option value="' + v + '"' + (poids === v ? ' selected' : '') + '>' + v + '</option>';
       });
-      w.innerHTML = '<label>Poids (g)<br><select id="dPoids">' + opts + '</select></label>';
+      w.innerHTML = '<label>Poids (g)<br><select id="dPoids" onchange="demRecalcPrix()">' + opts + '</select></label>';
     } else {
       w.innerHTML = '<label>Poids (g)<br>' +
         '<input id="dPoids" type="number" min="1" step="any" value="' + esc(poids) + '"></label>';
     }
+
+    var cat = (cur && cur.categorie) ? cur.categorie : (al ? 'avec' : 'detail');
+    el('dCatWrap').innerHTML = al
+      ? '<label>Type de client<br><select id="dCat" onchange="demRecalcPrix()">' +
+          '<option value="avec"' + (cat === 'avec' ? ' selected' : '') + '>Client provende</option>' +
+          '<option value="sans"' + (cat === 'sans' ? ' selected' : '') + '>Pas client provende</option>' +
+        '</select></label>'
+      : '<label>Qualité<br><select id="dCat" onchange="demRecalcPrix()">' +
+          '<option value="detail"' + (cat === 'detail' ? ' selected' : '') + '>Détail</option>' +
+          '<option value="gros"' + (cat === 'gros' ? ' selected' : '') + '>Gros</option>' +
+        '</select></label>';
+
+    var liv = (cur && cur.livraison) ? cur.livraison : 'enlevement';
+    el('dLivWrap').innerHTML = al
+      ? '<label>Livraison<br><select id="dLiv" onchange="demRecalcPrix()">' +
+          '<option value="enlevement"' + (liv === 'enlevement' ? ' selected' : '') + '>Enlèvement à la ferme</option>' +
+          '<option value="environs"' + (liv === 'environs' ? ' selected' : '') + '>Livraison environs de la ferme</option>' +
+          '<option value="ambohim"' + (liv === 'ambohim' ? ' selected' : '') + '>Livraison Ambohimangakely</option>' +
+        '</select></label>'
+      : '';
+    demRecalcPrix();
+  }
+
+  function demPrixTyped() {
+    demPrixUser = String(el('dPrix').value).trim() !== '';
+    if (!demPrixUser) demRecalcPrix();        // emptied = back to the tarif
+    else demPrixNote();
+  }
+
+  /**
+   * Prix from the SAME grid the order form uses (tarifBandForPm /
+   * tarifColumnKey / TARIFS.fish - one grid, two screens, no drift):
+   * Alevins - band(poids) x categorie x livraison x tier, the tier
+   * judged on nombre + 5 %, which is exactly the colonne H that
+   * Commander will produce. Poisson - flat Détail/Gros per kg.
+   * A typed price is never overwritten.
+   */
+  function demRecalcPrix() {
+    if (demPrixUser || !TARIFS || !el('dPrix')) { demPrixNote(); return; }
+    var price = null;
+    if (el('dType').value === 'Alevins') {
+      var band = tarifBandForPm(num(el('dPoids') ? el('dPoids').value : ''));
+      if (band) {
+        var n = num(el('dNombre').value);
+        var tier = (n !== null && Math.round(n * 1.05) <= 5000) ? 'le' : 'gt';
+        price = band[el('dCat').value][tarifColumnKey(el('dLiv').value, tier)] || null;
+      }
+    } else {
+      price = TARIFS.fish[el('dCat').value] || null;
+    }
+    el('dPrix').value = (price == null) ? '' : price;
+    demPrixNote();
+  }
+
+  function demPrixNote() {
+    var n = el('dPrixNote');
+    if (!n) return;
+    n.textContent = demPrixUser
+      ? 'Prix saisi à la main — vider le champ pour revenir au tarif.'
+      : (el('dType').value === 'Alevins'
+          ? 'Tarif automatique (Ar par alevin).' : 'Tarif automatique (Ar par kg).');
   }
 
   /**
@@ -782,7 +866,10 @@
       type: el('dType').value,
       nombre: el('dNombre').value,
       commentaires: el('dComm').value,
-      poids: el('dPoids') ? el('dPoids').value : ''
+      poids: el('dPoids') ? el('dPoids').value : '',
+      categorie: el('dCat') ? el('dCat').value : '',
+      livraison: el('dLiv') ? el('dLiv').value : '',
+      prix: el('dPrix').value
     };
     // All fields mandatory except Commentaires. The server re-checks;
     // this check exists so the refusal is instant and names the fields.
@@ -792,6 +879,7 @@
     if (!p.contact) missing.push('Contact');
     if (num(p.nombre) === null || !(num(p.nombre) > 0)) missing.push('Nombre');
     if (num(p.poids) === null || !(num(p.poids) > 0)) missing.push('Poids (g)');
+    if (num(p.prix) === null || !(num(p.prix) > 0)) missing.push('Prix');
     if (missing.length) {
       setStatusAndScroll('err',
         'Pré-commande NON enregistrée — remplir : ' + missing.join(', ') + '.');
@@ -843,17 +931,16 @@
   /**
    * Hand one pré-commande to the order form.
    *
-   * With a DISPONIBLE verdict on screen, the order lines are prefilled
-   * from the lots the check allocated - one line per lot, with the count
-   * (alevins) or the kg (grossis) taken from each. Then the normal
-   * per-line lookup (onLotChange) runs on every prefilled lot, exactly
-   * as if the worker had picked it: it opens the LOT FILE and shows the
-   * real available count under the line, so a Stock Poisson lag is
-   * visible before saving - and the save check refuses anything the lot
-   * cannot cover. It also prefills the lot's real PM and the price.
+   * The commercial choices travel with it: Type de client and Livraison
+   * (Alevins) or Qualité (Poisson) are set on the order form, and the
+   * stored prix goes into every prefilled line. The price field is then
+   * USER-owned (present and not auto-flagged), so the form's automatic
+   * pricing never overwrites it - the price sticks. A legacy line with
+   * no stored prix stays blank and the form's own tarif fills it.
    *
-   * Without a DISPONIBLE verdict (check not run yet, orange or red), the
-   * previous behaviour stands: one line, no lot, the worker chooses.
+   * With a DISPONIBLE verdict, the lines come from the allocated lots,
+   * and onLotChange runs on each: the LOT FILE's real count appears
+   * under every line before saving. Otherwise one line, worker picks.
    */
   function demCommander(row) {
     var cur = null;
@@ -883,21 +970,30 @@
     switchMode('new');
     pendingDem = { row: cur.row, client: cur.client, contact: cur.contact };
     el('fType').value = typeVal;
+    if (wantAL) {
+      if (el('fProvende')) el('fProvende').value = cur.categorie || 'avec';
+      if (el('fLivraison')) el('fLivraison').value = cur.livraison || 'enlevement';
+    } else {
+      if (el('fQualite')) el('fQualite').value = cur.categorie || 'detail';
+    }
 
+    var px = (cur.prix != null) ? cur.prix : '';
     if (plan.length) {
       lines = plan.map(function (p) {
         var lot = labelOf[p.lot] || '';
         return wantAL
-          ? { lot: lot, alevinsNb: p.nb, alevinsLivrer: Math.round(p.nb * 1.05) }
-          : { lot: lot, poissonKg: Math.round(p.nb * p.pm / 100) / 10 };
+          ? { lot: lot, alevinsNb: p.nb, alevinsLivrer: Math.round(p.nb * 1.05),
+              alevinsPrix: px }
+          : { lot: lot, poissonKg: Math.round(p.nb * p.pm / 100) / 10, prixKg: px };
       });
     } else {
       lines = wantAL
         ? [{ alevinsNb: cur.nombre, alevinsPm: cur.poids,
-             alevinsLivrer: Math.round(cur.nombre * 1.05) }]
-        : [{}];
+             alevinsLivrer: Math.round(cur.nombre * 1.05), alevinsPrix: px }]
+        : [{ prixKg: px }];
     }
     renderLines();
+    onLivraisonChange();   // Ambohimangakely shows its km field
     // A value set by script fires no change event: run the lookup by hand.
     document.querySelectorAll('select[data-k="lot"]').forEach(function (sel) {
       if (sel.value) onLotChange(sel);
