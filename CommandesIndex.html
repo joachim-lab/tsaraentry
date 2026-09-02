@@ -25,6 +25,20 @@
     .tab { padding: 10px 9px; cursor: pointer; font-size: 15px; white-space: nowrap;
            border-bottom: 3px solid transparent; margin-bottom: -2px; }
     .tab.active { border-bottom-color: #1a73e8; color: #1a73e8; font-weight: bold; }
+    /* Pré-commandes table: 9 columns plus 5 buttons per row does not fit
+       the 820px body column, and clipping loses the button labels on the
+       right. The wrapper breaks out of that column and centres itself on
+       the viewport (margin-left 50% + translateX(-50%) against a body
+       that is already centred), so the table gets the screen it needs on
+       a laptop and scrolls sideways on a phone. The page body itself
+       never scrolls horizontally. */
+    .demWrap { overflow-x: auto; width: min(96vw, 1500px);
+               margin-left: 50%; transform: translateX(-50%); }
+    /* Row buttons: 17px is right for a form, far too wide for five of
+       them in one cell. */
+    .demBtn { padding: 5px 8px; font-size: 14px; background: #f1f3f4;
+              color: #202124; }
+    .demBtn:disabled { color: #9aa0a6; cursor: not-allowed; }
     /* Prix poisson tab: a read-only price list. Horizontal scroll on the
        wrapper, never on the page body - the fry grid is 7 columns. */
     .prixWrap { overflow-x: auto; }
@@ -604,7 +618,7 @@
           'style="background:#188038;color:#fff;border-color:#188038">Enregistrer l’ordre</button> ' +
         '<button onclick="demCancelOrder()">Annuler</button></div>';
     }
-    h += '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
+    h += '<div class="demWrap"><table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
       '<tr style="text-align:left;border-bottom:2px solid #dadce0">' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Date</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Client</th>' +
@@ -634,18 +648,18 @@
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.commentaires) + '</td>' +
         (demStock ? demDispoCell(r) : '') +
         '<td style="padding:6px 8px;border:1px solid #dadce0;white-space:nowrap">' +
-          '<button onclick="demMove(' + r.row + ',-1)" title="Monter"' +
+          '<button class="demBtn" onclick="demMove(' + r.row + ',-1)" title="Monter"' +
             (first ? ' disabled' : '') + '>&#9650;</button> ' +
-          '<button onclick="demMove(' + r.row + ',1)" title="Descendre"' +
+          '<button class="demBtn" onclick="demMove(' + r.row + ',1)" title="Descendre"' +
             (last ? ' disabled' : '') + '>&#9660;</button> ' +
-          '<button onclick="demCommander(' + r.row + ')"' + dis + '>Commander</button> ' +
-          '<button onclick="demStartEdit(' + r.row + ')"' + dis + '>Modifier</button> ' +
-          '<button onclick="demAskDelete(' + r.row + ')"' + dis +
-            (armed ? ' style="background:#d93025;color:#fff;border-color:#d93025"' : '') +
-            '>' + (armed ? 'Confirmer — définitif' : 'Supprimer') + '</button>' +
+          '<button class="demBtn" onclick="demCommander(' + r.row + ')"' + dis + '>Commander</button> ' +
+          '<button class="demBtn" onclick="demStartEdit(' + r.row + ')"' + dis + '>Modifier</button> ' +
+          '<button class="demBtn" onclick="demAskDelete(' + r.row + ')"' + dis +
+            (armed ? ' style="background:#d93025;color:#fff"' : '') +
+            '>' + (armed ? 'Confirmer' : 'Supprimer') + '</button>' +
         '</td></tr>';
     });
-    el('demList').innerHTML = h + '</table>';
+    el('demList').innerHTML = h + '</table></div>';
   }
 
   function drawDemForm() {
