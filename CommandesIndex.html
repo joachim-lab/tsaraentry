@@ -607,8 +607,9 @@
       '<th style="padding:6px 8px;border:1px solid #dadce0">Commentaires</th>' +
       (demStock ? '<th style="padding:6px 8px;border:1px solid #dadce0">Disponibilité</th>' : '') +
       '<th style="padding:6px 8px;border:1px solid #dadce0"></th></tr>';
-    demRows.forEach(function (r) {
+    demRows.forEach(function (r, idx) {
       var armed = (demArmed === r.row);
+      var first = (idx === 0), last = (idx === demRows.length - 1);
       // The form is below the table; the tint is what ties the two
       // together when both cannot be on screen at once.
       var demEditRowBg = (demEdit === r.row) ? ';background:#fef7e0' : '';
@@ -622,6 +623,10 @@
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.commentaires) + '</td>' +
         (demStock ? demDispoCell(r) : '') +
         '<td style="padding:6px 8px;border:1px solid #dadce0;white-space:nowrap">' +
+          '<button onclick="demMove(' + r.row + ',-1)" title="Monter"' +
+            (first ? ' disabled' : '') + '>&#9650;</button> ' +
+          '<button onclick="demMove(' + r.row + ',1)" title="Descendre"' +
+            (last ? ' disabled' : '') + '>&#9660;</button> ' +
           '<button onclick="demCommander(' + r.row + ')">Commander</button> ' +
           '<button onclick="demStartEdit(' + r.row + ')">Modifier</button> ' +
           '<button onclick="demAskDelete(' + r.row + ')"' +
@@ -681,6 +686,23 @@
       w.innerHTML = '<label>Poids (g)<br>' +
         '<input id="dPoids" type="number" min="1" step="any" value="' + esc(poids) + '"></label>';
     }
+  }
+
+  /**
+   * Move one pré-commande up or down. The queue decides who gets the
+   * fish, so the check is re-run on the new order straight away - that
+   * is the whole point of moving a line.
+   */
+  function demMove(row, dir) {
+    setStatus('banner', 'Déplacement…');
+    google.script.run
+      .withSuccessHandler(function (res) {
+        if (res && res.moved === false) { setStatus('', ''); return; }
+        setStatus('', '');
+        loadDem(demVerifStock);
+      })
+      .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+      .demMove(row, dir);
   }
 
   function demStartEdit(row) {

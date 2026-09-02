@@ -1804,7 +1804,7 @@ function demList() {
   const sh = demSheet();
   const lastRow = sh.getLastRow();
   if (lastRow < DEM_START) return [];
-  const vals = sh.getRange(DEM_START, 1, lastRow - DEM_START + 1, 7).getValues();
+  const vals = sh.getRange(DEM_START, 1, lastRow - DEM_START + 1, 8).getValues();
   const tz = Session.getScriptTimeZone();
   const out = [];
   for (var i = 0; i < vals.length; i++) {
@@ -1823,10 +1823,62 @@ function demList() {
       type: String(vals[i][3] == null ? "" : vals[i][3]).trim(),
       nombre: cmdToNum(vals[i][4]),
       commentaires: String(vals[i][5] == null ? "" : vals[i][5]).trim(),
-      poids: cmdToNum(vals[i][6])
+      poids: cmdToNum(vals[i][6]),
+      rang: cmdToNum(vals[i][7])
     });
   }
+  // Manual priority (column H) decides the queue, and the queue decides
+  // who gets the fish. A blank rang keeps sheet order and sorts last,
+  // so a row added outside the app never jumps the queue.
+  out.sort(function (a, b) {
+    const ra = (a.rang == null ? Infinity : a.rang);
+    const rb = (b.rang == null ? Infinity : b.rang);
+    if (ra !== rb) return ra - rb;
+    return a.row - b.row;
+  });
   return out;
+}
+
+/**
+ * Move one pré-commande up or down one place.
+ * dir = -1 (up) or +1 (down). Renumbers column H 1..N over the whole
+ * list in ONE write, so a half-numbered sheet cannot survive the call.
+ * Returns the new rank, or null when the line is already at the end.
+ *
+ * The ROW NUMBER IS UNCHANGED: only column H is written, so every
+ * handle the browser holds stays valid and demCheckRow still guards
+ * edits exactly as before.
+ */
+function demMove(row, dir) {
+  const target = Number(row);
+  const step = (Number(dir) < 0) ? -1 : 1;
+  const list = demList();                       // already in queue order
+  var at = -1;
+  for (var i = 0; i < list.length; i++) if (list[i].row === target) { at = i; break; }
+  if (at < 0) throw new Error("Ligne introuvable — recharger l'écran.");
+  const to = at + step;
+  if (to < 0 || to >= list.length) return { rang: at + 1, moved: false };
+
+  const tmp = list[at]; list[at] = list[to]; list[to] = tmp;
+
+  // One write per row, but the ranks are contiguous, so the sheet is
+  // never left with two lines claiming the same place.
+  const sh = demSheet();
+  for (var k = 0; k < list.length; k++) {
+    sh.getRange(list[k].row, 8).setValue(k + 1);
+  }
+  return { rang: to + 1, moved: true };
+}
+
+/** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> demRenumber
+ *  Writes 1..N into column H in the current order. Use once after
+ *  adding the column, or to repair a hand-edited rang. */
+function demRenumber() {
+  const list = demList();
+  const sh = demSheet();
+  for (var i = 0; i < list.length; i++) sh.getRange(list[i].row, 8).setValue(i + 1);
+  Logger.log("Rangs réécrits : " + list.length);
+  list.forEach(function (d, i) { Logger.log("  " + (i + 1) + "  " + d.client); });
 }
 
 /** Validate one payload and return cleaned values, or throw. */
@@ -1882,8 +1934,12 @@ function demAdd(p) {
   const c = demClean(p);
   const sh = demSheet();
   const row = Math.max(sh.getLastRow() + 1, DEM_START);
-  sh.getRange(row, 1, 1, 7).setValues(
-    [[c.date, c.client, c.contact, c.type, c.nombre, c.commentaires, c.poids]]);
+  // Last in the queue: a new demande must not take fish from one that
+  // has been waiting. Kim re-ranks with the arrows when it is urgent.
+  var rang = 0;
+  demList().forEach(function (d) { if (d.rang != null && d.rang > rang) rang = d.rang; });
+  sh.getRange(row, 1, 1, 8).setValues(
+    [[c.date, c.client, c.contact, c.type, c.nombre, c.commentaires, c.poids, rang + 1]]);
   return { row: row };
 }
 
