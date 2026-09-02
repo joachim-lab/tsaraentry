@@ -1882,33 +1882,39 @@ function testDemandes() {
 
 
 /***************************************************************
- * PRE-COMMANDES STOCK CHECK - amount only, on demand.
+ * PRE-COMMANDES STOCK CHECK - three statuses, on demand and nightly.
  *
- * Question answered: "is there enough fish of this TYPE, all lots
- * together, to serve each pré-commande?" Weight is deliberately
- * ignored (decision 2026-08-30); the poids column stays in the sheet
- * so a weight filter can be added later.
+ * Two facts per pré-commande, asked in this order:
+ *   1. enough fish of its TYPE across all lots?      no -> INDISPONIBLE
+ *   2. enough fish in lots whose PM lies within
+ *      ±DEM_PM_TOL of the requested poids?           no -> PM
+ *                                                     yes -> DISPONIBLE
+ * (Kim, 2026-09-02, replacing the amount-only rule of 2026-08-30.)
  *
  * available per lot = Stock Poisson count
  *                     - réservation (TOUT excludes the lot)
  *                     - commandes entered but not yet deducted
- * Same arithmetic as cmdGetLotAvailability, but from Stock Poisson in
- * ONE read instead of opening every lot file. ADVISORY by design:
- * Stock Poisson can lag the lot files by up to 24 h, and the real
- * block still runs at order entry against the lot file itself.
+ * Same arithmetic as cmdGetLotAvailability, from Stock Poisson in ONE
+ * read instead of opening every lot file. ADVISORY: Stock Poisson can
+ * lag the lot files by up to 24 h (morts and movements of the day; sales
+ * are already covered by the pending term). Commander re-reads the lot
+ * file for each suggested lot, and the save check is the authority.
  *
- * Lots are pooled per type with the same verdict the order dropdown
- * uses (cmdLotTypeVerdict); "warn" lots count - the sale is possible.
- * A lot with no PM in Stock Poisson counts in BOTH pools, mirroring
- * the dropdown, which leaves such lots selectable for either type.
+ * Type eligibility is the dropdown's own verdict (cmdLotTypeVerdict);
+ * "warn" lots count - the sale is possible. A lot with no PM counts for
+ * the type test, never for the band test: it cannot prove a match.
  *
- * The pool is ALLOCATED to the pré-commandes in sheet order (oldest
- * at the top): two demandes are never both told OK on the strength
- * of the same fish.
+ * ALLOCATION, in sheet order (oldest at the top): only a DISPONIBLE
+ * pré-commande takes fish, from the band lots closest-PM-first, and it
+ * records which lots and how many. PM and INDISPONIBLE take nothing -
+ * they cannot be served, so holding fish of the wrong size for them
+ * would only make the pré-commandes below look worse than they are.
+ * Two DISPONIBLE verdicts are therefore never built on the same fish.
  *
- * FUTURE: the nightly e-mail trigger calls this same function and
- * mails when a row's verdict flips to OK. One function, two uses.
+ * The nightly mail (demNotifyServable) calls this same function.
  ***************************************************************/
+
+const DEM_PM_TOL = 0.25;   // ±25 % band around the requested weight
 
 /** {canonKey: "TOUT"|number} - every reservation in one read. */
 function demResMap() {
@@ -1963,6 +1969,7 @@ function demCheckStock() {
   const sh = ss.getSheetByName(STOCK_PM_CFG.SHEET);
   if (!sh) throw new Error('Onglet introuvable: "' + STOCK_PM_CFG.SHEET + '"');
   const lastRow = sh.getLastRow();
+  const lots = [];                                   // {key, avail, pm, al, gr}
   const pool = { Alevins: 0, Poisson: 0 };
   if (lastRow >= STOCK_PM_CFG.START_ROW) {
     const vals = sh.getRange(STOCK_PM_CFG.START_ROW, 14,
@@ -1978,30 +1985,66 @@ function demCheckStock() {
       if (r === "TOUT") continue;
       const count = cmdToNum(vals[i][1]);
       if (count == null || count <= 0) continue;
-      // Math.round, mirroring buildAvailMap. The "en attente" term is
-      // fractional (Commandes N = kg*1000/PM), so this expression is not
-      // a whole number of fish. Rounded HERE, not at the display: pool
-      // feeds the allocation loop and the "manque N" figure below.
-      const avail = Math.round(count - (r || 0) - (pend[key] || 0));
+      const avail = count - (r || 0) - (pend[key] || 0);
       if (avail <= 0) continue;
       const pm = cmdToNum(vals[i][2]);
-      if (cmdLotTypeVerdict(true,  pm, fryMax).level !== "block") pool.Alevins += avail;
-      if (cmdLotTypeVerdict(false, pm, fryMax).level !== "block") pool.Poisson += avail;
+      const lot = {
+        key: key, avail: avail, pm: pm,
+        al: cmdLotTypeVerdict(true,  pm, fryMax).level !== "block",
+        gr: cmdLotTypeVerdict(false, pm, fryMax).level !== "block"
+      };
+      lots.push(lot);
+      if (lot.al) pool.Alevins += avail;
+      if (lot.gr) pool.Poisson += avail;
     }
   }
 
-  const remain = { Alevins: pool.Alevins, Poisson: pool.Poisson };
-  const out = { pool: pool, rows: [] };
+  const out = { pool: pool, tol: DEM_PM_TOL, rows: [] };
   demList().forEach(function (d) {
-    const v = { row: d.row, ok: false, manque: null };
-    if (d.nombre != null && d.nombre > 0 && remain.hasOwnProperty(d.type)) {
-      if (remain[d.type] >= d.nombre) {
-        v.ok = true;
-        remain[d.type] -= d.nombre;
-      } else {
-        v.manque = Math.ceil(d.nombre - Math.max(remain[d.type], 0));
-      }
+    const v = { row: d.row, statut: null, manque: null, bande: null, lots: [] };
+    const isAL = (d.type === "Alevins"), isGR = (d.type === "Poisson");
+    if (d.nombre == null || d.nombre <= 0 || d.poids == null || d.poids <= 0 ||
+        (!isAL && !isGR)) {
+      out.rows.push(v);                              // incomplete row: no verdict
+      return;
     }
+
+    // 1. the type test, all lots together
+    const elig = lots.filter(function (l) { return l.avail > 0 && (isAL ? l.al : l.gr); });
+    var total = 0;
+    elig.forEach(function (l) { total += l.avail; });
+    if (total < d.nombre) {
+      v.statut = "INDISPONIBLE";
+      v.manque = Math.ceil(d.nombre - total);
+      out.rows.push(v);
+      return;
+    }
+
+    // 2. the band test, closest PM first
+    const lo = d.poids * (1 - DEM_PM_TOL), hi = d.poids * (1 + DEM_PM_TOL);
+    const band = elig.filter(function (l) {
+      return l.pm != null && l.pm >= lo && l.pm <= hi;
+    }).sort(function (a, b) {
+      return Math.abs(a.pm - d.poids) - Math.abs(b.pm - d.poids);
+    });
+    var bandTotal = 0;
+    band.forEach(function (l) { bandTotal += l.avail; });
+    v.bande = Math.round(bandTotal);
+    if (bandTotal < d.nombre) {
+      v.statut = "PM";
+      out.rows.push(v);
+      return;
+    }
+
+    // 3. DISPONIBLE: take the fish, remember where from
+    var need = d.nombre;
+    for (var k = 0; k < band.length && need > 0; k++) {
+      const take = Math.min(band[k].avail, need);
+      band[k].avail -= take;
+      need -= take;
+      v.lots.push({ lot: band[k].key, nb: Math.round(take), pm: band[k].pm });
+    }
+    v.statut = "DISPONIBLE";
     out.rows.push(v);
   });
   return out;
@@ -2011,52 +2054,39 @@ function demCheckStock() {
  *  Read-only. Prints the pools and the verdict per pré-commande. */
 function testDemCheckStock() {
   const r = demCheckStock();
-  Logger.log("Pool Alevins=" + r.pool.Alevins + "  Poisson=" + r.pool.Poisson);
+  const byRow = {};
+  demList().forEach(function (d) { byRow[d.row] = d; });
+  Logger.log("Pool Alevins=" + r.pool.Alevins + "  Poisson=" + r.pool.Poisson +
+             "   bande ±" + Math.round(r.tol * 100) + " %");
   r.rows.forEach(function (v) {
-    Logger.log("  ligne " + v.row + "  " +
-      (v.ok ? "DISPONIBLE" : (v.manque != null ? "manque " + v.manque : "—")));
+    const d = byRow[v.row] || {};
+    Logger.log("  ligne " + v.row + "  " + d.client + "  " + d.nombre + " " + d.type +
+               " " + d.poids + " g   " + demVerdictText(d, v));
   });
 }
 
-
-/**
- * {canonKey: available fish} for the lot dropdown.
- * available = Stock Poisson count - NOMBRE reservation - orders
- * entered but not yet deducted. The same arithmetic the save check
- * enforces, so the number in the label is the number that will be
- * accepted. TOUT lots are omitted - the dropdown already greys them
- * via reservedAll, and a count would contradict the "réservé" label.
- * Advisory: Stock Poisson can lag the lot files by up to 24 h; the
- * per-selection readout and the save check remain the authority.
- */
-function buildAvailMap() {
-  const ss = SpreadsheetApp.openById(STOCK_PM_CFG.SS_ID);
-  const sh = ss.getSheetByName(STOCK_PM_CFG.SHEET);
-  const out = {};
-  if (!sh) return out;
-  const lastRow = sh.getLastRow();
-  if (lastRow < STOCK_PM_CFG.START_ROW) return out;
-  const vals = sh.getRange(STOCK_PM_CFG.START_ROW, 14,
-                           lastRow - STOCK_PM_CFG.START_ROW + 1, 3).getValues();
-  const resv = demResMap();
-  const pend = demPendingMap();
-  for (var i = 0; i < vals.length; i++) {
-    const key = cmdCanonKey(vals[i][0]);
-    if (!key) continue;
-    if (resv[key] === "TOUT") continue;
-    const count = cmdToNum(vals[i][1]);
-    if (count == null) continue;
-    out[key] = Math.round(count - (resv[key] || 0) - (pend[key] || 0));
+/** One-line verdict, shared by the editor tests and the mail. */
+function demVerdictText(d, v) {
+  if (!v.statut) return "— (ligne incomplète)";
+  if (v.statut === "DISPONIBLE") {
+    return "DISPONIBLE  lots : " + v.lots.map(function (l) {
+      return l.lot + " (" + l.nb + ")";
+    }).join(", ");
   }
-  return out;
+  if (v.statut === "PM") {
+    return "PM PAS DISPONIBLE  " + v.bande + " à " + d.poids + " g ±" +
+           Math.round(DEM_PM_TOL * 100) + " %";
+  }
+  return "INDISPONIBLE  manque " + v.manque;
 }
 
-
 /***************************************************************
- * PRE-COMMANDE AVAILABILITY MAIL (2026-08-30)
+ * PRE-COMMANDE STATUS MAIL (2026-08-30, three statuses 2026-09-02)
  *
- * Once a night: run demCheckStock, and mail the pré-commandes that
- * became servable SINCE THE LAST RUN. No flip, no mail.
+ * Once a night: run demCheckStock. If ANY pré-commande is new or has
+ * a different status than at the last run, mail the whole list in
+ * three sections - Disponible, PM pas disponible, Indisponible - with
+ * the changed lines marked. No change overnight, no mail.
  *
  * HOUR 7, one hour after refreshNotSellableMap at 6. demCheckStock
  * reads that map, so running before it would judge against yesterday's
@@ -2067,19 +2097,18 @@ function buildAvailMap() {
  * signature is client|contact|type|nombre|poids, which is what the
  * farm actually means by "the same demande".
  *
- * THE STORED SET IS REPLACED, not merged: it holds exactly the
- * pré-commandes servable at the end of the last run. A demande that
- * becomes servable, then stops (the fish were sold), then becomes
- * servable again is mailed again - correct, that is news each time.
+ * THE STORED MAP IS REPLACED, not merged: {signature: statut} at the
+ * end of the last run. (Before 2026-09-02 it held {signature: true};
+ * such entries read as "new" once, which yields one full mail and then
+ * the normal regime. No migration step needed.)
  *
- * ADVISORY, like the screen. Stock Poisson can lag the lot files by
- * up to 24 h, and the allocation is amount-only: weight is ignored by
- * decision, so a 0,5 g demande can be flagged on 5 g fish. The mail
- * says "à vérifier", never "confirmé".
+ * ADVISORY, like the screen: Stock Poisson can lag the lot files by
+ * up to 24 h, and the band is ±DEM_PM_TOL, a tolerance, not a promise.
+ * The mail says "à vérifier", never "confirmé".
  *
  * FAILURE IS SILENT BY DESIGN in one direction only: if the mail
- * throws, the stored set is NOT updated, so the next run retries the
- * same flips instead of losing them.
+ * throws, the stored map is NOT updated, so the next run reports the
+ * same changes instead of losing them.
  ***************************************************************/
 
 const DEM_MAIL_TO = "joachim@tilapia4food.com";
@@ -2102,53 +2131,100 @@ function demGetNotified() {
  * tsaraentry -> CommandesServer.js -> demNotifyServable
  * Mails the new flips, then stores the current servable set.
  */
-function demNotifyServable() {
-  const check = demCheckStock();
-  const rows = demList();
-  const byRow = {};
-  rows.forEach(function (d) { byRow[d.row] = d; });
+function demStatutLabel(st) {
+  return st === "DISPONIBLE" ? "Disponible"
+       : st === "PM"         ? "PM pas disponible"
+       : st === "INDISPONIBLE" ? "Indisponible" : "—";
+}
 
+/**
+ * Everything one run needs, computed once and shared by the real send
+ * and the editor dry run: the current {signature: statut} map, how
+ * many lines changed, the subject and the body.
+ */
+function demBuildReport() {
+  const check = demCheckStock();
+  const byRow = {};
+  demList().forEach(function (d) { byRow[d.row] = d; });
   const known = demGetNotified();
+
   const current = {};
-  const fresh = [];
+  const sections = { DISPONIBLE: [], PM: [], INDISPONIBLE: [] };
+  var changed = 0;
+
   check.rows.forEach(function (v) {
-    if (!v.ok) return;
     const d = byRow[v.row];
-    if (!d) return;
+    if (!d || !v.statut) return;
     const sig = demSignature(d);
-    current[sig] = true;
-    if (!known[sig]) fresh.push(d);
+    current[sig] = v.statut;
+
+    var mark = "";
+    if (typeof known[sig] !== "string") {            // absent, or pre-09-02 "true"
+      mark = "NOUVEAU"; changed++;
+    } else if (known[sig] !== v.statut) {
+      mark = "CHANGÉ (était " + demStatutLabel(known[sig]) + ")"; changed++;
+    }
+
+    var line = "  • " + d.client + "  (" + d.contact + ")  —  " +
+               d.nombre + " " + d.type + " de " + d.poids + " g" +
+               (mark ? "   <-- " + mark : "") + "\n" +
+               "      " + demVerdictText(d, v) + "\n" +
+               (d.commentaires ? "      " + d.commentaires + "\n" : "") +
+               "      demandé le " + d.date + "\n";
+    sections[v.statut].push(line);
   });
 
-  Logger.log("Servables : " + Object.keys(current).length +
-             "   nouvelles : " + fresh.length);
+  const n = { DISPONIBLE: sections.DISPONIBLE.length,
+              PM: sections.PM.length,
+              INDISPONIBLE: sections.INDISPONIBLE.length };
 
-  if (fresh.length) {
-    var body = "Ces pré-commandes peuvent maintenant être servies :\n\n";
-    fresh.forEach(function (d) {
-      body += "  • " + d.client + "  (" + d.contact + ")\n" +
-              "    " + d.nombre + " " + d.type + " de " + d.poids + " g\n" +
-              (d.commentaires ? "    " + d.commentaires + "\n" : "") +
-              "    demandé le " + d.date + "\n\n";
-    });
-    body += "Stock disponible : Alevins " + check.pool.Alevins +
-            "  —  Poisson " + check.pool.Poisson + "\n\n" +
-            "À VÉRIFIER avant de confirmer au client :\n" +
-            "  - le contrôle porte sur le NOMBRE seulement, pas sur le poids\n" +
-            "  - Stock Poisson peut avoir jusqu'à 24 h de retard\n" +
-            "  - le contrôle définitif se fait à l'enregistrement de la commande\n\n" +
-            "Onglet Pré-commandes de l'écran Commandes pour les traiter.";
+  var body = "Pré-commandes — état du jour   (" + changed + " changement(s))\n\n";
+  [["DISPONIBLE", "DISPONIBLES"], ["PM", "PM PAS DISPONIBLE"],
+   ["INDISPONIBLE", "INDISPONIBLES"]].forEach(function (p) {
+    body += p[1] + " (" + n[p[0]] + ")\n" +
+            (sections[p[0]].length ? sections[p[0]].join("\n") : "  (aucune)\n") + "\n";
+  });
+  body += "Stock disponible : Alevins " + check.pool.Alevins +
+          "  —  Poisson " + check.pool.Poisson + "\n\n" +
+          "À VÉRIFIER avant de confirmer au client :\n" +
+          "  - le poids est jugé à ±" + Math.round(DEM_PM_TOL * 100) +
+          " % du poids demandé, sur le PM du lot\n" +
+          "  - Stock Poisson peut avoir jusqu'à 24 h de retard\n" +
+          "  - le contrôle définitif se fait à l'enregistrement de la commande\n\n" +
+          "Onglet Pré-commandes de l'écran Commandes : le bouton Commander " +
+          "pré-remplit les lots indiqués.";
 
-    // Mail first, store second. A throw here leaves the stored set
-    // untouched, so the next run retries these flips.
-    MailApp.sendEmail(DEM_MAIL_TO,
-      "Tsara — " + fresh.length + " pré-commande(s) disponible(s)", body);
+  return {
+    current: current, changed: changed, counts: n, body: body,
+    subject: "Tsara — pré-commandes : " + n.DISPONIBLE + " disponible(s), " +
+             n.PM + " PM, " + n.INDISPONIBLE + " indisponible(s)" +
+             (changed ? "  (" + changed + " changement(s))" : "")
+  };
+}
+
+/**
+ * RUN BY TRIGGER, and safe to run from the editor.
+ * tsaraentry -> CommandesServer.js -> demNotifyServable
+ * Mails when something changed, then stores the current map.
+ */
+function demNotifyServable() {
+  const r = demBuildReport();
+  Logger.log("Disponibles " + r.counts.DISPONIBLE + "   PM " + r.counts.PM +
+             "   Indisponibles " + r.counts.INDISPONIBLE +
+             "   changements " + r.changed);
+
+  if (r.changed) {
+    // Mail first, store second. A throw here leaves the stored map
+    // untouched, so the next run reports the same changes.
+    MailApp.sendEmail(DEM_MAIL_TO, r.subject, r.body);
     Logger.log("Mail envoyé à " + DEM_MAIL_TO);
+  } else {
+    Logger.log("Aucun changement — pas de mail.");
   }
 
   PropertiesService.getScriptProperties()
-    .setProperty(DEM_MAIL_PROP_KEY, JSON.stringify(current));
-  return { servable: Object.keys(current).length, nouvelles: fresh.length };
+    .setProperty(DEM_MAIL_PROP_KEY, JSON.stringify(r.current));
+  return r.counts;
 }
 
 /**
@@ -2176,25 +2252,10 @@ function installDemNotifyTrigger() {
 /** RUN FROM EDITOR: what the next mail would contain. Sends NOTHING,
  *  stores NOTHING. Use this before installing the trigger. */
 function testDemNotify() {
-  const check = demCheckStock();
-  const rows = demList();
-  const byRow = {};
-  rows.forEach(function (d) { byRow[d.row] = d; });
-  const known = demGetNotified();
-  Logger.log("Déjà notifiées : " + Object.keys(known).length);
-  Logger.log("Pool Alevins=" + check.pool.Alevins + "  Poisson=" + check.pool.Poisson);
-  var n = 0;
-  check.rows.forEach(function (v) {
-    if (!v.ok) return;
-    const d = byRow[v.row];
-    if (!d) return;
-    const sig = demSignature(d);
-    const tag = known[sig] ? "déjà notifiée" : ">>> NOUVELLE - serait dans le mail";
-    Logger.log("  " + d.client + "  " + d.nombre + " " + d.type +
-               " " + d.poids + " g   " + tag);
-    if (!known[sig]) n++;
-  });
-  Logger.log("Le mail contiendrait " + n + " ligne(s).");
+  const r = demBuildReport();
+  Logger.log(r.changed ? "UN MAIL PARTIRAIT :" : "PAS DE MAIL (aucun changement). Contenu si envoyé :");
+  Logger.log("Sujet : " + r.subject);
+  Logger.log(r.body);
 }
 
 /** RUN FROM EDITOR: forget every notification, so the next run mails

@@ -510,6 +510,7 @@
   }
 
   let demStock = null;   // row -> verdict from the last stock check
+  let demTol = 25;       // band width in %, as reported by the server
 
   /**
    * Amount-only check, on demand. Pool per type = available fish
@@ -526,6 +527,7 @@
       .withSuccessHandler(function (res) {
         demStock = {};
         res.rows.forEach(function (v) { demStock[v.row] = v; });
+        if (res.tol) demTol = Math.round(res.tol * 100);
         el('demPool').textContent = 'Disponible : Alevins ' + fmtNum(res.pool.Alevins) +
           ' — Poisson ' + fmtNum(res.pool.Poisson);
         drawDemList();
@@ -539,13 +541,21 @@
 
   function demDispoCell(r) {
     var base = 'padding:6px 8px;border:1px solid #dadce0';
+    var sub = '<div style="font-weight:normal;color:#5f6368;font-size:14px;margin-top:2px">';
     var v = demStock[r.row];
-    if (!v) return '<td style="' + base + '">—</td>';
-    if (v.ok) return '<td style="' + base + ';color:#188038;font-weight:bold">Disponible</td>';
-    if (v.manque != null) {
-      return '<td style="' + base + ';color:#d93025">Manque ' + fmtNum(v.manque) + '</td>';
+    if (!v || !v.statut) return '<td style="' + base + '">—</td>';
+    if (v.statut === 'DISPONIBLE') {
+      return '<td style="' + base + ';color:#188038;font-weight:bold">Disponible' +
+        sub + esc(v.lots.map(function (l) {
+          return l.lot + ' (' + fmtNum(l.nb) + ')';
+        }).join(', ')) + '</div></td>';
     }
-    return '<td style="' + base + '">—</td>';
+    if (v.statut === 'PM') {
+      return '<td style="' + base + ';color:#e37400;font-weight:bold">PM pas disponible' +
+        sub + fmtNum(v.bande) + ' à ' + esc(r.poids) + ' g ±' + demTol + ' %</div></td>';
+    }
+    return '<td style="' + base + ';color:#d93025;font-weight:bold">Indisponible' +
+      sub + 'manque ' + fmtNum(v.manque) + '</div></td>';
   }
 
   function drawDemList() {
@@ -713,11 +723,19 @@
   }
 
   /**
-   * Hand one pré-commande to the order form. Client, contact, type and
-   * remarques are prefilled; for Alevins the first line also gets the
-   * nombre, the +5% livrer default and the poids as PM. Picking a lot
-   * may overwrite that PM with the lot's real PM - correct: the desired
-   * weight stays in the Remarques.
+   * Hand one pré-commande to the order form.
+   *
+   * With a DISPONIBLE verdict on screen, the order lines are prefilled
+   * from the lots the check allocated - one line per lot, with the count
+   * (alevins) or the kg (grossis) taken from each. Then the normal
+   * per-line lookup (onLotChange) runs on every prefilled lot, exactly
+   * as if the worker had picked it: it opens the LOT FILE and shows the
+   * real available count under the line, so a Stock Poisson lag is
+   * visible before saving - and the save check refuses anything the lot
+   * cannot cover. It also prefills the lot's real PM and the price.
+   *
+   * Without a DISPONIBLE verdict (check not run yet, orange or red), the
+   * previous behaviour stands: one line, no lot, the worker chooses.
    */
   function demCommander(row) {
     var cur = null;
@@ -736,20 +754,49 @@
       if (wantAL && k.indexOf('AL') === 0) typeVal = t;
       if (!wantAL && k.indexOf('GR') === 0) typeVal = t;
     });
+
+    var v = demStock ? demStock[row] : null;
+    var plan = (v && v.statut === 'DISPONIBLE') ? v.lots : [];
+
+    // Canon key -> the dropdown's own label for that lot.
+    var labelOf = {};
+    OPTS.lots.forEach(function (l) { labelOf[canonKey(l)] = l; });
+
     switchMode('new');
     pendingDem = { row: cur.row, client: cur.client, contact: cur.contact };
     el('fType').value = typeVal;
-    lines = wantAL
-      ? [{ alevinsNb: cur.nombre, alevinsPm: cur.poids,
-           alevinsLivrer: Math.round(cur.nombre * 1.05) }]
-      : [{}];
+
+    if (plan.length) {
+      lines = plan.map(function (p) {
+        var lot = labelOf[p.lot] || '';
+        return wantAL
+          ? { lot: lot, alevinsNb: p.nb, alevinsLivrer: Math.round(p.nb * 1.05) }
+          : { lot: lot, poissonKg: Math.round(p.nb * p.pm / 100) / 10 };
+      });
+    } else {
+      lines = wantAL
+        ? [{ alevinsNb: cur.nombre, alevinsPm: cur.poids,
+             alevinsLivrer: Math.round(cur.nombre * 1.05) }]
+        : [{}];
+    }
     renderLines();
+    // A value set by script fires no change event: run the lookup by hand.
+    document.querySelectorAll('select[data-k="lot"]').forEach(function (sel) {
+      if (sel.value) onLotChange(sel);
+    });
+
     el('fClient').value = cur.client;
     el('fContact').value = cur.contact;
     el('fRemarques').value = 'Pré-commande ' + cur.poids + ' g' +
       (cur.commentaires ? ' — ' + cur.commentaires : '');
+
+    var how = plan.length
+      ? 'lots pré-remplis : ' + plan.map(function (p) {
+          return (labelOf[p.lot] || p.lot) + ' (' + fmtNum(p.nb) + ')';
+        }).join(', ') + '. Vérifier le stock réel affiché sous chaque lot, puis Enregistrer la commande.'
+      : 'choisir le lot puis Enregistrer la commande.';
     setStatusAndScroll('banner', 'Pré-commande de <b>' + esc(cur.client) +
-      '</b> chargée — choisir le lot puis Enregistrer la commande.');
+      '</b> chargée — ' + esc(how));
   }
 
   /**
