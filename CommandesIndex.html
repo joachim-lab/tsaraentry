@@ -704,7 +704,7 @@
         .withSuccessHandler(function () {
           demEdit = 0;
           setStatusAndScroll('ok', 'Pré-commande modifiée.');
-          loadDem();
+          loadDem(demVerifStock);
         })
         .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
         .demUpdate(p);
@@ -712,7 +712,7 @@
       google.script.run
         .withSuccessHandler(function () {
           setStatusAndScroll('ok', 'Pré-commande ajoutée.');
-          loadDem();
+          loadDem(demVerifStock);
         })
         .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
         .demAdd(p);
@@ -727,7 +727,7 @@
     google.script.run
       .withSuccessHandler(function () {
         setStatusAndScroll('ok', 'Pré-commande supprimée.');
-        loadDem();
+        loadDem(demVerifStock);
       })
       .withFailureHandler(function (e) {
         demArmed = 0; drawDemList();
