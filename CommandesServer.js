@@ -1840,34 +1840,51 @@ function demList() {
 }
 
 /**
- * Move one pré-commande up or down one place.
- * dir = -1 (up) or +1 (down). Renumbers column H 1..N over the whole
- * list in ONE write, so a half-numbered sheet cannot survive the call.
- * Returns the new rank, or null when the line is already at the end.
+ * Write 1..N into column H for `list` (queue order), in ONE block
+ * write over DEM_START..lastRow. Rows not in the list - empty rows -
+ * get "" so the block cannot invent a rank for them.
  *
  * The ROW NUMBER IS UNCHANGED: only column H is written, so every
  * handle the browser holds stays valid and demCheckRow still guards
  * edits exactly as before.
  */
-function demMove(row, dir) {
-  const target = Number(row);
-  const step = (Number(dir) < 0) ? -1 : 1;
-  const list = demList();                       // already in queue order
-  var at = -1;
-  for (var i = 0; i < list.length; i++) if (list[i].row === target) { at = i; break; }
-  if (at < 0) throw new Error("Ligne introuvable — recharger l'écran.");
-  const to = at + step;
-  if (to < 0 || to >= list.length) return { rang: at + 1, moved: false };
-
-  const tmp = list[at]; list[at] = list[to]; list[to] = tmp;
-
-  // One write per row, but the ranks are contiguous, so the sheet is
-  // never left with two lines claiming the same place.
+function demWriteRanks(list) {
   const sh = demSheet();
-  for (var k = 0; k < list.length; k++) {
-    sh.getRange(list[k].row, 8).setValue(k + 1);
+  const lastRow = sh.getLastRow();
+  if (lastRow < DEM_START) return;
+  const rankOf = {};
+  list.forEach(function (d, i) { rankOf[d.row] = i + 1; });
+  const col = [];
+  for (var r = DEM_START; r <= lastRow; r++) col.push([rankOf[r] == null ? "" : rankOf[r]]);
+  sh.getRange(DEM_START, 8, col.length, 1).setValues(col);
+}
+
+/**
+ * Store a complete new order. `rows` is every row number, in the
+ * order wanted. It must be exactly the set of rows demList returns -
+ * a missing or extra row means the list changed under the browser,
+ * and the order is refused rather than applied to the wrong lines.
+ */
+function demSetOrder(rows) {
+  const want = (rows || []).map(Number);
+  const list = demList();
+  if (want.length !== list.length) {
+    throw new Error("La liste a changé depuis l'affichage. Recharger l'écran.");
   }
-  return { rang: to + 1, moved: true };
+  const byRow = {};
+  list.forEach(function (d) { byRow[d.row] = d; });
+  const ordered = [];
+  const seen = {};
+  for (var i = 0; i < want.length; i++) {
+    const d = byRow[want[i]];
+    if (!d || seen[want[i]]) {
+      throw new Error("La liste a changé depuis l'affichage. Recharger l'écran.");
+    }
+    seen[want[i]] = true;
+    ordered.push(d);
+  }
+  demWriteRanks(ordered);
+  return { n: ordered.length };
 }
 
 /** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> demRenumber
@@ -1875,8 +1892,7 @@ function demMove(row, dir) {
  *  adding the column, or to repair a hand-edited rang. */
 function demRenumber() {
   const list = demList();
-  const sh = demSheet();
-  for (var i = 0; i < list.length; i++) sh.getRange(list[i].row, 8).setValue(i + 1);
+  demWriteRanks(list);
   Logger.log("Rangs réécrits : " + list.length);
   list.forEach(function (d, i) { Logger.log("  " + (i + 1) + "  " + d.client); });
 }

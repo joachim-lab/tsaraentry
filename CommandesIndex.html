@@ -531,7 +531,7 @@
   function loadDem(then) {
     google.script.run
       .withSuccessHandler(function (rows) {
-        demRows = rows; demArmed = 0; demStock = null;
+        demRows = rows; demArmed = 0; demStock = null; demDirty = false;
         if (el('demPool')) el('demPool').textContent = '';
         drawDemList(); drawDemForm();
         if (typeof then === 'function') then();
@@ -543,6 +543,7 @@
   }
 
   let demStock = null;   // row -> verdict from the last stock check
+  let demDirty = false;  // arrows moved lines; the server has not seen the order yet
   let demTol = 25;       // band width in %, as reported by the server
 
   /**
@@ -596,7 +597,14 @@
       el('demList').innerHTML = '<div class="warn">Aucune pré-commande.</div>';
       return;
     }
-    var h = '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
+    var h = '';
+    if (demDirty) {
+      h += '<div class="warn" style="margin-bottom:10px">Ordre modifié, pas encore enregistré. ' +
+        '<button onclick="demSaveOrder()" ' +
+          'style="background:#188038;color:#fff;border-color:#188038">Enregistrer l’ordre</button> ' +
+        '<button onclick="demCancelOrder()">Annuler</button></div>';
+    }
+    h += '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
       '<tr style="text-align:left;border-bottom:2px solid #dadce0">' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Date</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Client</th>' +
@@ -610,6 +618,9 @@
     demRows.forEach(function (r, idx) {
       var armed = (demArmed === r.row);
       var first = (idx === 0), last = (idx === demRows.length - 1);
+      // Nothing may act on a queue the server has not seen: an edit
+      // would reload the list and silently drop the unsaved order.
+      var dis = demDirty ? ' disabled' : '';
       // The form is below the table; the tint is what ties the two
       // together when both cannot be on screen at once.
       var demEditRowBg = (demEdit === r.row) ? ';background:#fef7e0' : '';
@@ -627,9 +638,9 @@
             (first ? ' disabled' : '') + '>&#9650;</button> ' +
           '<button onclick="demMove(' + r.row + ',1)" title="Descendre"' +
             (last ? ' disabled' : '') + '>&#9660;</button> ' +
-          '<button onclick="demCommander(' + r.row + ')">Commander</button> ' +
-          '<button onclick="demStartEdit(' + r.row + ')">Modifier</button> ' +
-          '<button onclick="demAskDelete(' + r.row + ')"' +
+          '<button onclick="demCommander(' + r.row + ')"' + dis + '>Commander</button> ' +
+          '<button onclick="demStartEdit(' + r.row + ')"' + dis + '>Modifier</button> ' +
+          '<button onclick="demAskDelete(' + r.row + ')"' + dis +
             (armed ? ' style="background:#d93025;color:#fff;border-color:#d93025"' : '') +
             '>' + (armed ? 'Confirmer — définitif' : 'Supprimer') + '</button>' +
         '</td></tr>';
@@ -689,20 +700,37 @@
   }
 
   /**
-   * Move one pré-commande up or down. The queue decides who gets the
-   * fish, so the check is re-run on the new order straight away - that
-   * is the whole point of moving a line.
+   * Move one line up or down IN THE BROWSER ONLY - no round trip, so
+   * bringing the last line to the top is nine instant clicks and one
+   * save. The verdicts are dropped at the first move: they were
+   * computed on the old queue and would now be wrong.
    */
   function demMove(row, dir) {
-    setStatus('banner', 'Déplacement…');
+    var at = -1;
+    demRows.forEach(function (r, i) { if (r.row === row) at = i; });
+    var to = at + (dir < 0 ? -1 : 1);
+    if (at < 0 || to < 0 || to >= demRows.length) return;
+    var tmp = demRows[at]; demRows[at] = demRows[to]; demRows[to] = tmp;
+    demDirty = true; demArmed = 0; demStock = null;
+    if (el('demPool')) el('demPool').textContent = 'Ordre modifié — enregistrer pour recalculer.';
+    drawDemList();
+  }
+
+  /** One write for the whole order, then one re-check. */
+  function demSaveOrder() {
+    setStatus('banner', 'Enregistrement de l’ordre…');
     google.script.run
-      .withSuccessHandler(function (res) {
-        if (res && res.moved === false) { setStatus('', ''); return; }
-        setStatus('', '');
+      .withSuccessHandler(function () {
+        setStatus('ok', 'Ordre enregistré.');
         loadDem(demVerifStock);
       })
       .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
-      .demMove(row, dir);
+      .demSetOrder(demRows.map(function (r) { return r.row; }));
+  }
+
+  function demCancelOrder() {
+    setStatus('', '');
+    loadDem(demVerifStock);
   }
 
   function demStartEdit(row) {
