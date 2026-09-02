@@ -2111,7 +2111,8 @@ function demCheckStock() {
 
   const out = { pool: pool, tol: DEM_PM_TOL, rows: [] };
   demList().forEach(function (d) {
-    const v = { row: d.row, statut: null, manque: null, bande: null, lots: [] };
+    const v = { row: d.row, statut: null, manque: null, bande: null,
+                lots: [], proche: [] };
     const isAL = (d.type === "Alevins"), isGR = (d.type === "Poisson");
     if (d.nombre == null || d.nombre <= 0 || d.poids == null || d.poids <= 0 ||
         (!isAL && !isGR)) {
@@ -2142,6 +2143,23 @@ function demCheckStock() {
     v.bande = Math.round(bandTotal);
     if (bandTotal < d.nombre) {
       v.statut = "PM";
+      // What to use instead: the lots nearest in weight that together
+      // cover the order. Band lots come first (distance ~0), then the
+      // closest ones outside it. A lot with no PM cannot be ranked by
+      // distance and is left out - it could not prove a match either.
+      // NOTHING IS SUBTRACTED: a PM line takes no fish, so these lots
+      // stay available to the pré-commandes below it.
+      const near = elig.filter(function (l) {
+        return l.pm != null && l.avail > 0;
+      }).sort(function (a, b) {
+        return Math.abs(a.pm - d.poids) - Math.abs(b.pm - d.poids);
+      });
+      var want = d.nombre;
+      for (var m = 0; m < near.length && want > 0; m++) {
+        const part = Math.min(near[m].avail, want);
+        want -= part;
+        v.proche.push({ lot: near[m].key, nb: Math.round(part), pm: near[m].pm });
+      }
       out.rows.push(v);
       return;
     }
@@ -2184,6 +2202,11 @@ function demVerdictText(d, v) {
     }).join(", ");
   }
   if (v.statut === "PM") {
+    if (v.proche && v.proche.length) {
+      return "PM PAS DISPONIBLE  le plus proche : " + v.proche.map(function (l) {
+        return l.lot + " (" + l.nb + " à " + l.pm + " g)";
+      }).join(", ");
+    }
     return "PM PAS DISPONIBLE  " + v.bande + " à " + d.poids + " g ±" +
            Math.round(DEM_PM_TOL * 100) + " %";
   }

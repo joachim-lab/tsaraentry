@@ -599,8 +599,15 @@
         }).join(', ')) + '</div></td>';
     }
     if (v.statut === 'PM') {
+      // The nearest lots by weight, not the size of the shortfall: the
+      // question this cell has to answer is "which lot instead?".
+      var near = (v.proche && v.proche.length)
+        ? 'le plus proche : ' + esc(v.proche.map(function (l) {
+            return l.lot + ' (' + fmtNum(l.nb) + ' à ' + l.pm + ' g)';
+          }).join(', '))
+        : fmtNum(v.bande) + ' à ' + esc(r.poids) + ' g ±' + demTol + ' %';
       return '<td style="' + base + ';color:#e37400;font-weight:bold">PM pas disponible' +
-        sub + fmtNum(v.bande) + ' à ' + esc(r.poids) + ' g ±' + demTol + ' %</div></td>';
+        sub + near + '</div></td>';
     }
     return '<td style="' + base + ';color:#d93025;font-weight:bold">Indisponible' +
       sub + 'manque ' + fmtNum(v.manque) + '</div></td>';
