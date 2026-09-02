@@ -576,7 +576,10 @@
       '<th style="padding:6px 8px;border:1px solid #dadce0"></th></tr>';
     demRows.forEach(function (r) {
       var armed = (demArmed === r.row);
-      h += '<tr style="border-bottom:1px solid #e8eaed">' +
+      // The form is below the table; the tint is what ties the two
+      // together when both cannot be on screen at once.
+      var demEditRowBg = (demEdit === r.row) ? ';background:#fef7e0' : '';
+      h += '<tr style="border-bottom:1px solid #e8eaed' + demEditRowBg + '">' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(demFmtDate(r.date)) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0"><b>' + esc(r.client) + '</b></td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.contact) + '</td>' +
@@ -650,10 +653,21 @@
   function demStartEdit(row) {
     demEdit = row; demArmed = 0;
     drawDemList(); drawDemForm();
+    var cur = null;
+    demRows.forEach(function (r) { if (r.row === row) cur = r; });
+    setStatus('banner', 'Modification de la pré-commande de <b>' +
+      esc(cur ? cur.client : '') + '</b> — le formulaire est en bas de l’écran.');
+    // Without this the form is rebuilt off-screen and the click looks
+    // like it did nothing at all.
+    var f = el('demForm');
+    if (f && f.scrollIntoView) f.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   function demCancelEdit() {
-    demEdit = 0; drawDemForm();
+    demEdit = 0; drawDemList(); drawDemForm();
+    setStatus('', '');
+    var t = el('demList');
+    if (t && t.scrollIntoView) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   function demSave() {
