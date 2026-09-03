@@ -35,6 +35,7 @@ const CS_CFG = {
   SNAP_STATUS_COL: 4,              // D = statut
   SNAP_STATUS_PENDING: "en attente",
   SNAP_STATUS_DONE: "compare",     // = WS_CFG.STOCK_SNAPSHOT.STATUS_DONE
+  SNAP_ANSWERED_COL: 5,            // E = date of the count that closed the snapshot
   MAX_LAG_DAYS: 2                  // WARNINGSYSTEM voids a count later than this
 };
 
@@ -76,42 +77,41 @@ function dayKeyOf(d) {
 /**
  * Re-open the comparison after an in-place correction.
  *
- * WARNINGSYSTEM marks the snapshot rows "compare" once it has compared
- * them. That status is the only guard both projects can read, because it
- * lives in the sheet. Setting it back to "en attente" makes the next
- * WARNINGSYSTEM run compare the corrected figures.
+ * WARNINGSYSTEM closes a snapshot with status "compare" and stamps the
+ * date of the count that closed it into column E. A correction re-opens
+ * ONLY the rows whose stamp equals the date of the column just corrected.
  *
- * Targets the newest snapshot dated on or before the count. A voided
- * snapshot is left alone: a count that missed its window must not revive.
+ * The stamp is what makes this exact. Matching on the snapshot date
+ * instead means guessing, and the guess re-opens a snapshot that an
+ * earlier count already answered.
+ *
+ * Rows written before the stamp existed have an empty column E. They
+ * match nothing, which is the safe default. A voided snapshot carries no
+ * stamp either: a count that missed its window must not revive.
+ *
+ * The stamp is cleared on re-arming, so WARNINGSYSTEM writes a fresh one
+ * when it compares again.
  * Returns true when at least one row was re-armed.
  */
 function rearmSnapshotForCount(ss, countDate) {
   const snapSh = ss.getSheetByName(CS_CFG.SNAP_SHEET);
   if (!snapSh || snapSh.getLastRow() < 2) return false;
 
-  const sv = snapSh.getRange(2, 1, snapSh.getLastRow() - 1, CS_CFG.SNAP_STATUS_COL).getValues();
+  const rows = snapSh.getLastRow() - 1;
+  const sv = snapSh.getRange(2, 1, rows, CS_CFG.SNAP_ANSWERED_COL).getValues();
   const countKey = dayKeyOf(countDate);
 
-  function doneDayKey(row) {
-    const status = String(row[CS_CFG.SNAP_STATUS_COL - 1] || "").trim().toLowerCase();
-    if (status !== CS_CFG.SNAP_STATUS_DONE) return null;
-    const d = row[CS_CFG.SNAP_DATE_COL - 1];
-    if (Object.prototype.toString.call(d) !== "[object Date]") return null;
-    return dayKeyOf(d);
-  }
-
-  let targetKey = null;
-  for (let i = 0; i < sv.length; i++) {
-    const k = doneDayKey(sv[i]);
-    if (k === null || k > countKey) continue;
-    if (targetKey === null || k > targetKey) targetKey = k;
-  }
-  if (targetKey === null) return false;
-
   let n = 0;
-  for (let i = 0; i < sv.length; i++) {
-    if (doneDayKey(sv[i]) !== targetKey) continue;
+  for (let i = 0; i < rows; i++) {
+    const status = String(sv[i][CS_CFG.SNAP_STATUS_COL - 1] || "").trim().toLowerCase();
+    if (status !== CS_CFG.SNAP_STATUS_DONE) continue;
+
+    const answered = sv[i][CS_CFG.SNAP_ANSWERED_COL - 1];
+    if (Object.prototype.toString.call(answered) !== "[object Date]") continue;
+    if (dayKeyOf(answered) !== countKey) continue;
+
     snapSh.getRange(i + 2, CS_CFG.SNAP_STATUS_COL).setValue(CS_CFG.SNAP_STATUS_PENDING);
+    snapSh.getRange(i + 2, CS_CFG.SNAP_ANSWERED_COL).clearContent();
     n++;
   }
   return n > 0;
