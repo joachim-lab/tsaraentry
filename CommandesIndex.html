@@ -20,7 +20,13 @@
        4px gap measure ~770px and fit.
        nowrap + overflow-x: a phone cannot fit six tabs at any readable
        size, so the bar scrolls sideways rather than wrapping. */
-    .tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 4px;
+    /* 7 tabs no longer fit the body column. nowrap + overflow-x hid the
+       last one behind a scrollbar macOS does not draw, so a tab could be
+       invisible with nothing to suggest it was there. Wrapping shows
+       every tab at every width; on a wide screen it stays one line.
+       Do not reinstate nowrap when an 8th tab is added - widen the wrap
+       or shorten the labels. */
+    .tabs { display: flex; flex-wrap: wrap; gap: 4px;
             border-bottom: 2px solid #dadce0; margin-bottom: 8px; }
     .tab { padding: 10px 9px; cursor: pointer; font-size: 15px; white-space: nowrap;
            border-bottom: 3px solid transparent; margin-bottom: -2px; }
@@ -1187,10 +1193,13 @@
       '<div style="margin-bottom:10px"><label>Dernière semaine (fin)<br>' +
         '<input id="rcFin" type="date" value="' + esc(cur ? cur.fin : '') +
         '"></label></div>' +
-      '<div style="margin-bottom:10px"><label>' +
-        '<input id="rcActif" type="checkbox"' +
-        ((!cur || cur.actif) ? ' checked' : '') + '> Actif</label>' +
-        '<div class="muted">Décocher suspend la règle sans la supprimer.</div>' +
+      '<div style="margin-bottom:10px">' +
+        '<label style="display:flex;align-items:center;gap:10px;max-width:420px">' +
+          '<span class="muted" style="flex:1">' +
+            'Décocher si la commande n’est plus active</span>' +
+          '<input id="rcActif" type="checkbox"' +
+          ((!cur || cur.actif) ? ' checked' : '') + '>' +
+        '</label>' +
       '</div>' +
       '<div style="margin-bottom:12px"><label>Remarques<br>' +
         '<input id="rcRem" type="text" size="50" value="' +
