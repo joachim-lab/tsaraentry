@@ -104,7 +104,8 @@
     <div class="tab active" id="tabNew" onclick="switchMode('new')">Nouvelle commande</div>
     <div class="tab" id="tabFul" onclick="switchMode('ful')">Paiement &amp; livraison</div>
     <div class="tab" id="tabRes" onclick="switchMode('res')">R&eacute;servations</div>
-    <div class="tab" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
+    <div class="tab" id="tabDemA" onclick="switchMode('demA')">Pr&eacute;-com. alevins</div>
+    <div class="tab" id="tabDemP" onclick="switchMode('demP')">Pr&eacute;-com. poisson</div>
     <div class="tab" id="tabRec" onclick="switchMode('rec')">R&eacute;currentes</div>
     <div class="tab" id="tabHist" onclick="switchMode('hist')">Historique</div>
     <div class="tab" id="tabPrix" onclick="switchMode('prix')">Prix poisson</div>
@@ -232,14 +233,15 @@
     el('tabNew').className = 'tab' + (m === 'new' ? ' active' : '');
     el('tabFul').className = 'tab' + (m === 'ful' ? ' active' : '');
     el('tabRes').className = 'tab' + (m === 'res' ? ' active' : '');
-    el('tabDem').className = 'tab' + (m === 'dem' ? ' active' : '');
+    el('tabDemA').className = 'tab' + (m === 'demA' ? ' active' : '');
+    el('tabDemP').className = 'tab' + (m === 'demP' ? ' active' : '');
     el('tabRec').className = 'tab' + (m === 'rec' ? ' active' : '');
     el('tabHist').className = 'tab' + (m === 'hist' ? ' active' : '');
     el('tabPrix').className = 'tab' + (m === 'prix' ? ' active' : '');
     el('paneNew').style.display = (m === 'new' ? '' : 'none');
     el('paneFul').style.display = (m === 'ful' ? '' : 'none');
     el('paneRes').style.display = (m === 'res' ? '' : 'none');
-    el('paneDem').style.display = (m === 'dem' ? '' : 'none');
+    el('paneDem').style.display = (m === 'demA' || m === 'demP' ? '' : 'none');
     el('paneRec').style.display = (m === 'rec' ? '' : 'none');
     el('paneHist').style.display = (m === 'hist' ? '' : 'none');
     el('panePrix').style.display = (m === 'prix' ? '' : 'none');
@@ -255,7 +257,10 @@
     // Rebuilt on every visit, never cached: the tab is shared and a stale
     // list is exactly what would let two people fight over one hold.
     if (m === 'res') renderRes();
-    if (m === 'dem') renderDem();
+    if (m === 'demA' || m === 'demP') {
+      demType = (m === 'demP') ? 'Poisson' : 'Alevins';
+      renderDem();
+    }
     if (m === 'rec') renderRec();
     if (m === 'hist') renderHist();
     if (m === 'prix') renderPrix();
@@ -528,11 +533,18 @@
     return out;
   }
 
-  /** Column is narrow; the data keeps the full word. */
-  function demTypeShort(t) {
-    if (t === 'Alevins') return 'Alv';
-    if (t === 'Poisson') return 'Gro';
-    return t;
+  // Which pré-commandes tab is on screen. The DATA does not split:
+  // demRows always holds every row (both types) so demSetOrder can
+  // send the complete queue; the tab only filters the VIEW.
+  let demType = 'Alevins';
+  let demNbPoisson = null;   // Poisson form: count computed from the kg
+
+  /** The rows this tab shows. The alevins tab takes every row that is
+   *  not Poisson, so a legacy row with a blank type stays visible. */
+  function demVisible() {
+    return demRows.filter(function (r) {
+      return (demType === 'Poisson') ? (r.type === 'Poisson') : (r.type !== 'Poisson');
+    });
   }
 
   let demRows = [];    // last list from the server
@@ -544,10 +556,11 @@
 
   function renderDem() {
     el('paneDem').innerHTML =
-      '<div style="margin-bottom:10px">' +
-        '<button onclick="demVerifStock()" ' +
+      '<div class="warn" style="margin-top:0;margin-bottom:10px">' +
+        '<button class="demBtn" onclick="demVerifStock()" ' +
           'style="background:#188038;color:#fff;border-color:#188038">' +
           'Actualiser le stock</button> ' +
+        '<span id="demOrderBtns"></span>' +
         '<span id="demPool" class="muted"></span></div>' +
       '<div id="demList">Chargement…</div>' +
       '<div id="demForm"></div>';
@@ -591,8 +604,7 @@
         demStock = {};
         res.rows.forEach(function (v) { demStock[v.row] = v; });
         if (res.tol) demTol = Math.round(res.tol * 100);
-        el('demPool').textContent = 'Disponible : Alevins ' + fmtNum(res.pool.Alevins) +
-          ' — Poisson ' + fmtNum(res.pool.Poisson);
+        el('demPool').textContent = 'Disponible : ' + fmtNum(res.pool[demType]);
         drawDemList();
       })
       .withFailureHandler(function (e) {
@@ -665,32 +677,36 @@
   }
 
   function drawDemList() {
-    if (!demRows.length) {
+    var rows = demVisible();
+    // The save/cancel pair lives in the bar next to Actualiser le
+    // stock: no sentence, the yellow bar itself says "not saved yet".
+    var ob = el('demOrderBtns');
+    if (ob) ob.innerHTML = demDirty
+      ? '<button class="demBtn" onclick="demSaveOrder()" ' +
+          'style="background:#188038;color:#fff;border-color:#188038">Enregistrer l’ordre</button> ' +
+        '<button class="demBtn" onclick="demCancelOrder()">Annuler</button> '
+      : '';
+    if (!rows.length) {
       el('demList').innerHTML = '<div class="warn">Aucune pré-commande.</div>';
       return;
     }
     var h = '';
-    if (demDirty) {
-      h += '<div class="warn" style="margin-bottom:10px">Ordre modifié, pas encore enregistré. ' +
-        '<button onclick="demSaveOrder()" ' +
-          'style="background:#188038;color:#fff;border-color:#188038">Enregistrer l’ordre</button> ' +
-        '<button onclick="demCancelOrder()">Annuler</button></div>';
-    }
     h += '<div class="demWrap"><table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:14px">' +
       '<tr style="text-align:left;border-bottom:2px solid #dadce0">' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Date</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Client</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Contact</th>' +
-      '<th style="padding:6px 8px;border:1px solid #dadce0">Type</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Nombre</th>' +
+      (demType === 'Poisson'
+        ? '<th style="padding:6px 8px;border:1px solid #dadce0">Kg</th>' : '') +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Prix</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">(g)</th>' +
       '<th style="padding:6px 8px;border:1px solid #dadce0">Commentaires</th>' +
       (demStock ? '<th style="padding:6px 8px;border:1px solid #dadce0">Disponibilité</th>' : '') +
       '<th style="padding:6px 8px;border:1px solid #dadce0"></th></tr>';
-    demRows.forEach(function (r, idx) {
+    rows.forEach(function (r, idx) {
       var armed = (demArmed === r.row);
-      var first = (idx === 0), last = (idx === demRows.length - 1);
+      var first = (idx === 0), last = (idx === rows.length - 1);
       // Nothing may act on a queue the server has not seen: an edit
       // would reload the list and silently drop the unsaved order.
       var dis = demDirty ? ' disabled' : '';
@@ -701,8 +717,11 @@
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(demFmtDate(r.date)) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.client) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.contact) + '</td>' +
-        '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(demTypeShort(r.type)) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + (r.nombre == null ? '' : fmtNum(r.nombre)) + '</td>' +
+        (demType === 'Poisson'
+          ? '<td style="padding:6px 8px;border:1px solid #dadce0">' +
+            (r.nombre != null && r.poids != null
+              ? Math.round(r.nombre * r.poids / 100) / 10 : '') + '</td>' : '') +
         demPrixCell(r) +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + (r.poids == null ? '' : esc(r.poids)) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.commentaires) + '</td>' +
@@ -729,7 +748,7 @@
     demRows.forEach(function (r) { if (r.row === demEdit) cur = r; });
     if (demEdit && !cur) demEdit = 0;          // row vanished under us
 
-    var type = cur ? cur.type : 'Alevins';
+    var type = demType;
     el('demForm').innerHTML =
       '<h3 style="margin:0 0 10px">' +
         (demEdit ? 'Modifier la pré-commande' : 'Nouvelle pré-commande') +
@@ -741,14 +760,15 @@
         '<input id="dClient" type="text" size="30" value="' + esc(cur ? cur.client : '') + '"></label></div>' +
       '<div style="margin-bottom:10px"><label>Contact<br>' +
         '<input id="dContact" type="text" size="30" value="' + esc(cur ? cur.contact : '') + '"></label></div>' +
-      '<div style="margin-bottom:10px"><label>Type<br>' +
-        '<select id="dType" onchange="demTypeChanged()">' +
-        '<option value="Alevins"' + (type === 'Alevins' ? ' selected' : '') + '>Alevins</option>' +
-        '<option value="Poisson"' + (type === 'Poisson' ? ' selected' : '') + '>Poisson</option>' +
-        '</select></label></div>' +
-      '<div style="margin-bottom:10px"><label>Nombre<br>' +
-        '<input id="dNombre" type="number" min="1" step="1" oninput="demRecalcPrix()" value="' +
-        (cur && cur.nombre != null ? cur.nombre : '') + '"></label></div>' +
+      (type === 'Poisson'
+        ? '<div style="margin-bottom:10px"><label>Kg commandé<br>' +
+            '<input id="dKg" type="number" min="0.1" step="any" oninput="demKgChanged()" value="' +
+            (cur && cur.nombre != null && cur.poids != null
+              ? Math.round(cur.nombre * cur.poids / 100) / 10 : '') + '"></label>' +
+            '<div class="muted" id="dNbNote"></div></div>'
+        : '<div style="margin-bottom:10px"><label>Nombre<br>' +
+            '<input id="dNombre" type="number" min="1" step="1" oninput="demRecalcPrix()" value="' +
+            (cur && cur.nombre != null ? cur.nombre : '') + '"></label></div>') +
       '<div style="margin-bottom:10px" id="dPoidsWrap"></div>' +
       '<div style="margin-bottom:10px" id="dCatWrap"></div>' +
       '<div style="margin-bottom:10px" id="dLivWrap"></div>' +
@@ -775,7 +795,7 @@
     var cur = null;
     demRows.forEach(function (r) { if (r.row === demEdit) cur = r; });
     var poids = (cur && cur.poids != null) ? String(cur.poids) : '';
-    var al = (el('dType').value === 'Alevins');
+    var al = (demType === 'Alevins');
 
     var w = el('dPoidsWrap');
     if (al) {
@@ -785,8 +805,11 @@
       });
       w.innerHTML = '<label>Poids (g)<br><select id="dPoids" onchange="demRecalcPrix()">' + opts + '</select></label>';
     } else {
+      // 350 g is the usual table fish. The worker can change it; the
+      // count then follows the same kg at the new weight.
       w.innerHTML = '<label>Poids (g)<br>' +
-        '<input id="dPoids" type="number" min="1" step="any" value="' + esc(poids) + '"></label>';
+        '<input id="dPoids" type="number" min="1" step="any" oninput="demKgChanged()" value="' +
+        esc(poids || '350') + '"></label>';
     }
 
     var cat = (cur && cur.categorie) ? cur.categorie : (al ? 'avec' : 'detail');
@@ -808,6 +831,25 @@
           '<option value="ambohim"' + (liv === 'ambohim' ? ' selected' : '') + '>Livraison Ambohimangakely</option>' +
         '</select></label>'
       : '';
+    if (al) demRecalcPrix(); else demKgChanged();
+  }
+
+  /** Poisson: the kg typed is the request; the fish COUNT is what
+   *  the sheet stores (column E) and what the stock check counts.
+   *  Count = kg × 1000 / poids, rounded. The note shows the count and
+   *  the real kg after rounding. */
+  function demKgChanged() {
+    demNbPoisson = null;
+    var kg = num(el('dKg') ? el('dKg').value : '');
+    var g = num(el('dPoids') ? el('dPoids').value : '');
+    var note = el('dNbNote');
+    if (kg !== null && kg > 0 && g !== null && g > 0) {
+      demNbPoisson = Math.max(1, Math.round(kg * 1000 / g));
+      if (note) note.textContent = '= ' + fmtNum(demNbPoisson) + ' poissons — ' +
+        (Math.round(demNbPoisson * g / 100) / 10) + ' kg réels';
+    } else if (note) {
+      note.textContent = '';
+    }
     demRecalcPrix();
   }
 
@@ -828,7 +870,7 @@
   function demRecalcPrix() {
     if (demPrixUser || !TARIFS || !el('dPrix')) { demPrixNote(); return; }
     var price = null;
-    if (el('dType').value === 'Alevins') {
+    if (demType === 'Alevins') {
       var band = tarifBandForPm(num(el('dPoids') ? el('dPoids').value : ''));
       if (band) {
         var n = num(el('dNombre').value);
@@ -847,7 +889,7 @@
     if (!n) return;
     n.textContent = demPrixUser
       ? 'Prix saisi à la main — vider le champ pour revenir au tarif.'
-      : (el('dType').value === 'Alevins'
+      : (demType === 'Alevins'
           ? 'Tarif automatique (Ar par alevin).' : 'Tarif automatique (Ar par kg).');
   }
 
@@ -858,13 +900,16 @@
    * computed on the old queue and would now be wrong.
    */
   function demMove(row, dir) {
+    var vis = demVisible();
     var at = -1;
-    demRows.forEach(function (r, i) { if (r.row === row) at = i; });
+    vis.forEach(function (r, i) { if (r.row === row) at = i; });
     var to = at + (dir < 0 ? -1 : 1);
-    if (at < 0 || to < 0 || to >= demRows.length) return;
-    var tmp = demRows[at]; demRows[at] = demRows[to]; demRows[to] = tmp;
+    if (at < 0 || to < 0 || to >= vis.length) return;
+    // Swap the two rows INSIDE demRows: the hidden type keeps its own
+    // positions, so the saved queue only reorders this tab's rows.
+    var ia = demRows.indexOf(vis[at]), ib = demRows.indexOf(vis[to]);
+    var tmp = demRows[ia]; demRows[ia] = demRows[ib]; demRows[ib] = tmp;
     demDirty = true; demArmed = 0; demStock = null;
-    if (el('demPool')) el('demPool').textContent = 'Ordre modifié — enregistrer pour recalculer.';
     drawDemList();
   }
 
@@ -910,8 +955,8 @@
       date: el('dDate').value,
       client: el('dClient').value.trim(),
       contact: el('dContact').value.trim(),
-      type: el('dType').value,
-      nombre: el('dNombre').value,
+      type: demType,
+      nombre: (demType === 'Poisson') ? demNbPoisson : el('dNombre').value,
       commentaires: el('dComm').value,
       poids: el('dPoids') ? el('dPoids').value : '',
       categorie: el('dCat') ? el('dCat').value : '',
@@ -924,7 +969,11 @@
     if (!p.date) missing.push('Date');
     if (!p.client) missing.push('Client');
     if (!p.contact) missing.push('Contact');
-    if (num(p.nombre) === null || !(num(p.nombre) > 0)) missing.push('Nombre');
+    if (demType === 'Poisson') {
+      if (demNbPoisson == null) missing.push('Kg commandé');
+    } else if (num(p.nombre) === null || !(num(p.nombre) > 0)) {
+      missing.push('Nombre');
+    }
     if (num(p.poids) === null || !(num(p.poids) > 0)) missing.push('Poids (g)');
     if (num(p.prix) === null || !(num(p.prix) > 0)) missing.push('Prix');
     if (missing.length) {
