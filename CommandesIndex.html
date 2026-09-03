@@ -31,6 +31,14 @@
     .tab { padding: 10px 9px; cursor: pointer; font-size: 15px; white-space: nowrap;
            border-bottom: 3px solid transparent; margin-bottom: -2px; }
     .tab.active { border-bottom-color: #1a73e8; color: #1a73e8; font-weight: bold; }
+    /* Second level, inside one pane. Green and smaller, so it cannot
+       be read as another row of the blue strip above it. */
+    .subtabs { display: flex; flex-wrap: wrap; gap: 4px;
+               border-bottom: 1px solid #dadce0; margin-bottom: 10px; }
+    .subtab { padding: 7px 14px; cursor: pointer; font-size: 14px;
+              white-space: nowrap; border-bottom: 3px solid transparent;
+              margin-bottom: -1px; color: #5f6368; }
+    .subtab.active { border-bottom-color: #188038; color: #188038; font-weight: bold; }
     /* Pré-commandes table: 9 columns plus 5 buttons per row does not fit
        the 820px body column, and clipping loses the button labels on the
        right. The wrapper breaks out of that column and centres itself on
@@ -104,8 +112,7 @@
     <div class="tab active" id="tabNew" onclick="switchMode('new')">Nouvelle commande</div>
     <div class="tab" id="tabFul" onclick="switchMode('ful')">Paiement &amp; livraison</div>
     <div class="tab" id="tabRes" onclick="switchMode('res')">R&eacute;servations</div>
-    <div class="tab" id="tabDemA" onclick="switchMode('demA')">Pr&eacute;-com. alevins</div>
-    <div class="tab" id="tabDemP" onclick="switchMode('demP')">Pr&eacute;-com. poisson</div>
+    <div class="tab" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
     <div class="tab" id="tabRec" onclick="switchMode('rec')">R&eacute;currentes</div>
     <div class="tab" id="tabHist" onclick="switchMode('hist')">Historique</div>
     <div class="tab" id="tabPrix" onclick="switchMode('prix')">Prix poisson</div>
@@ -233,15 +240,14 @@
     el('tabNew').className = 'tab' + (m === 'new' ? ' active' : '');
     el('tabFul').className = 'tab' + (m === 'ful' ? ' active' : '');
     el('tabRes').className = 'tab' + (m === 'res' ? ' active' : '');
-    el('tabDemA').className = 'tab' + (m === 'demA' ? ' active' : '');
-    el('tabDemP').className = 'tab' + (m === 'demP' ? ' active' : '');
+    el('tabDem').className = 'tab' + (m === 'dem' ? ' active' : '');
     el('tabRec').className = 'tab' + (m === 'rec' ? ' active' : '');
     el('tabHist').className = 'tab' + (m === 'hist' ? ' active' : '');
     el('tabPrix').className = 'tab' + (m === 'prix' ? ' active' : '');
     el('paneNew').style.display = (m === 'new' ? '' : 'none');
     el('paneFul').style.display = (m === 'ful' ? '' : 'none');
     el('paneRes').style.display = (m === 'res' ? '' : 'none');
-    el('paneDem').style.display = (m === 'demA' || m === 'demP' ? '' : 'none');
+    el('paneDem').style.display = (m === 'dem' ? '' : 'none');
     el('paneRec').style.display = (m === 'rec' ? '' : 'none');
     el('paneHist').style.display = (m === 'hist' ? '' : 'none');
     el('panePrix').style.display = (m === 'prix' ? '' : 'none');
@@ -257,10 +263,7 @@
     // Rebuilt on every visit, never cached: the tab is shared and a stale
     // list is exactly what would let two people fight over one hold.
     if (m === 'res') renderRes();
-    if (m === 'demA' || m === 'demP') {
-      demType = (m === 'demP') ? 'Poisson' : 'Alevins';
-      renderDem();
-    }
+    if (m === 'dem') renderDem();
     if (m === 'rec') renderRec();
     if (m === 'hist') renderHist();
     if (m === 'prix') renderPrix();
@@ -538,6 +541,7 @@
   // send the complete queue; the tab only filters the VIEW.
   let demType = 'Alevins';
   let demNbPoisson = null;   // Poisson form: count computed from the kg
+  let demPools = null;       // last pools per type, for the pool line
 
   /** The rows this tab shows. The alevins tab takes every row that is
    *  not Poisson, so a legacy row with a blank type stays visible. */
@@ -556,6 +560,12 @@
 
   function renderDem() {
     el('paneDem').innerHTML =
+      '<div class="subtabs">' +
+        '<div class="subtab" id="subDemAlevins" ' +
+          'onclick="demSetType(\'Alevins\')">Alevins</div>' +
+        '<div class="subtab" id="subDemPoisson" ' +
+          'onclick="demSetType(\'Poisson\')">Poisson</div>' +
+      '</div>' +
       '<div class="warn" style="margin-top:0;margin-bottom:10px">' +
         '<button class="demBtn" onclick="demVerifStock()" ' +
           'style="background:#188038;color:#fff;border-color:#188038">' +
@@ -564,16 +574,48 @@
         '<span id="demPool" class="muted"></span></div>' +
       '<div id="demList">Chargement…</div>' +
       '<div id="demForm"></div>';
+    demMarkSubtabs();
     // The verdict is what the tab is opened FOR, so it is not left
     // behind a click. The button stays, as a refresh: the pools move
     // whenever an order is saved elsewhere in the same session.
     loadDem(demVerifStock);
   }
 
+  /** Highlight the sub-tab that is on screen. */
+  function demMarkSubtabs() {
+    ['Alevins', 'Poisson'].forEach(function (t) {
+      var e = el('subDem' + t);
+      if (e) e.className = 'subtab' + (demType === t ? ' active' : '');
+    });
+  }
+
+  /** The pool line, for the type on screen. Blank until a check ran. */
+  function demPoolLine() {
+    if (!el('demPool')) return;
+    el('demPool').textContent = demPools
+      ? 'Disponible : ' + fmtNum(demPools[demType]) : '';
+  }
+
+  /**
+   * Change sub-tab. NO reload: demRows holds both types, and a reload
+   * would throw away an unsaved queue order. The stock verdicts are
+   * keyed by row and cover both types, so they are kept too.
+   */
+  function demSetType(t) {
+    if (demType === t) return;
+    demType = t;
+    demEdit = 0; demArmed = 0;
+    demMarkSubtabs();
+    demPoolLine();
+    drawDemList(); drawDemForm();
+    setStatus('', '');
+  }
+
   function loadDem(then) {
     google.script.run
       .withSuccessHandler(function (rows) {
         demRows = rows; demArmed = 0; demStock = null; demDirty = false;
+        demPools = null;
         if (el('demPool')) el('demPool').textContent = '';
         drawDemList(); drawDemForm();
         if (typeof then === 'function') then();
@@ -604,10 +646,12 @@
         demStock = {};
         res.rows.forEach(function (v) { demStock[v.row] = v; });
         if (res.tol) demTol = Math.round(res.tol * 100);
-        el('demPool').textContent = 'Disponible : ' + fmtNum(res.pool[demType]);
+        demPools = res.pool;
+        demPoolLine();
         drawDemList();
       })
       .withFailureHandler(function (e) {
+        demPools = null;
         el('demPool').textContent = '';
         setStatusAndScroll('err', 'Stock non vérifié : ' + esc(e.message));
       })
