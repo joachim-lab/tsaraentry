@@ -626,9 +626,92 @@ function cmdGetOrderLines(rows) {
       nombre: cmdToNum(v[C.ALEVINS_NB - 1]),
       pmAl: cmdToNum(v[C.ALEVINS_PM - 1]),
       kg: cmdToNum(v[C.POISSON_KG - 1]),
-      pmGr: cmdToNum(v[C.POISSON_PM - 1])
+      pmGr: cmdToNum(v[C.POISSON_PM - 1]),
+      prix: cmdToNum(isAl ? v[C.ALEVINS_PRIX - 1] : v[C.PRIX_KG - 1])
     };
   });
+}
+
+/***************************************************************
+ * PRIX — edit the unit price of an order line (2026-09-03).
+ *
+ * Deliberately NOT part of cmdModifyOrder. A quantity change moves
+ * stock, so cmdModifyOrder refuses a delivered order. A price change
+ * moves no fish, so it stays possible after delivery. Kim asked for
+ * exactly that.
+ *
+ * Writes column I (Prix/alevin) or column O (Prix/kg) only. K and Q
+ * are sheet formulas driven by those cells; this function never writes
+ * them, and reads them back after the write so the caller can show the
+ * recomputed amount.
+ *
+ * A cell already holding a formula is REFUSED, not overwritten. A
+ * hand-built price formula must not be destroyed by a farm-floor edit.
+ *
+ * Delivered-and-paid orders never reach this function: cmdFindOrders
+ * drops them before they can be selected. Cancelled rows are refused
+ * here as well, because a client can call any server function.
+ *
+ * NO trace of the tariff override is recorded. Kim decided this on
+ * 2026-09-03. Do not add a stamp without asking him.
+ *
+ * payload.lines = [{ row, prix }]
+ * Returns { changed: [...], totals: [...] }.
+ ***************************************************************/
+function cmdUpdateOrderPrices(payload) {
+  const f = payload || {};
+  const lines = f.lines || [];
+  if (!lines.length) throw new Error("Aucun prix reçu.");
+
+  const sh = cmdSheet();
+  const C = CMD_CFG.COL;
+  const lastRow = findNextCommandeRow(sh) - 1;
+
+  // ---- read, gate, plan. Nothing is written until every line passes.
+  const jobs = [];
+  lines.forEach(function (ln) {
+    const r = Number(ln.row);
+    if (!isFinite(r) || r < CMD_CFG.START_ROW || r > lastRow) {
+      throw new Error("Ligne " + ln.row + " invalide.");
+    }
+    const v = sh.getRange(r, 1, 1, C.ANNULE).getValues()[0];
+    if (String(v[C.ANNULE - 1] || "").trim() !== "") {
+      throw new Error("Commande annulée — modification impossible.");
+    }
+    const prix = cmdToNum(ln.prix);
+    if (prix == null || prix <= 0) throw new Error("Ligne " + r + " : prix invalide.");
+
+    const isAl = cmdToNum(v[C.ALEVINS_NB - 1]) != null;
+    const col  = isAl ? C.ALEVINS_PRIX : C.PRIX_KG;
+    if (String(sh.getRange(r, col).getFormula() || "") !== "") {
+      throw new Error("Ligne " + r + " : la cellule prix contient une formule — " +
+                      "modification refusée.");
+    }
+    jobs.push({ row: r, isAl: isAl, col: col, prix: prix });
+  });
+
+  // ---- write ----
+  const changed = [];
+  jobs.forEach(function (j) {
+    const label  = j.isAl ? "Prix/alevin" : "Prix/kg";
+    const cell   = sh.getRange(j.row, j.col);
+    const before = cell.getDisplayValue();
+    cell.setValue(j.prix);
+    const after  = cell.getDisplayValue();
+    if (before !== after) {
+      changed.push("L" + j.row + " " + label + " : " + (before || "(vide)") + " -> " + after);
+    }
+  });
+  SpreadsheetApp.flush();
+
+  // ---- read the money column back. It is a formula; this is the proof
+  // that it recomputed, not a value this function calculated.
+  const totals = jobs.map(function (j) {
+    const col = j.isAl ? C.ARGENT_ALEVINS : C.ARGENT_POISSON;
+    return "L" + j.row + " montant : " + sh.getRange(j.row, col).getDisplayValue();
+  });
+
+  return { changed: changed, totals: totals };
 }
 
 /** payload.lines = [{row, nombre, pm}] (alevins) or [{row, kg, pm}]. */

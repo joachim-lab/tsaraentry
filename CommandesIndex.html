@@ -2203,6 +2203,13 @@
           '<div id="modZone"></div>' +
         '</div>') +
         '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #dadce0">' +
+          '<button id="btnPrix" onclick="loadPrices()" ' +
+            'style="background:#fff;color:#1a73e8;border:1px solid #1a73e8;' +
+            'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
+            'Modifier les prix</button>' +
+          '<div id="prixZone"></div>' +
+        '</div>' +
+        '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #dadce0">' +
           '<button id="btnCancel" onclick="askCancel()" ' +
             'style="background:#fff;color:#c5221f;border:1px solid #c5221f;' +
             'border-radius:4px;padding:10px 14px;font-size: 17px;cursor:pointer">' +
@@ -2341,6 +2348,70 @@
         setStatusAndScroll('err', esc(e.message));
       })
       .cmdModifyOrder({ lines: lines });
+  }
+
+  /**
+   * MODIFIER LES PRIX. Shown whether the order is delivered or not: a
+   * price change moves no fish, so it carries none of the stock gates
+   * that "Modifier la commande" carries. The money column is a sheet
+   * formula; the server returns the recomputed amount, so the new total
+   * is on screen and is not a number this page worked out itself.
+   */
+  var priceLines = [];
+
+  function loadPrices() {
+    const o = hits.filter(h => h.key === selectedKey)[0];
+    if (!o) return;
+    el('btnPrix').disabled = true;
+    setStatus('banner', 'Chargement…');
+    google.script.run
+      .withSuccessHandler(lines => {
+        setStatus('', '');
+        priceLines = lines;
+        el('prixZone').innerHTML =
+          lines.map((ln, i) =>
+            '<div class="row" style="margin-top:8px">' +
+              '<div style="align-self:center;font-weight:600;padding-top:14px">' +
+                esc(ln.lot) + '</div>' +
+              '<div style="flex:1"><label>' +
+                (ln.isAlevins ? 'Prix / alevin (Ar)' : 'Prix / kg (Ar)') + '</label>' +
+                '<input type="text" inputmode="decimal" id="prixQ' + i + '" value="' +
+                (ln.prix == null ? '' : ln.prix) + '"></div>' +
+            '</div>').join('') +
+          '<button class="go" id="btnPrixSave" onclick="doPrices()">' +
+            'Enregistrer les prix</button>';
+      })
+      .withFailureHandler(e => {
+        el('btnPrix').disabled = false;
+        setStatusAndScroll('err', esc(e.message));
+      })
+      .cmdGetOrderLines(o.rows);
+  }
+
+  function doPrices() {
+    if (!priceLines.length) return;
+    const lines = priceLines.map((ln, i) => ({
+      row: ln.row,
+      prix: el('prixQ' + i).value
+    }));
+    const btn = el('btnPrixSave');
+    btn.disabled = true;
+    setStatus('banner', 'Enregistrement…');
+    google.script.run
+      .withSuccessHandler(res => {
+        // changed = what was written. totals = the formula read back.
+        // Both are shown; a save that changed nothing says nothing extra
+        // and must not be reported as a change.
+        const parts = [].concat(res.changed || []).concat(res.totals || []);
+        doSearch({ cls: 'ok',
+          html: 'Prix enregistré(s).' +
+                (parts.length ? '<br>' + parts.map(esc).join('<br>') : '') });
+      })
+      .withFailureHandler(e => {
+        btn.disabled = false;
+        setStatusAndScroll('err', esc(e.message));
+      })
+      .cmdUpdateOrderPrices({ lines: lines });
   }
 
   /**
