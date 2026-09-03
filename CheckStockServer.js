@@ -34,6 +34,7 @@ const CS_CFG = {
   SNAP_DATE_COL: 1,                // A = date of the snapshot
   SNAP_STATUS_COL: 4,              // D = statut
   SNAP_STATUS_PENDING: "en attente",
+  SNAP_STATUS_DONE: "compare",     // = WS_CFG.STOCK_SNAPSHOT.STATUS_DONE
   MAX_LAG_DAYS: 2                  // WARNINGSYSTEM voids a count later than this
 };
 
@@ -45,11 +46,14 @@ function openCheckStockSheet() {
 }
 
 /**
- * Newest date already present in row 2, scanning from FIRST_PHYS_COL
- * and skipping THEO_COL — the same rule the comparison uses.
- * Returns a Date or null.
+ * Newest count column. Scans row 2 from FIRST_PHYS_COL, skips THEO_COL,
+ * and keeps a STRICTLY greater date, so two columns of one date resolve
+ * to the leftmost — the exact rule WARNINGSYSTEM uses. Both projects
+ * must select the same column or a correction lands on a column that is
+ * never read.
+ * Returns { col, date } or null.
  */
-function findNewestCountDate(sh) {
+function findNewestCount(sh) {
   const lastCol = sh.getLastColumn();
   if (lastCol < CS_CFG.FIRST_PHYS_COL) return null;
 
@@ -59,9 +63,58 @@ function findNewestCountDate(sh) {
     if (c === CS_CFG.THEO_COL) continue;
     const v = dateRow[c - 1];
     if (Object.prototype.toString.call(v) !== "[object Date]") continue;
-    if (best === null || v.getTime() > best.getTime()) best = v;
+    if (best === null || v.getTime() > best.date.getTime()) best = { col: c, date: v };
   }
   return best;
+}
+
+/** Midnight of a date, so two counts of one day compare equal. */
+function dayKeyOf(d) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/**
+ * Re-open the comparison after an in-place correction.
+ *
+ * WARNINGSYSTEM marks the snapshot rows "compare" once it has compared
+ * them. That status is the only guard both projects can read, because it
+ * lives in the sheet. Setting it back to "en attente" makes the next
+ * WARNINGSYSTEM run compare the corrected figures.
+ *
+ * Targets the newest snapshot dated on or before the count. A voided
+ * snapshot is left alone: a count that missed its window must not revive.
+ * Returns true when at least one row was re-armed.
+ */
+function rearmSnapshotForCount(ss, countDate) {
+  const snapSh = ss.getSheetByName(CS_CFG.SNAP_SHEET);
+  if (!snapSh || snapSh.getLastRow() < 2) return false;
+
+  const sv = snapSh.getRange(2, 1, snapSh.getLastRow() - 1, CS_CFG.SNAP_STATUS_COL).getValues();
+  const countKey = dayKeyOf(countDate);
+
+  function doneDayKey(row) {
+    const status = String(row[CS_CFG.SNAP_STATUS_COL - 1] || "").trim().toLowerCase();
+    if (status !== CS_CFG.SNAP_STATUS_DONE) return null;
+    const d = row[CS_CFG.SNAP_DATE_COL - 1];
+    if (Object.prototype.toString.call(d) !== "[object Date]") return null;
+    return dayKeyOf(d);
+  }
+
+  let targetKey = null;
+  for (let i = 0; i < sv.length; i++) {
+    const k = doneDayKey(sv[i]);
+    if (k === null || k > countKey) continue;
+    if (targetKey === null || k > targetKey) targetKey = k;
+  }
+  if (targetKey === null) return false;
+
+  let n = 0;
+  for (let i = 0; i < sv.length; i++) {
+    if (doneDayKey(sv[i]) !== targetKey) continue;
+    snapSh.getRange(i + 2, CS_CFG.SNAP_STATUS_COL).setValue(CS_CFG.SNAP_STATUS_PENDING);
+    n++;
+  }
+  return n > 0;
 }
 
 /**
@@ -86,7 +139,21 @@ function getCheckStockContext() {
     if (nm) feeds.push(nm);
   }
 
-  const newest = findNewestCountDate(sh);
+  const newest = findNewestCount(sh);
+
+  // Figures of the newest column, so the screen can load them back for a
+  // correction. The FROZEN THEORETICAL is still never returned: the person
+  // sees only what he entered himself, never the number he is verifying.
+  const lastCountValues = [];
+  if (newest) {
+    const pv = sh.getRange(CS_CFG.START_ROW, newest.col, n, 1).getValues();
+    for (let i = 0; i < n; i++) {
+      const nm = String(names[i][0] || "").trim();
+      if (!nm) continue;
+      const raw = pv[i][0];
+      lastCountValues.push({ name: nm, value: (raw === "" || raw === null) ? "" : String(raw) });
+    }
+  }
 
   let pending = null;
   const snapSh = ss.getSheetByName(CS_CFG.SNAP_SHEET);
@@ -116,14 +183,20 @@ function getCheckStockContext() {
 
   return {
     feeds: feeds,
-    lastCountDate: newest ? Utilities.formatDate(newest, tz, "dd/MM/yyyy") : "",
+    lastCountDate: newest ? Utilities.formatDate(newest.date, tz, "dd/MM/yyyy") : "",
+    lastCountDateISO: newest ? Utilities.formatDate(newest.date, tz, "yyyy-MM-dd") : "",
+    lastCountValues: lastCountValues,
     pending: pending,
     maxLagDays: CS_CFG.MAX_LAG_DAYS
   };
 }
 
 /**
- * Append one count column.
+ * Write one count column — ONE COLUMN PER DATE.
+ *
+ * A date that already has a column OVERWRITES that column, so a miscount
+ * is corrected in place. A second column for the same date would be
+ * ignored: WARNINGSYSTEM keeps the leftmost of two equal dates.
  *
  * payload: { date: "yyyy-MM-dd", counts: [{ name, value }] }
  * A count with an empty value is written as an empty cell, so the
@@ -149,10 +222,10 @@ function submitCheckStock(payload) {
   const countDate = new Date(dateStr);
   if (isNaN(countDate.getTime())) throw new Error("Date invalide (reçu: " + dateStr + ").");
 
-  const newest = findNewestCountDate(sh);
-  if (newest && countDate.getTime() < newest.getTime()) {
+  const newest = findNewestCount(sh);
+  if (newest && dayKeyOf(countDate) < dayKeyOf(newest.date)) {
     throw new Error(
-      "Date trop ancienne. Un comptage du " + Utilities.formatDate(newest, tz, "dd/MM/yyyy") +
+      "Date trop ancienne. Un comptage du " + Utilities.formatDate(newest.date, tz, "dd/MM/yyyy") +
       " existe déjà, et le système compare toujours le comptage le plus récent. " +
       "Une colonne plus ancienne serait ignorée."
     );
@@ -188,13 +261,19 @@ function submitCheckStock(payload) {
 
   if (!filled) throw new Error("Aucun comptage saisi.");
 
-  const col = sh.getLastColumn() + 1;
+  const isUpdate = !!(newest && dayKeyOf(countDate) === dayKeyOf(newest.date));
+  const col = isUpdate ? newest.col : sh.getLastColumn() + 1;
+
   sh.getRange(CS_CFG.DATE_ROW, col).setValue(countDate);
   sh.getRange(CS_CFG.START_ROW, col, n, 1).setValues(values);
+
+  const rearmed = isUpdate ? rearmSnapshotForCount(sh.getParent(), countDate) : false;
 
   return {
     column: col,
     date: Utilities.formatDate(countDate, tz, "dd/MM/yyyy"),
-    filled: filled
+    filled: filled,
+    updated: isUpdate,
+    rearmed: rearmed
   };
 }

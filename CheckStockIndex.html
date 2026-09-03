@@ -64,6 +64,35 @@
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
+    let CTX = null;
+
+    /**
+     * One column per date. A date that already holds a count loads its
+     * figures back, so a single wrong feed type can be corrected without
+     * re-typing the others. Only the person's own figures are shown —
+     * never the theoretical, which the count exists to verify.
+     */
+    function applyDateMode() {
+      if (!CTX) return;
+      const date = document.getElementById('countDate').value;
+      const isEdit = !!(CTX.lastCountDateISO && date === CTX.lastCountDateISO);
+
+      const byName = {};
+      if (isEdit) {
+        (CTX.lastCountValues || []).forEach(function (v) { byName[v.name] = v.value; });
+      }
+
+      const inputs = document.querySelectorAll('input[data-feed]');
+      for (let i = 0; i < inputs.length; i++) {
+        const nm = inputs[i].getAttribute('data-feed');
+        inputs[i].value = isEdit ? (byName[nm] === undefined ? '' : byName[nm]) : '';
+      }
+
+      document.getElementById('submitBtn').textContent =
+        isEdit ? 'Corriger le comptage du ' + CTX.lastCountDate : 'Enregistrer le comptage';
+    }
+    document.getElementById('countDate').addEventListener('change', applyDateMode);
+
     function loadContext() {
       google.script.run
         .withSuccessHandler(ctx => {
@@ -89,6 +118,8 @@
             '<tr><td>' + esc(f) + '</td>' +
             '<td class="qty"><input type="number" min="0" step="any" data-feed="' + esc(f) + '" placeholder="sacs"></td></tr>'
           ).join('');
+          CTX = ctx;
+          applyDateMode();
           document.getElementById('submitBtn').disabled = false;
         })
         .withFailureHandler(e => {
@@ -130,9 +161,10 @@
         .withSuccessHandler(res => {
           document.getElementById('loading').style.display = 'none';
           document.getElementById('submitBtn').disabled = false;
-          showMsg('ok', 'Comptage du ' + res.date + ' enregistré : ' + res.filled + ' type(s) de provende.');
-          const inputs = document.querySelectorAll('input[data-feed]');
-          for (let i = 0; i < inputs.length; i++) inputs[i].value = '';
+          showMsg('ok', res.updated
+            ? 'Comptage du ' + res.date + ' corrigé : ' + res.filled + ' type(s) de provende.' +
+              (res.rearmed ? ' La comparaison théorique/physique sera refaite.' : '')
+            : 'Comptage du ' + res.date + ' enregistré : ' + res.filled + ' type(s) de provende.');
           loadContext();
         })
         .withFailureHandler(e => {
