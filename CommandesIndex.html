@@ -20,25 +20,50 @@
        4px gap measure ~770px and fit.
        nowrap + overflow-x: a phone cannot fit six tabs at any readable
        size, so the bar scrolls sideways rather than wrapping. */
-    /* 7 tabs no longer fit the body column. nowrap + overflow-x hid the
-       last one behind a scrollbar macOS does not draw, so a tab could be
-       invisible with nothing to suggest it was there. Wrapping shows
-       every tab at every width; on a wide screen it stays one line.
-       Do not reinstate nowrap when an 8th tab is added - widen the wrap
-       or shorten the labels. */
-    .tabs { display: flex; flex-wrap: wrap; gap: 4px;
-            border-bottom: 2px solid #dadce0; margin-bottom: 8px; }
+    /* 7 tabs do not fit the 820px body column, so the strip does NOT
+       use that column: it breaks out and takes the viewport, exactly
+       as .demWrap does for the pré-commandes table. All seven then sit
+       on one line on a laptop.
+       The earlier objection to nowrap was that a tab could hide behind
+       a scrollbar macOS does not draw. That was true INSIDE the 820px
+       column, where the tabs were wider than the box. Here the box is
+       ~1.7x the tabs, so nothing is clipped on a laptop; a phone gets
+       a real scroll container, and .tabs::after prints a fading edge
+       so the user can see there is more to the right.
+       If an 8th tab is added: shorten the labels, do not re-wrap. */
+    .tabsWrap { position: relative; width: min(96vw, 1500px);
+                margin-left: 50%; transform: translateX(-50%);
+                margin-bottom: 8px; }
+    .tabs { display: flex; flex-wrap: nowrap; gap: 4px;
+            overflow-x: auto; -webkit-overflow-scrolling: touch;
+            border-bottom: 2px solid #dadce0; }
     .tab { padding: 10px 9px; cursor: pointer; font-size: 15px; white-space: nowrap;
            border-bottom: 3px solid transparent; margin-bottom: -2px; }
     .tab.active { border-bottom-color: #1a73e8; color: #1a73e8; font-weight: bold; }
-    /* Second level, inside one pane. Green and smaller, so it cannot
-       be read as another row of the blue strip above it. */
-    .subtabs { display: flex; flex-wrap: wrap; gap: 4px;
-               border-bottom: 1px solid #dadce0; margin-bottom: 10px; }
-    .subtab { padding: 7px 14px; cursor: pointer; font-size: 14px;
-              white-space: nowrap; border-bottom: 3px solid transparent;
-              margin-bottom: -1px; color: #5f6368; }
-    .subtab.active { border-bottom-color: #188038; color: #188038; font-weight: bold; }
+    /* Only drawn when the strip actually scrolls: a flex row that fits
+       leaves no room under the fade, and it sits over the border. */
+    .tabsWrap::after { content: ''; position: absolute; top: 0; right: 0;
+                       width: 24px; height: 100%; pointer-events: none;
+                       background: linear-gradient(to right,
+                         rgba(255,255,255,0), rgba(255,255,255,0.95)); }
+    /* Second level, inside one pane. Blocks, not underlined text: the
+       worker must see WHICH list is on screen without reading it. The
+       one on screen is filled and white on its own colour - Alevins
+       green, Poisson blue - so the two differ in colour as well as in
+       position. Rounded blocks cannot be read as a row of the square
+       tabs above. */
+    .subtabs { display: flex; flex-wrap: wrap; gap: 8px;
+               margin: 0 0 12px 0; }
+    .subtab { padding: 9px 20px; cursor: pointer; font-size: 15px;
+              white-space: nowrap; border-radius: 18px;
+              border: 2px solid #dadce0; background: #fff;
+              color: #5f6368; user-select: none; }
+    .subtab:hover { border-color: #9aa0a6; }
+    .subtab .n { font-weight: normal; opacity: 0.75; }
+    .subtab.alv.active { background: #188038; border-color: #188038;
+                         color: #fff; font-weight: bold; }
+    .subtab.pois.active { background: #1a73e8; border-color: #1a73e8;
+                          color: #fff; font-weight: bold; }
     /* Pré-commandes table: 9 columns plus 5 buttons per row does not fit
        the 820px body column, and clipping loses the button labels on the
        right. The wrapper breaks out of that column and centres itself on
@@ -108,7 +133,7 @@
   <a class="backlink" id="backLink" href="#">&larr; Menu</a>
   <h1>Commandes</h1>
 
-  <div class="tabs">
+  <div class="tabsWrap"><div class="tabs">
     <div class="tab active" id="tabNew" onclick="switchMode('new')">Nouvelle commande</div>
     <div class="tab" id="tabFul" onclick="switchMode('ful')">Paiement &amp; livraison</div>
     <div class="tab" id="tabRes" onclick="switchMode('res')">R&eacute;servations</div>
@@ -116,7 +141,7 @@
     <div class="tab" id="tabRec" onclick="switchMode('rec')">R&eacute;currentes</div>
     <div class="tab" id="tabHist" onclick="switchMode('hist')">Historique</div>
     <div class="tab" id="tabPrix" onclick="switchMode('prix')">Prix poisson</div>
-  </div>
+  </div></div>
 
   <div id="status"></div>
   <div id="paneNew"></div>
@@ -561,9 +586,9 @@
   function renderDem() {
     el('paneDem').innerHTML =
       '<div class="subtabs">' +
-        '<div class="subtab" id="subDemAlevins" ' +
+        '<div class="subtab alv" id="subDemAlevins" ' +
           'onclick="demSetType(\'Alevins\')">Alevins</div>' +
-        '<div class="subtab" id="subDemPoisson" ' +
+        '<div class="subtab pois" id="subDemPoisson" ' +
           'onclick="demSetType(\'Poisson\')">Poisson</div>' +
       '</div>' +
       '<div class="warn" style="margin-top:0;margin-bottom:10px">' +
@@ -583,9 +608,17 @@
 
   /** Highlight the sub-tab that is on screen. */
   function demMarkSubtabs() {
+    var cls = { Alevins: 'alv', Poisson: 'pois' };
     ['Alevins', 'Poisson'].forEach(function (t) {
       var e = el('subDem' + t);
-      if (e) e.className = 'subtab' + (demType === t ? ' active' : '');
+      if (!e) return;
+      e.className = 'subtab ' + cls[t] + (demType === t ? ' active' : '');
+      // The count is the second signal: which list is bigger, and did
+      // the row I just saved land in the tab I was looking at.
+      var n = demRows.filter(function (r) {
+        return (t === 'Poisson') ? (r.type === 'Poisson') : (r.type !== 'Poisson');
+      }).length;
+      e.innerHTML = t + ' <span class="n">(' + n + ')</span>';
     });
   }
 
@@ -722,6 +755,7 @@
 
   function drawDemList() {
     var rows = demVisible();
+    demMarkSubtabs();          // the counts move with the list
     // The save/cancel pair lives in the bar next to Actualiser le
     // stock: no sentence, the yellow bar itself says "not saved yet".
     var ob = el('demOrderBtns');
