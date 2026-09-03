@@ -120,6 +120,84 @@ function creerCreateLotWithCarry(bassin, happa) {
 }
 
 /**
+ * Drive folder that receives archived lot files.
+ *
+ * Archiving MOVES the file: DriveApp.moveTo removes every existing
+ * parent. Once moved, the lot is outside LOT_CFG.LOTS_FOLDER_ID, so
+ * buildLotFileList no longer sees it and neither does any screen or
+ * engine pass that enumerates that folder. That is the whole point of
+ * the button. Nothing is deleted and nothing is renamed, so the move
+ * is undone by dragging the file back in Drive.
+ *
+ * WHO RUNS THE MOVE: the deployment is executeAs USER_DEPLOYING
+ * (appsscript.json), so every server call on this screen runs under
+ * Kim's authorisation, not the clicking worker's. No worker needs any
+ * right on the archive folder, and a worker who cannot open the lot
+ * file at all can still archive it from here. The access check that
+ * remains is the one this function performs itself.
+ */
+const ARCHIVE_FOLDER_ID = "1ei75vejg3_CUtY4QdpQG9EmHHi1ujGYw";
+
+/**
+ * Read-only. Every lot file currently in the lots folder, for the
+ * archive dropdown.
+ *
+ * Reuses getLotFileList (Lot.js), the same list screens 1 and 2 read,
+ * so the dropdown can never show a lot the rest of the app does not.
+ * That list is cached for 5 minutes: a lot created moments ago may not
+ * appear yet. Archiving one clears the cache.
+ *
+ * @return {Array<Object>} [{ lotNumber, fileId, fileName }]
+ */
+function creerListLots() {
+  return getLotFileList();
+}
+
+/**
+ * Move one lot file out of the lots folder and into the archive folder.
+ *
+ * The parent check is not decoration. fileId arrives from the client,
+ * and moveTo would happily move ANY file this worker can edit. Reading
+ * the real parents of the real file — not the cached list — is the one
+ * thing that proves the target is a lot file that is still in the lots
+ * folder.
+ *
+ * @param {string} fileId  Drive id of the lot file
+ * @return {Object} { ok:false, message } or { ok:true, fileName, fileUrl }
+ *                  A permission fault throws and reaches the client's
+ *                  failure handler.
+ */
+function creerArchiveLot(fileId) {
+  const id = String(fileId || "").trim();
+  if (!id) return { ok: false, message: "Aucun lot sélectionné." };
+
+  const file = DriveApp.getFileById(id);
+  const name = file.getName();
+
+  if (!/^Lot-/.test(name)) {
+    return { ok: false, message: "Ce fichier n'est pas un fichier lot : " + name };
+  }
+
+  let inLots = false;
+  const parents = file.getParents();
+  while (parents.hasNext()) {
+    if (parents.next().getId() === LOT_CFG.LOTS_FOLDER_ID) inLots = true;
+  }
+  if (!inLots) {
+    clearLotFileListCache();
+    return {
+      ok: false,
+      message: "Ce lot n'est plus dans le dossier des lots. La liste a été rafraîchie."
+    };
+  }
+
+  file.moveTo(DriveApp.getFolderById(ARCHIVE_FOLDER_ID));
+  clearLotFileListCache();
+
+  return { ok: true, fileName: name, fileUrl: file.getUrl() };
+}
+
+/**
  * RUN FROM EDITOR: read-only check that the library binding resolves.
  *
  * Writes nothing and creates nothing. Run this after every clasp push
