@@ -2294,13 +2294,22 @@
     if (o.alevinsTotal > 0) qtyParts.push(Number(o.alevinsTotal).toLocaleString('fr-FR') + ' alevins');
     if (o.poissonKgTotal > 0) qtyParts.push(Number(o.poissonKgTotal).toLocaleString('fr-FR') + ' kg poisson');
     const qtyTxt = qtyParts.join(' · ') || '—';
+    // Server sends distinct numbers. More than one means the rows of
+    // this order disagree; both are shown rather than one being picked.
+    const prixTxt = (o.prixKg && o.prixKg.length)
+      ? o.prixKg.map(v => Number(v).toLocaleString('fr-FR')).join(' · ') + ' Ar / kg'
+      : '';
     const montantTxt = Number(o.montantAr || 0).toLocaleString('fr-FR') + ' Ar';
 
     el('fulForm').innerHTML =
       '<div class="card"><h3>' + esc(o.orderNumber || '(sans numéro)') + ' — ' + esc(o.client) + '</h3>' +
         '<div class="row">' +
           '<div><label>Quantité commandée</label>' +
-            '<div style="font-size:18px;font-weight:600;padding:4px 0">' + esc(qtyTxt) + '</div></div>' +
+            '<div style="font-size:18px;font-weight:600;padding:4px 0">' + esc(qtyTxt) + '</div>' +
+            (prixTxt
+              ? '<div class="muted" style="font-size:15px;padding-bottom:4px">' +
+                  esc(prixTxt) + '</div>'
+              : '') + '</div>' +
           '<div><label>Montant total</label>' +
             '<div style="font-size:18px;font-weight:600;padding:4px 0">' + esc(montantTxt) + '</div></div>' +
         '</div>' +
@@ -2321,20 +2330,15 @@
         '</div>' +
         '<label>Remarques</label><input type="text" id="uRemarques" value="'+esc(o.remarques || '')+'">' +
         '<button class="go" id="btnFul" onclick="doFulfil()">Enregistrer</button>' +
-        (o.dateLivraison ? '' :
+        // ALWAYS shown. A delivered order still allows a price change,
+        // so the button stays and loadModify() drops the quantity
+        // fields instead.
         '<div style="margin-top:14px">' +
           '<button id="btnMod" onclick="loadModify()" ' +
             'style="background:#fff;color:#1a73e8;border:1px solid #1a73e8;' +
             'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
             'Modifier la commande</button>' +
           '<div id="modZone"></div>' +
-        '</div>') +
-        '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #dadce0">' +
-          '<button id="btnPrix" onclick="loadPrices()" ' +
-            'style="background:#fff;color:#1a73e8;border:1px solid #1a73e8;' +
-            'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
-            'Modifier les prix</button>' +
-          '<div id="prixZone"></div>' +
         '</div>' +
         '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #dadce0">' +
           '<button id="btnCancel" onclick="askCancel()" ' +
@@ -2402,40 +2406,60 @@
   }
 
   /**
-   * MODIFIER LA COMMANDE. Only quantities and PM are editable; the
-   * money columns are sheet formulas and recompute on their own. The
-   * server refuses delivered/cancelled orders and validates any stock
-   * increase; if the engine already deducted, it corrects the lot file
-   * by the delta at once. res.stock is the proof, shown line by line.
+   * MODIFIER LA COMMANDE — one screen for quantity, PM and price.
+   *
+   * Quantity and PM move stock: the server refuses them on a delivered
+   * or cancelled order, validates any increase, and corrects the lot
+   * file by the delta when the engine already deducted. res.stock is
+   * the proof, shown line by line and never swallowed.
+   *
+   * Price moves no fish and stays editable after delivery. So on a
+   * delivered order this form renders price fields ONLY, and the save
+   * sends the price call alone — cmdModifyOrder would refuse it.
+   *
+   * Save order is prices, then quantities. A repeated price write is
+   * idempotent, so a quantity refusal can be corrected and re-saved
+   * without the price drifting.
    */
   var modLines = [];
+  var modDelivered = false;
 
   function loadModify() {
     const o = hits.filter(h => h.key === selectedKey)[0];
     if (!o) return;
+    modDelivered = String(o.dateLivraison || '').trim() !== '';
     el('btnMod').disabled = true;
     setStatus('banner', 'Chargement\u2026');
     google.script.run
       .withSuccessHandler(lines => {
         setStatus('', '');
         modLines = lines;
+        const qtyOn = !modDelivered;
         el('modZone').innerHTML =
           lines.map((ln, i) =>
             '<div class="row" style="margin-top:8px">' +
               '<div style="align-self:center;font-weight:600;padding-top:14px">' +
                 esc(ln.lot) + '</div>' +
-              (ln.isAlevins
-                ? '<div><label>Nombre d\'alevins</label>' +
-                    '<input type="text" inputmode="decimal" id="modQ' + i + '" value="' +
-                    (ln.nombre == null ? '' : ln.nombre) + '"></div>'
-                : '<div><label>Poisson (kg)</label>' +
-                    '<input type="text" inputmode="decimal" id="modQ' + i + '" value="' +
-                    (ln.kg == null ? '' : ln.kg) + '"></div>') +
-              '<div><label>PM (g)</label>' +
-                '<input type="text" inputmode="decimal" id="modP' + i + '" value="' +
-                ((ln.isAlevins ? ln.pmAl : ln.pmGr) == null ? ''
-                  : (ln.isAlevins ? ln.pmAl : ln.pmGr)) + '"></div>' +
+              (!qtyOn ? '' :
+                (ln.isAlevins
+                  ? '<div><label>Nombre d\'alevins</label>' +
+                      '<input type="text" inputmode="decimal" id="modQ' + i + '" value="' +
+                      (ln.nombre == null ? '' : ln.nombre) + '"></div>'
+                  : '<div><label>Poisson (kg)</label>' +
+                      '<input type="text" inputmode="decimal" id="modQ' + i + '" value="' +
+                      (ln.kg == null ? '' : ln.kg) + '"></div>') +
+                '<div><label>PM (g)</label>' +
+                  '<input type="text" inputmode="decimal" id="modP' + i + '" value="' +
+                  ((ln.isAlevins ? ln.pmAl : ln.pmGr) == null ? ''
+                    : (ln.isAlevins ? ln.pmAl : ln.pmGr)) + '"></div>') +
+              '<div><label>' +
+                (ln.isAlevins ? 'Prix / alevin (Ar)' : 'Prix / kg (Ar)') + '</label>' +
+                '<input type="text" inputmode="decimal" id="modPrix' + i + '" value="' +
+                (ln.prix == null ? '' : ln.prix) + '"></div>' +
             '</div>').join('') +
+          (qtyOn ? '' :
+            '<div class="warn">Commande livr\u00e9e \u2014 seuls les prix ' +
+            'sont modifiables.</div>') +
           '<button class="go" id="btnModSave" onclick="doModify()">' +
             'Enregistrer les modifications</button>';
       })
@@ -2448,6 +2472,43 @@
 
   function doModify() {
     if (!modLines.length) return;
+    const btn = el('btnModSave');
+    btn.disabled = true;
+    setStatus('banner', 'Enregistrement\u2026');
+
+    // Empty price fields are NOT sent. cmdUpdateOrderPrices refuses an
+    // empty price, so sending them would block a quantity-only edit on
+    // a line whose price is not set yet.
+    const modPrices = modLines
+      .map((ln, i) => ({ row: ln.row, prix: el('modPrix' + i).value }))
+      .filter(p => String(p.prix).trim() !== '');
+
+    if (!modPrices.length) {
+      if (modDelivered) {
+        btn.disabled = false;
+        setStatusAndScroll('err', 'Aucun prix saisi.');
+        return;
+      }
+      modSaveQty(null, btn);
+      return;
+    }
+
+    google.script.run
+      .withSuccessHandler(pres => {
+        // Delivered: the quantity fields were never rendered and the
+        // server would refuse them. Stop here.
+        if (modDelivered) { modDone(pres, null); return; }
+        modSaveQty(pres, btn);
+      })
+      .withFailureHandler(e => {
+        btn.disabled = false;
+        setStatusAndScroll('err', esc(e.message));
+      })
+      .cmdUpdateOrderPrices({ lines: modPrices });
+  }
+
+  /** Second call. pres is the price result, or null if none was sent. */
+  function modSaveQty(pres, btn) {
     const lines = modLines.map((ln, i) => {
       const q = el('modQ' + i).value;
       const p = el('modP' + i).value;
@@ -2455,90 +2516,34 @@
         ? { row: ln.row, nombre: q, pm: p }
         : { row: ln.row, kg: q, pm: p };
     });
-    const btn = el('btnModSave');
-    btn.disabled = true;
-    setStatus('banner', 'Enregistrement\u2026');
     google.script.run
-      .withSuccessHandler(res => {
-        // The stock lines ARE the confirmation: they state, per lot,
-        // whether the correction happened now, happens tonight, or
-        // FAILED and needs Kim. Never swallowed into a generic "OK".
-        const parts = []
-          .concat(res.stock || [])
-          .concat(res.warnings || []);
-        doSearch({ cls: 'ok',
-          html: 'Commande modifi\u00e9e.' +
-                (parts.length ? '<br>' + parts.map(esc).join('<br>') : '') });
-      })
+      .withSuccessHandler(res => modDone(pres, res))
       .withFailureHandler(e => {
         btn.disabled = false;
-        setStatusAndScroll('err', esc(e.message));
+        // If a price was already written, say so, or the next attempt
+        // is made against a state the user does not know.
+        setStatusAndScroll('err',
+          (pres ? 'Prix enregistr\u00e9(s). Quantit\u00e9s refus\u00e9es : ' : '') +
+          esc(e.message));
       })
       .cmdModifyOrder({ lines: lines });
   }
 
   /**
-   * MODIFIER LES PRIX. Shown whether the order is delivered or not: a
-   * price change moves no fish, so it carries none of the stock gates
-   * that "Modifier la commande" carries. The money column is a sheet
-   * formula; the server returns the recomputed amount, so the new total
-   * is on screen and is not a number this page worked out itself.
+   * One confirmation for both calls. The stock lines state, per lot,
+   * whether the correction happened now, happens tonight, or FAILED
+   * and needs Kim. changed/totals state what the price write did.
+   * Nothing is swallowed into a generic "OK".
    */
-  var priceLines = [];
-
-  function loadPrices() {
-    const o = hits.filter(h => h.key === selectedKey)[0];
-    if (!o) return;
-    el('btnPrix').disabled = true;
-    setStatus('banner', 'Chargement…');
-    google.script.run
-      .withSuccessHandler(lines => {
-        setStatus('', '');
-        priceLines = lines;
-        el('prixZone').innerHTML =
-          lines.map((ln, i) =>
-            '<div class="row" style="margin-top:8px">' +
-              '<div style="align-self:center;font-weight:600;padding-top:14px">' +
-                esc(ln.lot) + '</div>' +
-              '<div style="flex:1"><label>' +
-                (ln.isAlevins ? 'Prix / alevin (Ar)' : 'Prix / kg (Ar)') + '</label>' +
-                '<input type="text" inputmode="decimal" id="prixQ' + i + '" value="' +
-                (ln.prix == null ? '' : ln.prix) + '"></div>' +
-            '</div>').join('') +
-          '<button class="go" id="btnPrixSave" onclick="doPrices()">' +
-            'Enregistrer les prix</button>';
-      })
-      .withFailureHandler(e => {
-        el('btnPrix').disabled = false;
-        setStatusAndScroll('err', esc(e.message));
-      })
-      .cmdGetOrderLines(o.rows);
-  }
-
-  function doPrices() {
-    if (!priceLines.length) return;
-    const lines = priceLines.map((ln, i) => ({
-      row: ln.row,
-      prix: el('prixQ' + i).value
-    }));
-    const btn = el('btnPrixSave');
-    btn.disabled = true;
-    setStatus('banner', 'Enregistrement…');
-    google.script.run
-      .withSuccessHandler(res => {
-        // changed = what was written. totals = the formula read back.
-        // Both are shown; a save that changed nothing says nothing extra
-        // and must not be reported as a change.
-        const parts = [].concat(res.changed || []).concat(res.totals || []);
-        doSearch({ cls: 'ok',
-          html: 'Prix enregistré(s).' +
-                (parts.length ? '<br>' + parts.map(esc).join('<br>') : '') });
-      })
-      .withFailureHandler(e => {
-        btn.disabled = false;
-        setStatusAndScroll('err', esc(e.message));
-      })
-      .cmdUpdateOrderPrices({ lines: lines });
+  function modDone(pres, res) {
+    const parts = []
+      .concat((pres && pres.changed) || [])
+      .concat((pres && pres.totals) || [])
+      .concat((res && res.stock) || [])
+      .concat((res && res.warnings) || []);
+    doSearch({ cls: 'ok',
+      html: 'Commande modifi\u00e9e.' +
+            (parts.length ? '<br>' + parts.map(esc).join('<br>') : '') });
   }
 
   /**

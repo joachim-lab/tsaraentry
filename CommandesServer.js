@@ -330,6 +330,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
         remarques: r[C.REMARQUES - 1],
         alevinsNb: [],
         poissonKg: [],
+        prixKg: [],
         alevinsTotal: 0,
         poissonKgTotal: 0,
         montantAr: 0
@@ -342,6 +343,11 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
     if (r[C.LOT - 1]) g.lots.push(r[C.LOT - 1]);
     if (r[C.ALEVINS_NB - 1]) g.alevinsNb.push(r[C.ALEVINS_NB - 1]);
     if (r[C.POISSON_KG - 1]) g.poissonKg.push(r[C.POISSON_KG - 1]);
+    // Column O as a NUMBER, so the client formats it the same way it
+    // formats the total. Display text would carry the sheet's own
+    // format and could not be reconciled with the montant line.
+    const pkg = cmdNumFromDisplay_(r[C.PRIX_KG - 1]);
+    if (pkg) g.prixKg.push(pkg);
     g.alevinsTotal += cmdNumFromDisplay_(r[C.ALEVINS_NB - 1]);
     g.poissonKgTotal += cmdNumFromDisplay_(r[C.POISSON_KG - 1]);
     g.montantAr += cmdNumFromDisplay_(r[C.ARGENT_ALEVINS - 1]) +
@@ -380,6 +386,11 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
     const keep = (wantDeliveredUnpaid && delivered) ||
                  (wantUndelivered && !delivered);
     if (!keep) continue;
+
+    // One order should hold one price per kg. The sheet does not
+    // enforce it, so distinct values are kept and the card shows all
+    // of them rather than hiding a disagreement behind the first one.
+    g.prixKg = g.prixKg.filter(function (v, k, a) { return a.indexOf(v) === k; });
 
     out.push(g);
     if (out.length >= 25) break;
