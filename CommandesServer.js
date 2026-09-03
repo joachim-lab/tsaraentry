@@ -2587,3 +2587,473 @@ function testLegacyFactures() {
   }
   Logger.log("Total : " + count + " commande(s).");
 }
+
+
+/***************************************************************
+ * COMMANDES RÉCURRENTES - fifth tab on the Commandes screen.
+ *
+ * A standing weekly order: "client X takes 200 kg of grossis every
+ * Monday until the end date". Grossis only - alevins are never
+ * recurrent (Kim, 2026-09-03).
+ *
+ * WHAT THIS DOES NOT DO: it never writes an order row. Every Monday
+ * at 05h it writes ONE PRÉ-COMMANDE (Demandes tab) per due rule, and
+ * stops there. The worker then uses the existing Commander button,
+ * which prefills the order form from the lot allocation, and the
+ * existing save path applies the full stock guard. The "2026" tab
+ * keeps exactly two writers: cmdCreateOrder and cmdRecordFulfilment.
+ *
+ * WHY NO STORED WEIGHT PER FISH. A pré-commande stores a fish COUNT
+ * and a weight in grams; the rule stores KG. The count is derived at
+ * generation time from the live PM of the sellable grossi lots, so
+ * nothing to maintain per client and nothing to go stale. That count
+ * only feeds the availability verdict: the order form takes kg
+ * (column L) and the sheet computes N = (L*1000)/M, and demCommander
+ * rebuilds the kg line from the allocated lot's real PM. So a rough
+ * PM here can never distort the order that is finally saved.
+ *
+ * NO PRICE IS WRITTEN. Column K of the Demandes row is left blank, the
+ * legacy shape demCommander already handles: the order form's own
+ * Tarifs lookup fills the price at order time, so it is never stale.
+ * Consequence: a worker who EDITS a generated pré-commande in the UI
+ * will be asked for a price, because demClean requires one. Editing
+ * is not the normal path - Commander is.
+ *
+ * PRIORITY. A generated row is placed FIRST in the queue (rang 1),
+ * ahead of one-off pré-commandes (Kim, 2026-09-03). demCheckStock
+ * allocates in queue order, so a recurring client takes its fish
+ * first, and a waiting one-off can flip to PM or INDISPONIBLE on a
+ * Monday morning. That is the intended meaning of priority.
+ *
+ * IDEMPOTENT BY MARKER. Each generated row carries
+ * "RÉCURRENTE <kg> kg — lundi <yyyy-MM-dd>" in commentaires. A rule
+ * whose marker for this Monday is already present is skipped, so a
+ * re-run of the trigger cannot double-order.
+ *
+ * ONE ACTIVE RULE PER CLIENT - enforced in recClean, as Réservations
+ * enforces one hold per lot. It is what makes the marker unique.
+ *
+ * ROW NUMBERS ARE THE HANDLE, as in Réservations and Demandes: every
+ * write re-reads the row and checks the client still matches what the
+ * browser last saw. Mismatch = stale screen, refuse.
+ ***************************************************************/
+
+const REC_SHEET = "Récurrentes";
+const REC_START = 2;                       // row 1 = headers
+const REC_QUALITES = ["detail", "gros"];
+const REC_TRIGGER_HOUR = 5;                // Monday 05h, before the farm morning
+
+/* Overdue mail. CONFIRM THESE ADDRESSES BEFORE INSTALLING THE TRIGGER.
+ * DEM_MAIL_TO above is joachim@tilapia4food.com, a different account. */
+const REC_MAIL_TO = "joachim@tilapia4food.com,charles@jdsresearch.com," +
+                    "audry@jdsresearch.com,hasina@jdsresearch.com";
+
+const REC_HEADERS = ["Client", "Contact", "Kg", "Qualité", "Début", "Fin",
+                     "Actif", "Remarques", "Dernier PM", "Dernière génération"];
+
+function recSheet() {
+  const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
+  const sh = ss.getSheetByName(REC_SHEET);
+  if (!sh) throw new Error('Onglet introuvable: "' + REC_SHEET +
+                           '". Lancer recEnsureSheet une fois.');
+  return sh;
+}
+
+/**
+ * RUN FROM EDITOR ONCE: tsaraentry -> CommandesServer.js -> recEnsureSheet
+ *
+ * Creates the tab AT THE END of the spreadsheet. Position matters:
+ * CDR/poisson.js falls back to getSheets()[0] when "2026" is missing,
+ * so no new tab may ever take first position.
+ */
+function recEnsureSheet() {
+  const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
+  var sh = ss.getSheetByName(REC_SHEET);
+  if (sh) {
+    Logger.log('Onglet "' + REC_SHEET + '" déjà présent (position ' +
+               sh.getIndex() + ").");
+    return sh.getIndex();
+  }
+  sh = ss.insertSheet(REC_SHEET, ss.getNumSheets());
+  sh.getRange(1, 1, 1, REC_HEADERS.length).setValues([REC_HEADERS])
+    .setFontWeight("bold");
+  sh.setFrozenRows(1);
+  Logger.log('Onglet "' + REC_SHEET + '" créé en position ' + sh.getIndex() +
+             " sur " + ss.getNumSheets() + ".");
+  return sh.getIndex();
+}
+
+/** Midnight local date, or null. Mirrors cmdParseDate. */
+function recParseDate(isoStr) {
+  if (!isoStr) return null;
+  const m = String(isoStr).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+/** yyyy-MM-dd in script timezone, or "" for a non-date. */
+function recIso(d) {
+  if (!(d instanceof Date) || isNaN(d.getTime())) return "";
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
+}
+
+/** Midnight of the Monday of the week CONTAINING d. */
+function recMondayOf(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const shift = (x.getDay() + 6) % 7;        // Sunday=0 -> 6, Monday=1 -> 0
+  x.setDate(x.getDate() - shift);
+  return x;
+}
+
+/** The commentaires marker that makes a generated row recognisable. */
+function recMarker(kg, mondayIso) {
+  return "RÉCURRENTE " + kg + " kg — lundi " + mondayIso;
+}
+
+/** The yyyy-MM-dd inside a marker, or "" when the text is not one. */
+function recMarkerDate(text) {
+  const m = String(text == null ? "" : text)
+    .match(/R[EÉ]CURRENTE[^\n]*?(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : "";
+}
+
+/** Every rule, in sheet order. row is the handle for edit and delete. */
+function recList() {
+  const sh = recSheet();
+  const lastRow = sh.getLastRow();
+  if (lastRow < REC_START) return [];
+  const vals = sh.getRange(REC_START, 1, lastRow - REC_START + 1, 10).getValues();
+  const out = [];
+  for (var i = 0; i < vals.length; i++) {
+    const client = String(vals[i][0] == null ? "" : vals[i][0]).trim();
+    if (!client) continue;
+    out.push({
+      row: REC_START + i,
+      client: client,
+      contact: String(vals[i][1] == null ? "" : vals[i][1]).trim(),
+      kg: cmdToNum(vals[i][2]),
+      qualite: String(vals[i][3] == null ? "" : vals[i][3]).trim().toLowerCase(),
+      debut: recIso(vals[i][4]),
+      fin: recIso(vals[i][5]),
+      actif: String(vals[i][6] == null ? "" : vals[i][6]).trim() !== "",
+      remarques: String(vals[i][7] == null ? "" : vals[i][7]).trim(),
+      dernierPm: cmdToNum(vals[i][8]),
+      derniereGen: recIso(vals[i][9])
+    });
+  }
+  return out;
+}
+
+/**
+ * Validate one payload and return cleaned values, or throw.
+ * excludeRow is the row being edited, so it does not clash with itself.
+ * Pass 0 when adding.
+ */
+function recClean(p, excludeRow) {
+  const client = String(p && p.client != null ? p.client : "").trim();
+  if (!client) throw new Error("Client requis.");
+
+  const contact = String(p && p.contact != null ? p.contact : "").trim();
+  if (!contact) throw new Error("Contact requis.");
+
+  var kg = cmdToNum(p && p.kg);
+  if (kg == null || kg <= 0) throw new Error("Quantité requise (kg, nombre positif).");
+  kg = Math.round(kg * 10) / 10;
+
+  const qualite = String(p && p.qualite != null ? p.qualite : "").trim().toLowerCase();
+  if (REC_QUALITES.indexOf(qualite) < 0) throw new Error("Qualité invalide : " + qualite);
+
+  const debut = recParseDate(p && p.debut);
+  if (!debut) throw new Error("Date de début requise.");
+  const fin = recParseDate(p && p.fin);
+  if (!fin) throw new Error("Date de fin requise.");
+  if (fin.getTime() < debut.getTime()) {
+    throw new Error("La date de fin précède la date de début.");
+  }
+
+  // One ACTIVE rule per client: it is what makes the weekly marker
+  // unique, and two standing orders for one client is an entry error.
+  const actif = !!(p && p.actif);
+  if (actif) {
+    const existing = recList();
+    for (var i = 0; i < existing.length; i++) {
+      if (existing[i].row === excludeRow) continue;
+      if (!existing[i].actif) continue;
+      if (existing[i].client.toLowerCase() === client.toLowerCase()) {
+        throw new Error("Le client " + existing[i].client +
+                        " a déjà une commande récurrente active (ligne " +
+                        existing[i].row + "). Modifier celle-ci.");
+      }
+    }
+  }
+
+  return {
+    client: client, contact: contact, kg: kg, qualite: qualite,
+    debut: debut, fin: fin, actif: actif,
+    remarques: String(p && p.remarques != null ? p.remarques : "").trim()
+  };
+}
+
+/** The row must still hold the client the browser last saw. */
+function recCheckRow(sh, row, seenClient) {
+  if (!(row >= REC_START)) throw new Error("Ligne invalide.");
+  if (row > sh.getLastRow()) throw new Error("Ligne introuvable — recharger l'écran.");
+  const now = String(sh.getRange(row, 1).getValue() || "").trim();
+  if (now !== String(seenClient == null ? "" : seenClient).trim()) {
+    throw new Error("La liste a changé depuis l'affichage. Recharger l'écran.");
+  }
+}
+
+function recAdd(p) {
+  const c = recClean(p, 0);
+  const sh = recSheet();
+  const row = Math.max(sh.getLastRow() + 1, REC_START);
+  // Columns I and J (dernier PM, dernière génération) belong to the
+  // generator alone and stay empty here.
+  sh.getRange(row, 1, 1, 8).setValues(
+    [[c.client, c.contact, c.kg, c.qualite, c.debut, c.fin,
+      c.actif ? "x" : "", c.remarques]]);
+  return { row: row };
+}
+
+function recUpdate(p) {
+  const row = Number(p && p.row);
+  const sh = recSheet();
+  recCheckRow(sh, row, p && p.seenClient);
+  const c = recClean(p, row);
+  sh.getRange(row, 1, 1, 8).setValues(
+    [[c.client, c.contact, c.kg, c.qualite, c.debut, c.fin,
+      c.actif ? "x" : "", c.remarques]]);
+  return { row: row };
+}
+
+function recDelete(p) {
+  const row = Number(p && p.row);
+  const sh = recSheet();
+  recCheckRow(sh, row, p && p.seenClient);
+  sh.deleteRow(row);
+  return { row: row };
+}
+
+/**
+ * Volume-weighted mean PM of the lots a grossi order could be served
+ * from, in grams. Same pool arithmetic as demCheckStock - Stock
+ * Poisson count minus réservations minus commandes non déduites, lots
+ * excluded by getNotSellableMap or by the type gate - so the derived
+ * fish count agrees with the verdict the screen will show.
+ *
+ * Returns null when no sellable grossi lot has a PM. The caller then
+ * falls back to the rule's last used PM.
+ */
+function recGrossisPm() {
+  const ss = SpreadsheetApp.openById(STOCK_PM_CFG.SS_ID);
+  const sh = ss.getSheetByName(STOCK_PM_CFG.SHEET);
+  if (!sh) throw new Error('Onglet introuvable: "' + STOCK_PM_CFG.SHEET + '"');
+  const lastRow = sh.getLastRow();
+  if (lastRow < STOCK_PM_CFG.START_ROW) return null;
+
+  const vals = sh.getRange(STOCK_PM_CFG.START_ROW, 14,
+                           lastRow - STOCK_PM_CFG.START_ROW + 1, 3).getValues();
+  const resv = demResMap();
+  const pend = demPendingMap();
+  const notSellable = getNotSellableMap();
+  const fryMax = cmdFryMaxPm();
+
+  var fish = 0, mass = 0;
+  for (var i = 0; i < vals.length; i++) {
+    const key = cmdCanonKey(vals[i][0]);
+    if (!key || notSellable[key]) continue;
+    const r = resv[key];
+    if (r === "TOUT") continue;
+    const count = cmdToNum(vals[i][1]);
+    if (count == null || count <= 0) continue;
+    const avail = count - (r || 0) - (pend[key] || 0);
+    if (avail <= 0) continue;
+    const pm = cmdToNum(vals[i][2]);
+    if (pm == null || pm <= 0) continue;
+    if (cmdLotTypeVerdict(false, pm, fryMax).level === "block") continue;
+    fish += avail;
+    mass += avail * pm;
+  }
+  if (fish <= 0) return null;
+  return Math.round((mass / fish) * 10) / 10;
+}
+
+/**
+ * The rules due on `monday` that have not been generated for it yet.
+ * Returns [{rule, marker}]. Pure read - used by the preview and by the
+ * generator, so what the preview shows is what the generator writes.
+ */
+function recDueRules(monday) {
+  const mondayIso = recIso(monday);
+  const t = monday.getTime();
+  const seen = {};
+  demList().forEach(function (d) {
+    const md = recMarkerDate(d.commentaires);
+    if (md) seen[d.client.toLowerCase() + "|" + md] = true;
+  });
+
+  const out = [];
+  recList().forEach(function (rule) {
+    if (!rule.actif) return;
+    if (rule.kg == null || rule.kg <= 0) return;
+    const deb = recParseDate(rule.debut), fin = recParseDate(rule.fin);
+    if (!deb || !fin) return;
+    if (t < deb.getTime() || t > fin.getTime()) return;
+    if (seen[rule.client.toLowerCase() + "|" + mondayIso]) return;
+    out.push({ rule: rule, marker: recMarker(rule.kg, mondayIso) });
+  });
+  return out;
+}
+
+/**
+ * RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> recPreviewWeekly
+ * Read-only. Shows exactly what the next Monday run would write.
+ */
+function recPreviewWeekly() {
+  const monday = recMondayOf(new Date());
+  const due = recDueRules(monday);
+  const pm = recGrossisPm();
+  Logger.log("Lundi de la semaine : " + recIso(monday));
+  Logger.log("PM grossis pondéré  : " + (pm == null ? "AUCUN STOCK" : pm + " g"));
+  Logger.log("Règles dues         : " + due.length);
+  due.forEach(function (d) {
+    const use = (pm != null) ? pm : d.rule.dernierPm;
+    Logger.log("  " + d.rule.client + "   " + d.rule.kg + " kg   " +
+               d.rule.qualite + "   PM " + (use == null ? "INCONNU" : use) +
+               "   -> " + (use ? Math.round(d.rule.kg * 1000 / use) : "?") +
+               " poissons   [" + d.marker + "]");
+  });
+  return due.length;
+}
+
+/**
+ * THE MONDAY JOB. Writes one pré-commande per due rule, places them at
+ * the head of the queue, stamps the rules, then mails whatever is
+ * overdue. Installed by installRecTrigger.
+ */
+function recGenerateWeekly() {
+  const monday = recMondayOf(new Date());
+  const mondayIso = recIso(monday);
+  const due = recDueRules(monday);
+  Logger.log("Génération récurrentes — lundi " + mondayIso +
+             " — " + due.length + " règle(s) due(s).");
+
+  if (due.length) {
+    const pm = recGrossisPm();
+    const sh = demSheet();
+    const newRows = [];
+
+    due.forEach(function (d) {
+      const use = (pm != null) ? pm : d.rule.dernierPm;
+      if (use == null || use <= 0) {
+        Logger.log("  " + d.rule.client + " : AUCUN PM disponible et aucun PM " +
+                   "mémorisé — ligne non écrite.");
+        return;
+      }
+      const nombre = Math.round(d.rule.kg * 1000 / use);
+      const row = Math.max(sh.getLastRow() + 1, DEM_START);
+      // Column H (rang) is left blank so demList sorts this row last;
+      // the reorder below puts it first. Column K (prix) is left blank
+      // on purpose - the order form prices from Tarifs at order time.
+      sh.getRange(row, 1, 1, 11).setValues(
+        [[monday, d.rule.client, d.rule.contact, "Poisson", nombre,
+          d.marker + (d.rule.remarques ? " — " + d.rule.remarques : ""),
+          use, "", d.rule.qualite, "", ""]]);
+      newRows.push(row);
+      // Stamp the rule: I = PM used, J = date generated.
+      recSheet().getRange(d.rule.row, 9, 1, 2).setValues([[use, monday]]);
+      Logger.log("  " + d.rule.client + " : " + d.rule.kg + " kg, PM " + use +
+                 " g -> " + nombre + " poissons, ligne " + row + ".");
+    });
+
+    // PRIORITY: generated rows first, in rule order, then everything
+    // else in its current queue order. demWriteRanks writes 1..N over
+    // column H only, so every row handle the UI holds stays valid.
+    if (newRows.length) {
+      SpreadsheetApp.flush();
+      const isNew = {};
+      newRows.forEach(function (r) { isNew[r] = true; });
+      const all = demList();
+      const head = [], tail = [];
+      all.forEach(function (d) { (isNew[d.row] ? head : tail).push(d); });
+      head.sort(function (a, b) { return newRows.indexOf(a.row) - newRows.indexOf(b.row); });
+      demWriteRanks(head.concat(tail));
+    }
+  }
+
+  recMailOverdue(monday);
+}
+
+/**
+ * Mail the team about generated pré-commandes from an EARLIER week that
+ * are still sitting in the list - the order was never placed. Nothing
+ * is sent when nothing is overdue (Kim, 2026-09-03).
+ *
+ * BLIND SPOT, ACCEPTED: this runs inside the Monday job, so a trigger
+ * that never fires sends no mail and writes no row. Silence then looks
+ * like "nothing overdue". Apps Script failure notifications are the
+ * only alarm for a dead trigger.
+ */
+function recMailOverdue(monday) {
+  const mondayIso = recIso(monday);
+  const late = [];
+  demList().forEach(function (d) {
+    const md = recMarkerDate(d.commentaires);
+    if (md && md < mondayIso) late.push({ d: d, when: md });
+  });
+  if (!late.length) {
+    Logger.log("Aucune commande récurrente en retard.");
+    return 0;
+  }
+  const lines = late.map(function (x) {
+    return "- " + x.d.client + "   (" + x.d.commentaires + ")   rang " +
+           (x.d.rang == null ? "?" : x.d.rang);
+  });
+  const body =
+    "Ces commandes récurrentes ont été préparées mais la commande n'a " +
+    "jamais été passée :\n\n" + lines.join("\n") +
+    "\n\nÉcran Commandes -> onglet Pré-commandes -> bouton Commander.\n" +
+    "Si le client a annulé, supprimer la ligne.\n";
+  MailApp.sendEmail(REC_MAIL_TO,
+                    "Tsara — " + late.length + " commande(s) récurrente(s) en retard",
+                    body);
+  Logger.log("Mail retard envoyé à " + REC_MAIL_TO + " (" + late.length + ").");
+  return late.length;
+}
+
+/**
+ * RUN FROM EDITOR ONCE: tsaraentry -> CommandesServer.js -> installRecTrigger
+ * Monday 05h. Deletes any existing trigger for the same handler first,
+ * so running it twice cannot leave two generators writing the same week.
+ */
+function installRecTrigger() {
+  var removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === "recGenerateWeekly") {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  ScriptApp.newTrigger("recGenerateWeekly")
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.MONDAY)
+    .atHour(REC_TRIGGER_HOUR)
+    .create();
+  Logger.log("Trigger recGenerateWeekly installé (lundi " + REC_TRIGGER_HOUR +
+             "h). Anciens supprimés : " + removed);
+}
+
+/** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> testRecurrences
+ *  Read-only. Prints every rule and its state. */
+function testRecurrences() {
+  const rows = recList();
+  Logger.log("Commandes récurrentes : " + rows.length);
+  rows.forEach(function (r) {
+    Logger.log("  ligne " + r.row + "   " + r.client + "   " + r.kg + " kg   " +
+               r.qualite + "   " + r.debut + " -> " + r.fin +
+               (r.actif ? "   ACTIF" : "   inactif") +
+               (r.dernierPm ? "   dernier PM " + r.dernierPm : "") +
+               (r.derniereGen ? "   dernière génération " + r.derniereGen : ""));
+  });
+}
