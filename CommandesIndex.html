@@ -591,6 +591,42 @@
       .demCheckStock();
   }
 
+  /**
+   * The automatic price for one listed pré-commande, or null when it
+   * cannot be known (Tarifs not loaded, legacy row with no categorie
+   * or livraison, weight off the grid). Mirrors demRecalcPrix exactly,
+   * including the ≤5000 tier judged on nombre + 5 %.
+   */
+  function demTarifPrix(r) {
+    if (!TARIFS || !r.categorie) return null;
+    if (r.type === 'Alevins') {
+      if (!r.livraison) return null;
+      var band = tarifBandForPm(r.poids);
+      if (!band) return null;
+      var tier = (r.nombre != null && Math.round(r.nombre * 1.05) <= 5000) ? 'le' : 'gt';
+      var col = tarifColumnKey(r.livraison, tier);
+      return (band[r.categorie] && band[r.categorie][col]) || null;
+    }
+    return TARIFS.fish[r.categorie] || null;
+  }
+
+  /**
+   * Prix cell. Red only when the stored price is ABOVE the tarif - the
+   * case worth seeing, because it is money the client is being asked
+   * for beyond the price list. A price below the tarif is a discount,
+   * a normal commercial decision, and is left in plain text.
+   */
+  function demPrixCell(r) {
+    var base = 'padding:6px 8px;border:1px solid #dadce0';
+    if (r.prix == null) return '<td style="' + base + '"></td>';
+    var t = demTarifPrix(r);
+    if (t != null && r.prix > t) {
+      return '<td style="' + base + ';color:#d93025;font-weight:bold" ' +
+             'title="Tarif : ' + fmtNum(t) + ' Ar">' + fmtNum(r.prix) + '</td>';
+    }
+    return '<td style="' + base + '">' + fmtNum(r.prix) + '</td>';
+  }
+
   function demDispoCell(r) {
     var base = 'padding:6px 8px;border:1px solid #dadce0';
     var sub = '<div style="font-weight:normal;color:#5f6368;font-size:14px;margin-top:2px">';
@@ -656,7 +692,7 @@
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.contact) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(demTypeShort(r.type)) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + (r.nombre == null ? '' : fmtNum(r.nombre)) + '</td>' +
-        '<td style="padding:6px 8px;border:1px solid #dadce0">' + (r.prix == null ? '' : fmtNum(r.prix)) + '</td>' +
+        demPrixCell(r) +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + (r.poids == null ? '' : esc(r.poids)) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.commentaires) + '</td>' +
         (demStock ? demDispoCell(r) : '') +
