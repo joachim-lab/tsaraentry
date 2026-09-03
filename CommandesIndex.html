@@ -99,6 +99,7 @@
     <div class="tab" id="tabFul" onclick="switchMode('ful')">Paiement &amp; livraison</div>
     <div class="tab" id="tabRes" onclick="switchMode('res')">R&eacute;servations</div>
     <div class="tab" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
+    <div class="tab" id="tabRec" onclick="switchMode('rec')">R&eacute;currentes</div>
     <div class="tab" id="tabHist" onclick="switchMode('hist')">Historique</div>
     <div class="tab" id="tabPrix" onclick="switchMode('prix')">Prix poisson</div>
   </div>
@@ -108,6 +109,7 @@
   <div id="paneFul" style="display:none"></div>
   <div id="paneRes" style="display:none"></div>
   <div id="paneDem" style="display:none"></div>
+  <div id="paneRec" style="display:none"></div>
   <div id="paneHist" style="display:none"></div>
   <div id="panePrix" style="display:none"></div>
 
@@ -225,12 +227,14 @@
     el('tabFul').className = 'tab' + (m === 'ful' ? ' active' : '');
     el('tabRes').className = 'tab' + (m === 'res' ? ' active' : '');
     el('tabDem').className = 'tab' + (m === 'dem' ? ' active' : '');
+    el('tabRec').className = 'tab' + (m === 'rec' ? ' active' : '');
     el('tabHist').className = 'tab' + (m === 'hist' ? ' active' : '');
     el('tabPrix').className = 'tab' + (m === 'prix' ? ' active' : '');
     el('paneNew').style.display = (m === 'new' ? '' : 'none');
     el('paneFul').style.display = (m === 'ful' ? '' : 'none');
     el('paneRes').style.display = (m === 'res' ? '' : 'none');
     el('paneDem').style.display = (m === 'dem' ? '' : 'none');
+    el('paneRec').style.display = (m === 'rec' ? '' : 'none');
     el('paneHist').style.display = (m === 'hist' ? '' : 'none');
     el('panePrix').style.display = (m === 'prix' ? '' : 'none');
     setStatus('', '');
@@ -246,6 +250,7 @@
     // list is exactly what would let two people fight over one hold.
     if (m === 'res') renderRes();
     if (m === 'dem') renderDem();
+    if (m === 'rec') renderRec();
     if (m === 'hist') renderHist();
     if (m === 'prix') renderPrix();
     // Leaving the order form abandons any pending Commander hand-off.
@@ -1068,6 +1073,192 @@
           esc(e.message) + ') — la supprimer à la main dans l’onglet Pré-commandes.</div>';
       })
       .demDelete({ row: p.row, seenClient: p.client, seenContact: p.contact });
+  }
+
+  // ---------- MODE G: commandes récurrentes ----------
+  //
+  // Standing weekly orders. This panel edits the RULES only; it never
+  // creates a pré-commande and never touches an order. The Monday 05h
+  // trigger (recGenerateWeekly) is what acts on these rows.
+  //
+  // Same shape as Réservations: list + form, row-number handles,
+  // deletion arms on the first click and acts on the second. The server
+  // enforces one ACTIVE rule per client, so the error is rare rather
+  // than normal; it is surfaced as-is rather than pre-checked here,
+  // because the sheet can change under an open screen.
+  //
+  // Grossis only - alevins are never recurrent, so there is no type
+  // selector. Kg is the quantity; the fish count is derived each Monday
+  // from live stock and never typed here.
+
+  let recRows = [];   // last list from the server
+  let recEdit = 0;    // row being edited; 0 = adding
+  let recArmed = 0;   // row armed for deletion; 0 = none
+
+  function renderRec() {
+    el('paneRec').innerHTML =
+      '<div id="recList">Chargement…</div>' +
+      '<div id="recForm"></div>';
+    loadRec();
+  }
+
+  function loadRec() {
+    google.script.run
+      .withSuccessHandler(function (rows) {
+        recRows = rows; recArmed = 0; drawRecList(); drawRecForm();
+      })
+      .withFailureHandler(function (e) {
+        el('recList').innerHTML = '<div class="err">Erreur : ' + esc(e.message) + '</div>';
+      })
+      .recList();
+  }
+
+  function drawRecList() {
+    if (!recRows.length) {
+      el('recList').innerHTML =
+        '<div class="warn">Aucune commande récurrente. ' +
+        'Une règle active crée une pré-commande chaque lundi à 5h.</div>';
+      return;
+    }
+    var h = '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
+      '<tr style="text-align:left;border-bottom:2px solid #dadce0">' +
+      '<th style="padding:6px 8px">Client</th>' +
+      '<th style="padding:6px 8px">Kg / semaine</th>' +
+      '<th style="padding:6px 8px">Qualité</th>' +
+      '<th style="padding:6px 8px">Période</th>' +
+      '<th style="padding:6px 8px">Actif</th>' +
+      '<th style="padding:6px 8px">Dernière génération</th>' +
+      '<th style="padding:6px 8px"></th></tr>';
+    recRows.forEach(function (r) {
+      var armed = (recArmed === r.row);
+      h += '<tr style="border-bottom:1px solid #e8eaed"' +
+           (r.actif ? '' : ' style="opacity:.55"') + '>' +
+        '<td style="padding:6px 8px"><b>' + esc(r.client) + '</b>' +
+          (r.contact ? '<br><span class="muted">' + esc(r.contact) + '</span>' : '') +
+        '</td>' +
+        '<td style="padding:6px 8px">' + (r.kg == null ? '' : fmtNum(r.kg)) + '</td>' +
+        '<td style="padding:6px 8px">' + esc(r.qualite) + '</td>' +
+        '<td style="padding:6px 8px">' + esc(r.debut) + ' → ' + esc(r.fin) + '</td>' +
+        '<td style="padding:6px 8px">' +
+          (r.actif ? '<b style="color:#188038">actif</b>' :
+                     '<span class="muted">inactif</span>') + '</td>' +
+        '<td style="padding:6px 8px">' +
+          (r.derniereGen ? esc(r.derniereGen) +
+             (r.dernierPm ? '<br><span class="muted">PM ' + esc(String(r.dernierPm)) +
+                            ' g</span>' : '')
+                         : '<span class="muted">—</span>') + '</td>' +
+        '<td style="padding:6px 8px;white-space:nowrap">' +
+          '<button onclick="recStartEdit(' + r.row + ')">Modifier</button> ' +
+          '<button onclick="recAskDelete(' + r.row + ')"' +
+            (armed ? ' style="background:#d93025;color:#fff;border-color:#d93025"' : '') +
+            '>' + (armed ? 'Confirmer — définitif' : 'Supprimer') + '</button>' +
+        '</td></tr>';
+    });
+    el('recList').innerHTML = h + '</table>';
+  }
+
+  function drawRecForm() {
+    var cur = null;
+    recRows.forEach(function (r) { if (r.row === recEdit) cur = r; });
+    if (recEdit && !cur) recEdit = 0;          // row vanished under us
+
+    var qual = cur ? cur.qualite : 'gros';
+    el('recForm').innerHTML =
+      '<h3 style="margin:0 0 10px">' +
+        (recEdit ? 'Modifier la commande récurrente' : 'Nouvelle commande récurrente') +
+      '</h3>' +
+      '<div style="margin-bottom:10px"><label>Client<br>' +
+        '<input id="rcClient" type="text" size="30" value="' +
+        esc(cur ? cur.client : '') + '"></label></div>' +
+      '<div style="margin-bottom:10px"><label>Contact<br>' +
+        '<input id="rcContact" type="text" size="30" value="' +
+        esc(cur ? cur.contact : '') + '"></label></div>' +
+      '<div style="margin-bottom:10px"><label>Quantité par semaine (kg)<br>' +
+        '<input id="rcKg" type="number" min="1" step="0.1" value="' +
+        (cur && cur.kg != null ? cur.kg : '') + '"></label></div>' +
+      '<div style="margin-bottom:10px"><label>Qualité<br>' +
+        '<select id="rcQual">' +
+        '<option value="gros"' + (qual === 'gros' ? ' selected' : '') + '>Gros</option>' +
+        '<option value="detail"' + (qual === 'detail' ? ' selected' : '') + '>Détail</option>' +
+        '</select></label></div>' +
+      '<div style="margin-bottom:10px"><label>Première semaine (début)<br>' +
+        '<input id="rcDebut" type="date" value="' +
+        esc(cur ? cur.debut : todayISO()) + '"></label></div>' +
+      '<div style="margin-bottom:10px"><label>Dernière semaine (fin)<br>' +
+        '<input id="rcFin" type="date" value="' + esc(cur ? cur.fin : '') +
+        '"></label></div>' +
+      '<div style="margin-bottom:10px"><label>' +
+        '<input id="rcActif" type="checkbox"' +
+        ((!cur || cur.actif) ? ' checked' : '') + '> Actif</label>' +
+        '<div class="muted">Décocher suspend la règle sans la supprimer.</div>' +
+      '</div>' +
+      '<div style="margin-bottom:12px"><label>Remarques<br>' +
+        '<input id="rcRem" type="text" size="50" value="' +
+        esc(cur ? cur.remarques : '') + '"></label></div>' +
+      '<button onclick="recSave()">' + (recEdit ? 'Enregistrer' : 'Ajouter') + '</button>' +
+      (recEdit ? ' <button onclick="recCancelEdit()">Annuler</button>' : '');
+  }
+
+  function recStartEdit(row) {
+    recEdit = row; recArmed = 0;
+    drawRecList(); drawRecForm();
+  }
+
+  function recCancelEdit() {
+    recEdit = 0; drawRecForm();
+  }
+
+  function recSave() {
+    var p = {
+      client:    el('rcClient').value,
+      contact:   el('rcContact').value,
+      kg:        el('rcKg').value,
+      qualite:   el('rcQual').value,
+      debut:     el('rcDebut').value,
+      fin:       el('rcFin').value,
+      actif:     el('rcActif').checked,
+      remarques: el('rcRem').value
+    };
+    setStatus('banner', 'Enregistrement…');
+    if (recEdit) {
+      var cur = null;
+      recRows.forEach(function (r) { if (r.row === recEdit) cur = r; });
+      p.row = recEdit;
+      p.seenClient = cur ? cur.client : '';
+      google.script.run
+        .withSuccessHandler(function () {
+          recEdit = 0;
+          setStatusAndScroll('ok', 'Commande récurrente modifiée.');
+          loadRec();
+        })
+        .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+        .recUpdate(p);
+    } else {
+      google.script.run
+        .withSuccessHandler(function () {
+          setStatusAndScroll('ok', 'Commande récurrente ajoutée.');
+          loadRec();
+        })
+        .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+        .recAdd(p);
+    }
+  }
+
+  function recAskDelete(row) {
+    if (recArmed !== row) { recArmed = row; drawRecList(); return; }
+    var cur = null;
+    recRows.forEach(function (r) { if (r.row === row) cur = r; });
+    setStatus('banner', 'Suppression…');
+    google.script.run
+      .withSuccessHandler(function () {
+        setStatusAndScroll('ok', 'Commande récurrente supprimée.');
+        loadRec();
+      })
+      .withFailureHandler(function (e) {
+        recArmed = 0; drawRecList();
+        setStatusAndScroll('err', esc(e.message));
+      })
+      .recDelete({ row: row, seenClient: cur ? cur.client : '' });
   }
 
   // ---------- MODE E: historique ----------
