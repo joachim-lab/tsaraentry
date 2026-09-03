@@ -26,7 +26,8 @@
   <div id="tiles">Chargement…</div>
 
   <script>
-    google.script.run.withSuccessHandler(function (url) {
+    (function () {
+      var url = <?!= JSON.stringify(getWebAppUrl()) ?>;
       var b = document.getElementById('backLink');
       if (b) b.href = url;
       document.getElementById('tiles').innerHTML =
@@ -36,7 +37,7 @@
           '<h2>Check stock physique</h2><p>Comptage des sacs, sur demande par email</p></a>' +
         '<a class="tile green" href="' + url + '?screen=achats">' +
           '<h2>Factures provende</h2><p>Achats du mois sur base des factures</p></a>';
-    }).getWebAppUrl();
+    })();
   </script>
 </body>
 </html>

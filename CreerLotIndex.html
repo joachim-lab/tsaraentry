@@ -116,12 +116,12 @@
       if (html) window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    google.script.run.withSuccessHandler(function (u) {
-      BASE = u;
+    BASE = <?!= JSON.stringify(getWebAppUrl()) ?>;
+    (function () {
       var b = el('backLink');
-      if (b) b.href = u;
-      refresh();
-    }).getWebAppUrl();
+      if (b) b.href = BASE;
+    })();
+    window.addEventListener('DOMContentLoaded', refresh);
 
     /* The harvest waiting to be continued, or null. Fetched once on
        load. A failure is silent on purpose: no carry simply means the

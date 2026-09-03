@@ -52,12 +52,12 @@
         .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
-    google.script.run.withSuccessHandler(function (u) {
-      BASE = u;
+    BASE = <?!= JSON.stringify(getWebAppUrl()) ?>;
+    (function () {
       var b = document.getElementById('backLink');
-      if (b) b.href = u;
-      refresh();
-    }).getWebAppUrl();
+      if (b) b.href = BASE;
+    })();
+    window.addEventListener('DOMContentLoaded', refresh);
 
     google.script.run
       .withSuccessHandler(function (o) {
