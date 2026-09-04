@@ -391,8 +391,6 @@
     return '<div class="card">' +
              '<b>' + esc(r.client) + '</b>' +
              (r.type ? ' <span class="muted">(' + esc(r.type) + ')</span>' : '') +
-             ' <span class="muted" style="cursor:pointer" ' +
-                   'onclick="cliToggle(' + r.row + ')">[fermer]</span>' +
              '<table style="margin:8px 0">' +
                cliLigne('Dernier prix/alevin', cliAr(r.prixAl)) +
                cliLigne('Dernier prix/kg', cliAr(r.prixKg)) +
@@ -412,6 +410,8 @@
                '</textarea></label>' +
              '<button id="cliSave" style="margin-top:8px" ' +
                      'onclick="cliSave(' + r.row + ')">Enregistrer</button>' +
+             ' <button id="cliClose" style="margin-top:8px" ' +
+                     'onclick="cliToggle(' + r.row + ')">Fermer</button>' +
            '</div>';
   }
 
