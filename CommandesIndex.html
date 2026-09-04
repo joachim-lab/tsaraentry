@@ -209,7 +209,11 @@
     // order form is built ONCE here. Commander (demCommander) calls
     // switchMode('new') and expects to find the fields already there.
     // Then land on Pré-commandes, which is the tab the day starts on.
-    .withSuccessHandler(o => { OPTS = o; renderNew(); switchMode('dem'); })
+    // Reopen the tab the person was on before a reload (Kim, 2026-09-04).
+    // The tab is remembered in this browser only; a fresh browser lands
+    // on Pré-commandes as before. 'new' is never restored: the order form
+    // is a hand-off target, not a place to start the day.
+    .withSuccessHandler(o => { OPTS = o; renderNew(); switchMode(lastTab()); })
     .withFailureHandler(e => setStatus('err', 'Erreur chargement : ' + esc(e.message)))
     .cmdGetOptions();
 
@@ -266,8 +270,25 @@
       'l\'enregistrement. Pr\u00e9venir Kim.</div>';
   }
 
+  const TAB_KEY = 'tsara.commandes.tab';
+  const TABS_RESTORE = ['dem', 'rec', 'ful', 'hist', 'prix', 'cli', 'res'];
+
+  function lastTab() {
+    try {
+      const t = localStorage.getItem(TAB_KEY);
+      return TABS_RESTORE.indexOf(t) >= 0 ? t : 'dem';
+    } catch (e) { return 'dem'; }
+  }
+
+  function rememberTab(m) {
+    try {
+      if (TABS_RESTORE.indexOf(m) >= 0) localStorage.setItem(TAB_KEY, m);
+    } catch (e) { /* storage blocked: nothing to remember, nothing breaks */ }
+  }
+
   function switchMode(m) {
     mode = m;
+    rememberTab(m);
     el('tabNew').className = 'tab' + (m === 'new' ? ' active' : '');
     el('tabFul').className = 'tab' + (m === 'ful' ? ' active' : '');
     el('tabRes').className = 'tab' + (m === 'res' ? ' active' : '');
@@ -577,17 +598,24 @@
     var h = '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
       '<tr style="text-align:left;border-bottom:2px solid #dadce0">' +
       '<th style="padding:6px 8px">Lot</th>' +
-      '<th style="padding:6px 8px">Type</th>' +
-      '<th style="padding:6px 8px">Quantit\u00e9</th>' +
+      '<th style="padding:6px 8px">Ne pas vendre</th>' +
+      '<th style="padding:6px 8px">On peut vendre</th>' +
       '<th style="padding:6px 8px">Note</th>' +
       '<th style="padding:6px 8px"></th></tr>';
     resRows.forEach(function (r) {
       var armed = (resArmed === r.row);
+      // No Type column (Kim, 2026-09-04): a TOUT hold reads "Tout le lot"
+      // under Ne pas vendre and 0 under On peut vendre. The type is still
+      // chosen in the form below, where it is needed.
+      var holdTxt = (r.type === 'TOUT') ? 'Tout le lot'
+                  : (r.qty == null ? '' : fmtNum(r.qty));
+      var sellTxt = (r.type === 'TOUT') ? '0'
+                  : (r.sell == null ? '' : fmtNum(r.sell));
       h += '<tr style="border-bottom:1px solid #e8eaed">' +
-        '<td style="padding:6px 8px"><b>' + esc(r.lot) + '</b></td>' +
-        '<td style="padding:6px 8px">' + esc(r.type) + '</td>' +
-        '<td style="padding:6px 8px">' + (r.qty == null ? '' : fmtNum(r.qty)) + '</td>' +
-        '<td style="padding:6px 8px">' + esc(r.note) + '</td>' +
+        '<td style="padding:6px 8px;white-space:nowrap"><b>' + esc(r.lot) + '</b></td>' +
+        '<td style="padding:6px 8px">' + holdTxt + '</td>' +
+        '<td style="padding:6px 8px">' + sellTxt + '</td>' +
+        '<td style="padding:6px 8px' + (r.auto ? ';color:#5f6368' : '') + '">' + resNoteTxt(r) + '</td>' +
         '<td style="padding:6px 8px;white-space:nowrap">' +
           '<button onclick="resStartEdit(' + r.row + ')">Modifier</button> ' +
           '<button onclick="resAskDelete(' + r.row + ')"' +
@@ -596,6 +624,19 @@
         '</td></tr>';
     });
     el('resList').innerHTML = h + '</table>';
+  }
+
+  /**
+   * Note as shown in the list. An AUTO row's sheet note is the machine
+   * marker "AUTO — Besoins production yyyy-MM-dd" (V3 and resList key on
+   * that prefix); the screen shows it as "4/9 besoin production". The
+   * sheet text is untouched — the edit form still shows it in full.
+   */
+  function resNoteTxt(r) {
+    if (!r.auto) return esc(r.note);
+    var m = /(\d{4})-(\d{2})-(\d{2})/.exec(r.note);
+    var d = m ? (Number(m[3]) + '/' + Number(m[2]) + ' ') : '';
+    return d + 'besoin production';
   }
 
   function drawResForm() {
@@ -628,7 +669,7 @@
         '<option value="TOUT"' + (type === 'TOUT' ? ' selected' : '') + '>Tout le lot</option>' +
         '<option value="NOMBRE"' + (type === 'NOMBRE' ? ' selected' : '') + '>Un nombre</option>' +
         '</select></label></div>' +
-      '<div style="margin-bottom:10px" id="rQtyWrap"><label>Quantit\u00e9 (poissons)<br>' +
+      '<div style="margin-bottom:10px" id="rQtyWrap"><label>Ne pas vendre (poissons \u00e0 garder)<br>' +
         '<input id="rQty" type="number" min="1" step="1" value="' +
         (cur && cur.qty != null ? cur.qty : '') + '"></label></div>' +
       '<div style="margin-bottom:12px"><label>Note<br>' +
@@ -646,10 +687,23 @@
   function resStartEdit(row) {
     resEdit = row; resArmed = 0;
     drawResList(); drawResForm();
+    // An AUTO row is rewritten by Production Model V3 at every Generate.
+    // Without this the worker's edit vanishes overnight with no trace.
+    var cur = null;
+    resRows.forEach(function (r) { if (r.row === row) cur = r; });
+    if (cur && cur.auto) {
+      setStatusAndScroll('warn',
+        'Réservation écrite automatiquement par le modèle de production. ' +
+        'Elle sera <b>remplacée chaque matin</b>. Pour la garder à la main, ' +
+        'changez la Note pour qu’elle ne commence plus par « AUTO — ».');
+    } else {
+      setStatus('', '');
+    }
   }
 
   function resCancelEdit() {
     resEdit = 0; drawResForm();
+    setStatus('', '');
   }
 
   function resSave() {
