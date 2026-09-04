@@ -31,9 +31,9 @@
        a real scroll container, and .tabs::after prints a fading edge
        so the user can see there is more to the right.
        If an 8th tab is added: shorten the labels, do not re-wrap. */
-    .tabsWrap { position: relative; width: min(96vw, 1500px);
-                margin-left: 50%; transform: translateX(-50%);
-                margin-bottom: 8px; }
+    .tabsWrap { position: relative; width: max-content;
+                max-width: min(96vw, 1500px);
+                margin: 0 auto 8px; }
     .tabs { display: flex; flex-wrap: nowrap; gap: 4px;
             overflow-x: auto; -webkit-overflow-scrolling: touch;
             border-bottom: 2px solid #dadce0; }
