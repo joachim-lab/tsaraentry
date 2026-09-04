@@ -2440,7 +2440,10 @@
       const card = ev.target.closest ? ev.target.closest('.hit') : null;
       if (!card) return;
       const key = card.getAttribute('data-key');
-      if (key) selectHit(key);
+      // Click the card that is already open to close it, as the
+      // Clients screen does (cliToggle).
+      if (!key) return;
+      if (key === selectedKey) fulClose(); else selectHit(key);
     });
 
     doSearch();
@@ -2520,6 +2523,28 @@
         el('fDeliveredUnpaid').checked, el('fUndelivered').checked);
   }
 
+  /**
+   * Collapse the open order card. Called by the Fermer button and by
+   * clicking the card that is already open.
+   */
+  function fulClose() {
+    const wasKey = selectedKey;
+    selectedKey = null;
+    el('fulForm').innerHTML = '';
+    hits.forEach(o => {
+      const n = el('hit_' + o.key);
+      // className is REPLACED here too: without hitClass(o) the
+      // alevins/poisson colour would be stripped on close.
+      if (n) n.className = 'hit' + hitClass(o);
+    });
+    // The form is tall. Closing it without this leaves the screen
+    // parked on blank space well below the list.
+    const back = wasKey ? el('hit_' + wasKey) : null;
+    if (back && back.scrollIntoView) {
+      back.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
   function selectHit(key) {
     selectedKey = key;
     hits.forEach(o => {
@@ -2575,7 +2600,16 @@
           '<div><label>Bon de livraison externe</label><input type="text" id="uBl" value="'+esc(o.bl || '')+'"></div>' +
         '</div>' +
         '<label>Remarques</label><input type="text" id="uRemarques" value="'+esc(o.remarques || '')+'">' +
-        '<button class="go" id="btnFul" onclick="doFulfil()">Enregistrer</button>' +
+        // Fermer sits right of Enregistrer, as on the Clients card.
+        // .go carries its own margin-top, so the row uses align-items
+        // rather than a margin of its own.
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
+          '<button class="go" id="btnFul" onclick="doFulfil()">Enregistrer</button>' +
+          '<button id="btnFulClose" onclick="fulClose()" ' +
+            'style="margin-top:18px;background:#fff;color:#5f6368;' +
+            'border:1px solid #dadce0;border-radius:4px;padding:10px 14px;' +
+            'font-size:17px;cursor:pointer">Fermer</button>' +
+        '</div>' +
         // ALWAYS shown. A delivered order still allows a price change,
         // so the button stays and loadModify() drops the quantity
         // fields instead.
