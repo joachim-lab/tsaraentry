@@ -134,8 +134,8 @@
   <h1>Commandes</h1>
 
   <div class="tabsWrap"><div class="tabs">
-    <div class="tab" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
-    <div class="tab active" id="tabNew" onclick="switchMode('new')">Nouvelle cmd</div>
+    <div class="tab active" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
+    <div class="tab" id="tabNew" onclick="switchMode('new')">Nouvelle cmd</div>
     <div class="tab" id="tabRec" onclick="switchMode('rec')">R&eacute;currentes</div>
     <div class="tab" id="tabFul" onclick="switchMode('ful')">Paiement</div>
     <div class="tab" id="tabHist" onclick="switchMode('hist')">Historique</div>
@@ -145,10 +145,10 @@
   </div></div>
 
   <div id="status"></div>
-  <div id="paneNew"></div>
+  <div id="paneNew" style="display:none"></div>
   <div id="paneFul" style="display:none"></div>
   <div id="paneRes" style="display:none"></div>
-  <div id="paneDem" style="display:none"></div>
+  <div id="paneDem"></div>
   <div id="paneRec" style="display:none"></div>
   <div id="paneHist" style="display:none"></div>
   <div id="panePrix" style="display:none"></div>
@@ -171,7 +171,7 @@
   const NOT_SELLABLE = {};
   let GATE_FAILED = false;     // true once cmdGetLotGateData has thrown
   let lines = [{}];            // create mode: one line per lot
-  let mode = 'new';
+  let mode = 'dem';
   let hits = [];               // fulfilment search results
   let selectedKey = null;
 
@@ -205,7 +205,11 @@
 
   // ---------- boot ----------
   google.script.run
-    .withSuccessHandler(o => { OPTS = o; renderNew(); })
+    // renderNew() still runs: switchMode has no 'new' branch, so the
+    // order form is built ONCE here. Commander (demCommander) calls
+    // switchMode('new') and expects to find the fields already there.
+    // Then land on Pré-commandes, which is the tab the day starts on.
+    .withSuccessHandler(o => { OPTS = o; renderNew(); switchMode('dem'); })
     .withFailureHandler(e => setStatus('err', 'Erreur chargement : ' + esc(e.message)))
     .cmdGetOptions();
 
