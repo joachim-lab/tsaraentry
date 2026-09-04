@@ -633,6 +633,23 @@
             '>' + (armed ? 'Confirmer \u2014 d\u00e9finitif' : 'Supprimer') + '</button>' +
         '</td></tr>';
     });
+    // Totals (Kim, 2026-09-04). A TOUT row has no count in the sheet, so it
+    // cannot be added: it is named as a separate note. Column D is blank on
+    // manual rows (V3 writes it for AUTO rows only), so a blank counts 0.
+    var totHold = 0, totSell = 0, nTout = 0;
+    resRows.forEach(function (r) {
+      if (r.type === 'TOUT') { nTout++; return; }
+      if (r.qty != null) totHold += r.qty;
+      if (r.sell != null) totSell += r.sell;
+    });
+    h += '<tr style="border-top:2px solid #dadce0;font-weight:bold">' +
+      '<td style="padding:6px 8px">Total</td>' +
+      '<td style="padding:6px 8px">' + fmtNum(totHold) +
+        (nTout ? ' <span style="font-weight:normal;color:#5f6368">+ ' + nTout +
+                 ' lot' + (nTout > 1 ? 's' : '') + ' en totalit\u00e9</span>' : '') +
+      '</td>' +
+      '<td style="padding:6px 8px">' + fmtNum(totSell) + '</td>' +
+      '<td colspan="2"></td></tr>';
     el('resList').innerHTML = h + '</table>';
   }
 
