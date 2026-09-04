@@ -325,6 +325,11 @@
     google.script.run
       .withSuccessHandler(function (res) {
         cliRows = (res && res.rows) || [];
+        // Alphabetical, accent-blind via localeCompare('fr'): "Éla"
+        // sorts next to "Elie", not off at the end past "Z".
+        cliRows.sort(function (a, b) {
+          return a.client.localeCompare(b.client, 'fr', { sensitivity: 'base' });
+        });
         cliOpen = null;
         pane.innerHTML = cliHtml(res && res.stamp);
         const f = el('cliFiltre');
@@ -344,8 +349,6 @@
              '<h3>Clients <span class="muted">(' + cliRows.length + ')</span></h3>' +
              '<p class="muted">' +
                (stamp ? esc(stamp) : 'Jamais actualis&eacute;') +
-               ' &mdash; les chiffres viennent de la derni&egrave;re ' +
-               'actualisation, pas de maintenant.' +
              '</p>' +
              '<input id="cliFiltre" type="text" autocomplete="off" ' +
                     'placeholder="Chercher un nom, un t&eacute;l&eacute;phone, ' +
@@ -407,9 +410,6 @@
                '</textarea></label>' +
              '<button id="cliSave" style="margin-top:8px" ' +
                      'onclick="cliSave(' + r.row + ')">Enregistrer</button>' +
-             '<p class="muted">Le t&eacute;l&eacute;phone et les chiffres ' +
-               'viennent des commandes. Seules la localisation et les notes ' +
-               's&rsquo;enregistrent ici.</p>' +
            '</div>';
   }
 
