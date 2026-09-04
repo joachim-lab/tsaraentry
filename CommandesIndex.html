@@ -2573,7 +2573,13 @@
     const montantTxt = Number(o.montantAr || 0).toLocaleString('fr-FR') + ' Ar';
 
     el('fulForm').innerHTML =
-      '<div class="card"><h3>' + esc(o.orderNumber || '(sans numéro)') + ' — ' + esc(o.client) + '</h3>' +
+      // The title bar closes the card: it is the only zone with no
+      // input in it, so the click cannot collide with filling the form.
+      '<div class="card"><h3 onclick="fulClose()" style="cursor:pointer" ' +
+          'title="Cliquer pour fermer">' +
+        esc(o.orderNumber || '(sans numéro)') + ' — ' + esc(o.client) +
+        '<span class="muted" style="float:right;font-size:14px;font-weight:normal">' +
+          '&#9650; fermer</span></h3>' +
         '<div class="row" style="margin-top:12px">' +
           '<div>' +
             '<div style="font-size:18px;font-weight:600;padding:4px 0">' + esc(qtyTxt) + '</div>' +
