@@ -374,7 +374,7 @@
   }
 
   /** One client. Closed = a summary line. Open = the numbers plus the
-   *  two editable fields. */
+   *  three editable fields. */
   function cliCard(r) {
     if (cliOpen !== r.row) {
       return '<div class="card" style="cursor:pointer" ' +
@@ -394,14 +394,16 @@
              ' <span class="muted" style="cursor:pointer" ' +
                    'onclick="cliToggle(' + r.row + ')">[fermer]</span>' +
              '<table style="margin:8px 0">' +
-               cliLigne('T&eacute;l&eacute;phone', r.tel ? esc(r.tel) : '&mdash;') +
                cliLigne('Dernier prix/alevin', cliAr(r.prixAl)) +
                cliLigne('Dernier prix/kg', cliAr(r.prixKg)) +
                cliLigne('Total alevins', fmtNum(r.totAl)) +
                cliLigne('Total kg', fmtNum(r.totKg)) +
                cliLigne('Nb achats', fmtNum(r.nb)) +
              '</table>' +
-             '<label>Localisation<br>' +
+             '<label>T&eacute;l&eacute;phone<br>' +
+               '<input id="cliTel" type="text" style="width:100%;padding:8px" ' +
+                      'value="' + esc(r.tel) + '"></label>' +
+             '<label style="display:block;margin-top:8px">Localisation<br>' +
                '<input id="cliLoc" type="text" style="width:100%;padding:8px" ' +
                       'value="' + esc(r.loc) + '"></label>' +
              '<label style="display:block;margin-top:8px">Notes<br>' +
@@ -431,12 +433,14 @@
   function cliSave(row) {
     const r = cliRows.filter(function (x) { return x.row === row; })[0];
     if (!r) return;
+    const tel = el('cliTel').value;
     const loc = el('cliLoc').value;
     const notes = el('cliNotes').value;
     const btn = el('cliSave');
     if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…'; }
     google.script.run
       .withSuccessHandler(function () {
+        r.tel = tel.trim();
         r.loc = loc.trim();
         r.notes = notes.trim();
         cliOpen = null;
@@ -447,7 +451,7 @@
         if (btn) { btn.disabled = false; btn.textContent = 'Enregistrer'; }
         setStatusAndScroll('err', esc(e.message));
       })
-      .crmSaveInfo(row, r.client, loc, notes);
+      .crmSaveInfo(row, r.client, tel, loc, notes);
   }
 
   /* ---------- MODE F: Prix poisson (lecture seule) ----------

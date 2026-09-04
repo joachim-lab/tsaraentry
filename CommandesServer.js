@@ -3178,11 +3178,16 @@ function testRecurrences() {
  *   L1 = the rebuild stamp, printed at the top of the tab so a worker
  *        can see the age of the numbers.
  *
- * WRITEABLE FROM HERE: C and J only. Everything else is overwritten by
+ * WRITEABLE FROM HERE: B, C and J. Everything else is overwritten by
  * the next rebuild, so an edit to it would vanish without a message -
  * the worst kind of failure. The client name is NOT writeable either:
  * renaming here would not rename the order rows the totals come from,
  * and the next rebuild would re-append the old name as a second row.
+ *
+ * B (Telephone): 06_crm.gs only fills this cell when it is empty
+ * (Kim, 2026-09-04 - a manual number is final). A save from here makes
+ * the cell non-empty, so the next rebuild leaves it alone from then on,
+ * the same way it already treats C and J.
  *
  * ROW NUMBERS ARE THE HANDLE, as in Reservations and Pre-commandes:
  * the save re-reads the row and compares the client name against what
@@ -3194,6 +3199,7 @@ function testRecurrences() {
 const CRM_SHEET = "CRM";
 const CRM_START = 2;                       // row 1 = headers
 const CRM_COLS = 10;                       // A..J
+const CRM_COL_TEL = 2;                      // B
 const CRM_COL_LOC = 3;                     // C
 const CRM_COL_NOTES = 10;                  // J
 const CRM_COL_STAMP = 12;                  // L1
@@ -3246,11 +3252,11 @@ function crmClientList() {
 }
 
 /**
- * Write Localisation (C) and Notes (J) for one client row.
+ * Write Telephone (B), Localisation (C) and Notes (J) for one client row.
  * clientSeen is the name the browser displayed; it is the staleness
  * proof, not a value to write.
  */
-function crmSaveInfo(row, clientSeen, loc, notes) {
+function crmSaveInfo(row, clientSeen, tel, loc, notes) {
   const r = Math.floor(Number(row));
   if (!(r >= CRM_START)) throw new Error("Ligne invalide.");
 
@@ -3265,6 +3271,7 @@ function crmSaveInfo(row, clientSeen, loc, notes) {
                     'maintenant "' + String(nameNow).trim() + '". Rechargez la page.');
   }
 
+  sh.getRange(r, CRM_COL_TEL).setValue(String(tel == null ? "" : tel).trim());
   sh.getRange(r, CRM_COL_LOC).setValue(String(loc == null ? "" : loc).trim());
   sh.getRange(r, CRM_COL_NOTES).setValue(String(notes == null ? "" : notes).trim());
   SpreadsheetApp.flush();
