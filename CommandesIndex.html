@@ -118,7 +118,17 @@
     .del { color: #c5221f; cursor: pointer; font-size: 15px; }
     .hit { border: 1px solid #dadce0; border-radius: 6px; padding: 10px 12px; margin-top: 8px; cursor: pointer; }
     .hit:hover { background: #f8f9fa; }
-    .hit.sel { border-color: #1a73e8; background: #e8f0fe; }
+    /* Fill = WHAT the order is. Ring = WHICH one is open. Two signals,
+       two channels: a selected alevins card must still read as alevins,
+       so .sel no longer repaints the background. */
+    .hit.alv  { background: #e6f4ea; border-color: #b7dfc4; }
+    .hit.pois { background: #fef7e0; border-color: #f0d79a; }
+    .hit.mix  { background: #f3e8fd; border-color: #d9bef7; }
+    /* .hit:hover is declared ABOVE these and carries the same weight,
+       so the type fill wins and a coloured card would lose its hover
+       feedback. Darkening the card itself works whatever the fill. */
+    .hit.alv:hover, .hit.pois:hover, .hit.mix:hover { filter: brightness(0.96); }
+    .hit.sel { border-color: #1a73e8; box-shadow: inset 0 0 0 2px #1a73e8; }
     .hit b { font-size: 16px; }
     .backlink { display:inline-block; margin-bottom:10px; font-size: 16px; color:#1a73e8;
                 text-decoration:none; }
@@ -137,7 +147,7 @@
     <div class="tab active" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
     <div class="tab" id="tabNew" onclick="switchMode('new')">Nouvelle cmd</div>
     <div class="tab" id="tabRec" onclick="switchMode('rec')">R&eacute;currentes</div>
-    <div class="tab" id="tabFul" onclick="switchMode('ful')">Paiement</div>
+    <div class="tab" id="tabFul" onclick="switchMode('ful')">Paiement &amp; livraison</div>
     <div class="tab" id="tabHist" onclick="switchMode('hist')">Historique</div>
     <div class="tab" id="tabPrix" onclick="switchMode('prix')">Prix</div>
     <div class="tab" id="tabCli" onclick="switchMode('cli')">Clients</div>
@@ -2451,6 +2461,20 @@
 
   /** Quantity of one order: alevins as a count, poisson in kg. Both are
    *  shown when an order carries both, which a multi-lot order can. */
+  /**
+   * The colour class for one order. Read from the quantities, not from
+   * the AL-/GR- order number: an order saved before a number was cut
+   * has no prefix, and it still has to be the right colour.
+   */
+  function hitClass(o) {
+    const al = Number(o.alevinsTotal || 0) > 0;
+    const po = Number(o.poissonKgTotal || 0) > 0;
+    if (al && po) return ' mix';
+    if (al) return ' alv';
+    if (po) return ' pois';
+    return '';
+  }
+
   function hitQty(o) {
     const bits = [];
     if (Number(o.alevinsTotal || 0) > 0) {
@@ -2481,7 +2505,7 @@
               : 'Aucune commande trouvée.');
         el('hits').innerHTML = hits.length
           ? hits.map(o =>
-              '<div class="hit" id="hit_'+esc(o.key)+'" data-key="'+esc(o.key)+'">' +
+              '<div class="hit'+hitClass(o)+'" id="hit_'+esc(o.key)+'" data-key="'+esc(o.key)+'">' +
                 '<b>' + esc(o.orderNumber || '(sans numéro)') + '</b> · ' + esc(o.client) +
                 '<div class="muted">' + esc(o.dateCommande) + ' · lots : ' + esc(o.lots.join(', ') || '—') +
                 hitQty(o) +
@@ -2500,7 +2524,9 @@
     selectedKey = key;
     hits.forEach(o => {
       const n = el('hit_' + o.key);
-      if (n) n.className = 'hit' + (o.key === key ? ' sel' : '');
+      // hitClass() is re-applied: this line REPLACES className, so
+      // leaving it out would strip the colour on the first click.
+      if (n) n.className = 'hit' + hitClass(o) + (o.key === key ? ' sel' : '');
     });
     const o = hits.filter(h => h.key === key)[0];
     if (!o) return;
@@ -2553,19 +2579,20 @@
         // ALWAYS shown. A delivered order still allows a price change,
         // so the button stays and loadModify() drops the quantity
         // fields instead.
-        '<div style="margin-top:14px">' +
+        // One row, Annuler to the right of Modifier. modZone stays
+        // OUTSIDE the flex row: the edit form is a block, not a
+        // third button sharing the line.
+        '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">' +
           '<button id="btnMod" onclick="loadModify()" ' +
             'style="background:#fff;color:#1a73e8;border:1px solid #1a73e8;' +
             'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
             'Modifier la commande</button>' +
-          '<div id="modZone"></div>' +
-        '</div>' +
-        '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #dadce0">' +
           '<button id="btnCancel" onclick="askCancel()" ' +
             'style="background:#fff;color:#c5221f;border:1px solid #c5221f;' +
-            'border-radius:4px;padding:10px 14px;font-size: 17px;cursor:pointer">' +
+            'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
             'Annuler la commande</button>' +
         '</div>' +
+        '<div id="modZone"></div>' +
       '</div>';
 
     // The results list can be long; make sure the form is actually seen.
