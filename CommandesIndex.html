@@ -2307,14 +2307,14 @@
 
     el('fulForm').innerHTML =
       '<div class="card"><h3>' + esc(o.orderNumber || '(sans numéro)') + ' — ' + esc(o.client) + '</h3>' +
-        '<div class="row">' +
-          '<div><label>Quantité commandée</label>' +
+        '<div class="row" style="margin-top:12px">' +
+          '<div>' +
             '<div style="font-size:18px;font-weight:600;padding:4px 0">' + esc(qtyTxt) + '</div>' +
             (prixTxt
               ? '<div class="muted" style="font-size:15px;padding-bottom:4px">' +
                   esc(prixTxt) + '</div>'
               : '') + '</div>' +
-          '<div><label>Montant total</label>' +
+          '<div>' +
             '<div style="font-size:18px;font-weight:600;padding:4px 0">' + esc(montantTxt) + '</div></div>' +
         '</div>' +
         '<div class="row">' +
