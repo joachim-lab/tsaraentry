@@ -36,7 +36,14 @@ const CS_CFG = {
   SNAP_STATUS_PENDING: "en attente",
   SNAP_STATUS_DONE: "compare",     // = WS_CFG.STOCK_SNAPSHOT.STATUS_DONE
   SNAP_ANSWERED_COL: 5,            // E = date of the count that closed the snapshot
-  MAX_LAG_DAYS: 2                  // WARNINGSYSTEM voids a count later than this
+  MAX_LAG_DAYS: 2,                 // WARNINGSYSTEM voids a count later than this
+
+  // Freshness of the theoretical. C2 carries the timestamp of the last
+  // consolidateProvendeToAnalyse run (project controleconsoprovende).
+  FEED_SHEET: "Consommation provende",
+  FEED_START_ROW: 2,
+  FEED_DATE_COL: 4,                // D = date of the feed entry
+  MAX_FEED_LAG_DAYS: 1             // = WS_CFG.STOCK_SNAPSHOT.MAX_FEED_LAG_DAYS
 };
 
 /** Open the count sheet, or fail loudly. */
@@ -115,6 +122,93 @@ function rearmSnapshotForCount(ss, countDate) {
     n++;
   }
   return n > 0;
+}
+
+/** Newest date in the feed log, or null. */
+function newestFeedDate(ss) {
+  const fsh = ss.getSheetByName(CS_CFG.FEED_SHEET);
+  if (!fsh) return null;
+
+  const last = fsh.getLastRow();
+  if (last < CS_CFG.FEED_START_ROW) return null;
+
+  const col = fsh.getRange(CS_CFG.FEED_START_ROW, CS_CFG.FEED_DATE_COL,
+                           last - CS_CFG.FEED_START_ROW + 1, 1).getValues();
+  let best = null;
+  for (let i = 0; i < col.length; i++) {
+    const d = col[i][0];
+    if (Object.prototype.toString.call(d) !== "[object Date]") continue;
+    if (best === null || d.getTime() > best.getTime()) best = d;
+  }
+  return best;
+}
+
+/**
+ * Freeze the theoretical for a count that no scheduled request asked for.
+ *
+ * WARNINGSYSTEM compares a count only against a FROZEN theoretical, because
+ * column C has no memory. A count taken between the fortnightly requests
+ * had nothing frozen to answer, so it was recorded and never checked.
+ * This writes that freeze, and the next 06:30 run does the comparing.
+ *
+ * Refuses when the theoretical cannot be trusted:
+ *   pending    - a scheduled request is already open; the count answers it
+ *   no_feed    - the feed log is empty
+ *   feed_lag   - the feed log is more than MAX_FEED_LAG_DAYS behind
+ *   stale_theo - C2 is older than the newest feed entry, so column C does
+ *                not yet include feed that has been recorded. Run
+ *                consolidateProvendeToAnalyse (project controleconsoprovende)
+ *                and save the count again.
+ *
+ * A refusal never blocks the count. Only the check is skipped.
+ * Returns { frozen, reason, types }.
+ */
+function freezeTheoreticalForCount(ss, sh, countDate, names, n) {
+  const snapSh = ss.getSheetByName(CS_CFG.SNAP_SHEET);
+  if (!snapSh) return { frozen: false, reason: "no_tab", types: 0 };
+
+  if (snapSh.getLastRow() > 1) {
+    const st = snapSh.getRange(2, CS_CFG.SNAP_STATUS_COL, snapSh.getLastRow() - 1, 1).getValues();
+    for (let i = 0; i < st.length; i++) {
+      if (String(st[i][0] || "").trim().toLowerCase() === CS_CFG.SNAP_STATUS_PENDING) {
+        return { frozen: false, reason: "pending", types: 0 };
+      }
+    }
+  }
+
+  const feedDate = newestFeedDate(ss);
+  if (!feedDate) return { frozen: false, reason: "no_feed", types: 0 };
+
+  const lagDays = Math.round((dayKeyOf(countDate) - dayKeyOf(feedDate)) / 86400000);
+  if (lagDays > CS_CFG.MAX_FEED_LAG_DAYS) {
+    return { frozen: false, reason: "feed_lag", types: 0 };
+  }
+
+  const stamp = sh.getRange(CS_CFG.DATE_ROW, CS_CFG.THEO_COL).getValue();
+  if (Object.prototype.toString.call(stamp) !== "[object Date]") {
+    return { frozen: false, reason: "stale_theo", types: 0 };
+  }
+  if (dayKeyOf(stamp) < dayKeyOf(feedDate)) {
+    return { frozen: false, reason: "stale_theo", types: 0 };
+  }
+
+  const theo = sh.getRange(CS_CFG.START_ROW, CS_CFG.THEO_COL, n, 1).getValues();
+  const rows = [];
+  for (let i = 0; i < n; i++) {
+    const nm = String(names[i][0] || "").trim();
+    if (!nm) continue;
+    const v = Number(theo[i][0]);
+    if (theo[i][0] === "" || theo[i][0] === null || !isFinite(v)) continue;
+    rows.push([countDate, nm, Math.round(v * 100) / 100, CS_CFG.SNAP_STATUS_PENDING, ""]);
+  }
+  if (!rows.length) return { frozen: false, reason: "no_theo", types: 0 };
+
+  if (!snapSh.getRange(1, CS_CFG.SNAP_ANSWERED_COL).getValue()) {
+    snapSh.getRange(1, CS_CFG.SNAP_ANSWERED_COL).setValue("Date comptage");
+  }
+  snapSh.getRange(snapSh.getLastRow() + 1, 1, rows.length, 5).setValues(rows);
+
+  return { frozen: true, reason: "ok", types: rows.length };
 }
 
 /**
@@ -267,13 +361,22 @@ function submitCheckStock(payload) {
   sh.getRange(CS_CFG.DATE_ROW, col).setValue(countDate);
   sh.getRange(CS_CFG.START_ROW, col, n, 1).setValues(values);
 
-  const rearmed = isUpdate ? rearmSnapshotForCount(sh.getParent(), countDate) : false;
+  const ss = sh.getParent();
+  const rearmed = isUpdate ? rearmSnapshotForCount(ss, countDate) : false;
+
+  // A re-armed snapshot is already the open question. Freezing a second one
+  // for the same count would compare the same figures twice.
+  const freeze = rearmed
+    ? { frozen: false, reason: "rearmed", types: 0 }
+    : freezeTheoreticalForCount(ss, sh, countDate, names, n);
 
   return {
     column: col,
     date: Utilities.formatDate(countDate, tz, "dd/MM/yyyy"),
     filled: filled,
     updated: isUpdate,
-    rearmed: rearmed
+    rearmed: rearmed,
+    frozen: freeze.frozen,
+    freezeReason: freeze.reason
   };
 }

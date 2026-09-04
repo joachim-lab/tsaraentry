@@ -161,10 +161,26 @@
         .withSuccessHandler(res => {
           document.getElementById('loading').style.display = 'none';
           document.getElementById('submitBtn').disabled = false;
-          showMsg('ok', res.updated
-            ? 'Comptage du ' + res.date + ' corrigé : ' + res.filled + ' type(s) de provende.' +
-              (res.rearmed ? ' La comparaison théorique/physique sera refaite.' : '')
-            : 'Comptage du ' + res.date + ' enregistré : ' + res.filled + ' type(s) de provende.');
+          const base = res.updated
+            ? 'Comptage du ' + res.date + ' corrigé : ' + res.filled + ' type(s) de provende.'
+            : 'Comptage du ' + res.date + ' enregistré : ' + res.filled + ' type(s) de provende.';
+
+          let tail = '';
+          if (res.rearmed) {
+            tail = ' La comparaison théorique/physique sera refaite.';
+          } else if (res.frozen) {
+            tail = ' Théorique figé : la comparaison sera faite demain matin.';
+          } else if (res.freezeReason === 'feed_lag') {
+            tail = ' ATTENTION : la saisie de nourrissage est en retard. Aucun contrôle ne sera fait.';
+          } else if (res.freezeReason === 'stale_theo') {
+            tail = ' ATTENTION : le théorique n’est pas à jour. Aucun contrôle ne sera fait — prévenez Joachim.';
+          } else if (res.freezeReason === 'no_feed' || res.freezeReason === 'no_theo') {
+            tail = ' ATTENTION : données insuffisantes. Aucun contrôle ne sera fait.';
+          }
+
+          // Always green: the count WAS saved. A red box would read as a
+          // failed save and invite the person to enter it a second time.
+          showMsg('ok', base + tail);
           loadContext();
         })
         .withFailureHandler(e => {
