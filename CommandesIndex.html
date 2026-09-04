@@ -2441,9 +2441,9 @@
             '<button class="primary" style="width:100%" onclick="doSearch()">Rechercher</button></div>' +
         '</div>' +
         '<label style="font-weight:normal"><input type="checkbox" id="fDeliveredUnpaid" checked style="width:auto"> ' +
-          'Commandes livrées et non-payées</label>' +
+          'Commandes livrées et non-payées <span class="muted" id="fTotDeliveredUnpaid"></span></label>' +
         '<label style="font-weight:normal"><input type="checkbox" id="fUndelivered" checked style="width:auto"> ' +
-          'Commandes non-livrées</label>' +
+          'Commandes non-livrées <span class="muted" id="fTotUndelivered"></span></label>' +
       '</div>' +
       '<div id="fulForm"></div>' +
       '<div id="hits"></div>';
@@ -2506,6 +2506,16 @@
     return bits.length ? ' · ' + esc(bits.join(' + ')) : '';
   }
 
+  /** "12 kg · 3 000 alevins · 1 500 000 Ar" for one category;
+   *  '—' when it is empty. */
+  function fmtTot(t) {
+    const bits = [];
+    if (t && t.kg > 0) bits.push(fmtNum(t.kg) + ' kg');
+    if (t && t.al > 0) bits.push(fmtNum(t.al) + ' alevins');
+    if (t && t.ar > 0) bits.push(fmtAr(t.ar));
+    return bits.length ? bits.join(' · ') : '\u2014';
+  }
+
   function doSearch(keepMsg) {
     setStatus('banner', 'Recherche…');
     el('fulForm').innerHTML = '';
@@ -2513,6 +2523,9 @@
     google.script.run
       .withSuccessHandler(res => {
         hits = res.orders;
+        const tot = res.totals || {};
+        el('fTotDeliveredUnpaid').textContent = fmtTot(tot.deliveredUnpaid);
+        el('fTotUndelivered').textContent = fmtTot(tot.undelivered);
         if (keepMsg) setStatusAndScroll(keepMsg.cls, keepMsg.html); else setStatus('', '');
         // Nothing ticked selects nothing. Said plainly, because an
         // empty list with no explanation reads as a broken search.

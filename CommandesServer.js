@@ -295,7 +295,11 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
   const sh = cmdSheet();
   const C = CMD_CFG.COL;
   const lastRow = findNextCommandeRow(sh) - 1;
-  if (lastRow < CMD_CFG.START_ROW) return [];
+  const zero = function () { return { kg: 0, al: 0, ar: 0 }; };
+  const totals = { deliveredUnpaid: zero(), undelivered: zero() };
+  if (lastRow < CMD_CFG.START_ROW) {
+    return { orders: [], closedMatches: 0, totals: totals };
+  }
 
   const n = lastRow - CMD_CFG.START_ROW + 1;
   const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.ANNULE).getDisplayValues();
@@ -381,6 +385,16 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
     // than reporting a search that found nothing.
     if (delivered && paid) { closedMatches++; continue; }
 
+    // Category totals over every open order that matches the query,
+    // whatever is ticked and beyond the 25-order cap below. They
+    // describe the population each box selects, so they must not
+    // shrink when a box is unticked or when the list is cut.
+    // ar = alevins + poisson amount, same sum as the card's montant.
+    const t = delivered ? totals.deliveredUnpaid : totals.undelivered;
+    t.kg += g.poissonKgTotal;
+    t.al += g.alevinsTotal;
+    t.ar += g.montantAr;
+
     // Each box INCLUDES a category. Fully closed orders (delivered and
     // paid) were already dropped above, so "delivered" here always means
     // delivered-and-unpaid. The two categories are therefore disjoint
@@ -400,7 +414,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
     out.push(g);
     if (out.length >= 25) break;
   }
-  return { orders: out, closedMatches: closedMatches };
+  return { orders: out, closedMatches: closedMatches, totals: totals };
 }
 
 /**
