@@ -331,6 +331,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
         alevinsNb: [],
         poissonKg: [],
         prixKg: [],
+        prixAl: [],
         alevinsTotal: 0,
         poissonKgTotal: 0,
         montantAr: 0
@@ -348,6 +349,9 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
     // format and could not be reconciled with the montant line.
     const pkg = cmdNumFromDisplay_(r[C.PRIX_KG - 1]);
     if (pkg) g.prixKg.push(pkg);
+    // Column I, the alevins equivalent of column O.
+    const pal = cmdNumFromDisplay_(r[C.ALEVINS_PRIX - 1]);
+    if (pal) g.prixAl.push(pal);
     g.alevinsTotal += cmdNumFromDisplay_(r[C.ALEVINS_NB - 1]);
     g.poissonKgTotal += cmdNumFromDisplay_(r[C.POISSON_KG - 1]);
     g.montantAr += cmdNumFromDisplay_(r[C.ARGENT_ALEVINS - 1]) +
@@ -391,6 +395,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
     // enforce it, so distinct values are kept and the card shows all
     // of them rather than hiding a disagreement behind the first one.
     g.prixKg = g.prixKg.filter(function (v, k, a) { return a.indexOf(v) === k; });
+    g.prixAl = g.prixAl.filter(function (v, k, a) { return a.indexOf(v) === k; });
 
     out.push(g);
     if (out.length >= 25) break;

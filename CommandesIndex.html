@@ -2296,9 +2296,13 @@
     const qtyTxt = qtyParts.join(' · ') || '—';
     // Server sends distinct numbers. More than one means the rows of
     // this order disagree; both are shown rather than one being picked.
-    const prixTxt = (o.prixKg && o.prixKg.length)
-      ? o.prixKg.map(v => Number(v).toLocaleString('fr-FR')).join(' · ') + ' Ar / kg'
-      : '';
+    // Same order as qtyParts above: alevins first, then poisson, so a
+    // mixed order reads its prices in the order it reads its quantities.
+    const fmtPrix = a => a.map(v => Number(v).toLocaleString('fr-FR')).join(' · ');
+    const prixParts = [];
+    if (o.prixAl && o.prixAl.length) prixParts.push(fmtPrix(o.prixAl) + ' Ar / alevin');
+    if (o.prixKg && o.prixKg.length) prixParts.push(fmtPrix(o.prixKg) + ' Ar / kg');
+    const prixTxt = prixParts.join(' · ');
     const montantTxt = Number(o.montantAr || 0).toLocaleString('fr-FR') + ' Ar';
 
     el('fulForm').innerHTML =
