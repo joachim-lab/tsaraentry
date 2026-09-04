@@ -1697,8 +1697,18 @@ function testFoundBlockVerdict() {
  * RESERVATIONS - third tab on the Commandes screen.
  *
  * The Réservations tab lives in the SAME spreadsheet as the orders
- * (CMD_CFG.SS_ID). Columns: A=Lot, B=Type, C=Quantité, D=Note.
- * Headers in row 1, data from row 2.
+ * (CMD_CFG.SS_ID). Columns (5 since 2026-08-28, TT_RESERVATIONS_HEADERS
+ * in engine_core.js): A=Lot, B=Type, C=Ne pas vendre (the floor —
+ * fish that must stay), D=On peut vendre (display only, never read by
+ * any check), E=Note. Headers in row 1, data from row 2.
+ *
+ * AUTO ROWS. Production Model V3 rewrites every row whose Note starts
+ * with "AUTO —" at each Generate (fs_writeProductionHolds_, FrySale.js),
+ * from the plan's Fry needs. A manual edit of such a row is lost the
+ * next morning UNLESS the note is changed so it no longer starts with
+ * "AUTO —": V3 then treats the lot as manual and skips it. The screen
+ * says so when an AUTO row is opened for editing. Column D is written
+ * by V3 only; this file never writes it (resUpdate leaves it alone).
  *
  * Two types only, matching tt_loadReservations in engine_core.js:
  *   TOUT    - the whole lot is held; no order may touch it.
@@ -1732,6 +1742,7 @@ function testFoundBlockVerdict() {
 
 const RES_SHEET = "Réservations";
 const RES_TYPES = ["TOUT", "NOMBRE"];
+const RES_AUTO_PREFIX = "AUTO —";     // = FS_RESA_AUTO_PREFIX_ in V3/FrySale.js
 
 function resSheet() {
   const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
@@ -1745,18 +1756,21 @@ function resList() {
   const sh = resSheet();
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return [];
-  const vals = sh.getRange(2, 1, lastRow - 1, 4).getValues();
+  const vals = sh.getRange(2, 1, lastRow - 1, 5).getValues();
   const out = [];
   for (var i = 0; i < vals.length; i++) {
     const lot = String(vals[i][0] == null ? "" : vals[i][0]).trim();
     if (!lot) continue;
+    const note = String(vals[i][4] == null ? "" : vals[i][4]).trim();
     out.push({
       row: i + 2,
       lot: lot,
       key: cmdCanonKey(lot),
       type: String(vals[i][1] == null ? "" : vals[i][1]).trim().toUpperCase(),
       qty: cmdToNum(vals[i][2]),
-      note: String(vals[i][3] == null ? "" : vals[i][3]).trim()
+      sell: cmdToNum(vals[i][3]),
+      note: note,
+      auto: note.indexOf(RES_AUTO_PREFIX) === 0
     });
   }
   return out;
@@ -1820,7 +1834,7 @@ function resAdd(p) {
   const c = resClean(p, 0);
   const sh = resSheet();
   const row = sh.getLastRow() + 1;
-  sh.getRange(row, 1, 1, 4).setValues([[c.lot, c.type, c.qty == null ? "" : c.qty, c.note]]);
+  sh.getRange(row, 1, 1, 5).setValues([[c.lot, c.type, c.qty == null ? "" : c.qty, "", c.note]]);
   return { row: row };
 }
 
@@ -1829,7 +1843,9 @@ function resUpdate(p) {
   const sh = resSheet();
   resCheckRow(sh, row, p && p.seenLot);
   const c = resClean(p, row);
-  sh.getRange(row, 1, 1, 4).setValues([[c.lot, c.type, c.qty == null ? "" : c.qty, c.note]]);
+  // A..C and E only. D ("On peut vendre") belongs to V3 and is left as is.
+  sh.getRange(row, 1, 1, 3).setValues([[c.lot, c.type, c.qty == null ? "" : c.qty]]);
+  sh.getRange(row, 5).setValue(c.note);
   return { row: row };
 }
 
