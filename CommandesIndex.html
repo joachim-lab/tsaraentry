@@ -134,13 +134,14 @@
   <h1>Commandes</h1>
 
   <div class="tabsWrap"><div class="tabs">
-    <div class="tab active" id="tabNew" onclick="switchMode('new')">Nouvelle commande</div>
-    <div class="tab" id="tabFul" onclick="switchMode('ful')">Paiement &amp; livraison</div>
+    <div class="tab active" id="tabNew" onclick="switchMode('new')">Nouvelle cmd</div>
+    <div class="tab" id="tabFul" onclick="switchMode('ful')">Paiement</div>
     <div class="tab" id="tabRes" onclick="switchMode('res')">R&eacute;servations</div>
     <div class="tab" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
     <div class="tab" id="tabRec" onclick="switchMode('rec')">R&eacute;currentes</div>
     <div class="tab" id="tabHist" onclick="switchMode('hist')">Historique</div>
-    <div class="tab" id="tabPrix" onclick="switchMode('prix')">Prix poisson</div>
+    <div class="tab" id="tabPrix" onclick="switchMode('prix')">Prix</div>
+    <div class="tab" id="tabCli" onclick="switchMode('cli')">Clients</div>
   </div></div>
 
   <div id="status"></div>
@@ -151,6 +152,7 @@
   <div id="paneRec" style="display:none"></div>
   <div id="paneHist" style="display:none"></div>
   <div id="panePrix" style="display:none"></div>
+  <div id="paneCli" style="display:none"></div>
 
 <script>
 
@@ -269,6 +271,7 @@
     el('tabRec').className = 'tab' + (m === 'rec' ? ' active' : '');
     el('tabHist').className = 'tab' + (m === 'hist' ? ' active' : '');
     el('tabPrix').className = 'tab' + (m === 'prix' ? ' active' : '');
+    el('tabCli').className = 'tab' + (m === 'cli' ? ' active' : '');
     el('paneNew').style.display = (m === 'new' ? '' : 'none');
     el('paneFul').style.display = (m === 'ful' ? '' : 'none');
     el('paneRes').style.display = (m === 'res' ? '' : 'none');
@@ -276,6 +279,7 @@
     el('paneRec').style.display = (m === 'rec' ? '' : 'none');
     el('paneHist').style.display = (m === 'hist' ? '' : 'none');
     el('panePrix').style.display = (m === 'prix' ? '' : 'none');
+    el('paneCli').style.display = (m === 'cli' ? '' : 'none');
     setStatus('', '');
     // 2026-08-30: refresh on EVERY visit, not only the first. The list
     // was built once and then only unhidden, so an order saved in the
@@ -292,8 +296,158 @@
     if (m === 'rec') renderRec();
     if (m === 'hist') renderHist();
     if (m === 'prix') renderPrix();
+    if (m === 'cli') renderCli();
     // Leaving the order form abandons any pending Commander hand-off.
     if (m !== 'new') pendingDem = null;
+  }
+
+  /* ---------- MODE H: Clients (CRM) ----------
+   *
+   * Reads the CRM tab. The numbers are NOT computed here and NOT
+   * computed on the server call either: they were computed by
+   * automatismescommande > menu CRM > Actualiser la table. This tab
+   * prints the rebuild stamp for exactly that reason - a total from
+   * last week looks identical to one from this morning.
+   *
+   * Two fields save: Localisation and Notes. Everything else is
+   * read-only because the next rebuild overwrites it.
+   *
+   * Re-fetched on every visit, like Reservations and Pre-commandes:
+   * two people may be editing notes on the same client.
+   */
+
+  var cliRows = [];        // last list from the server
+  var cliOpen = null;      // row number of the open detail, or null
+
+  function renderCli() {
+    const pane = el('paneCli');
+    pane.innerHTML = '<div class="banner">Chargement des clients&hellip;</div>';
+    google.script.run
+      .withSuccessHandler(function (res) {
+        cliRows = (res && res.rows) || [];
+        cliOpen = null;
+        pane.innerHTML = cliHtml(res && res.stamp);
+        const f = el('cliFiltre');
+        if (f) f.oninput = cliPaint;
+        cliPaint();
+      })
+      .withFailureHandler(function (e) {
+        pane.innerHTML = '<div class="err">Clients indisponibles&nbsp;: ' +
+                         esc(e.message) + '</div>';
+      })
+      .crmClientList();
+  }
+
+  /** Shell: the stamp, the filter box, and the empty list container. */
+  function cliHtml(stamp) {
+    return '<div class="card">' +
+             '<h3>Clients <span class="muted">(' + cliRows.length + ')</span></h3>' +
+             '<p class="muted">' +
+               (stamp ? esc(stamp) : 'Jamais actualis&eacute;') +
+               ' &mdash; les chiffres viennent de la derni&egrave;re ' +
+               'actualisation, pas de maintenant.' +
+             '</p>' +
+             '<input id="cliFiltre" type="text" autocomplete="off" ' +
+                    'placeholder="Chercher un nom, un t&eacute;l&eacute;phone, ' +
+                    'une localisation&hellip;" style="width:100%;padding:8px">' +
+           '</div>' +
+           '<div id="cliListe"></div>';
+  }
+
+  /** Redraw the list for the current filter. Substring, accent-blind is
+   *  NOT attempted: "Be" finds "Bema", "bema" finds it too. */
+  function cliPaint() {
+    const f = el('cliFiltre');
+    const q = (f ? f.value : '').trim().toLowerCase();
+    const hits = !q ? cliRows : cliRows.filter(function (r) {
+      return (r.client + ' ' + r.tel + ' ' + r.loc).toLowerCase().indexOf(q) >= 0;
+    });
+    if (!hits.length) {
+      el('cliListe').innerHTML =
+        '<div class="banner">Aucun client ne correspond.</div>';
+      return;
+    }
+    el('cliListe').innerHTML = hits.map(cliCard).join('');
+  }
+
+  /** One client. Closed = a summary line. Open = the numbers plus the
+   *  two editable fields. */
+  function cliCard(r) {
+    if (cliOpen !== r.row) {
+      return '<div class="card" style="cursor:pointer" ' +
+                  'onclick="cliToggle(' + r.row + ')">' +
+               '<b>' + esc(r.client) + '</b>' +
+               (r.type ? ' <span class="muted">(' + esc(r.type) + ')</span>' : '') +
+               '<br><span class="muted">' +
+                 (r.tel ? esc(r.tel) : 'pas de num&eacute;ro') +
+                 (r.loc ? ' &mdash; ' + esc(r.loc) : '') +
+                 ' &mdash; ' + fmtNum(r.nb) + ' achat(s)' +
+               '</span>' +
+             '</div>';
+    }
+    return '<div class="card">' +
+             '<b>' + esc(r.client) + '</b>' +
+             (r.type ? ' <span class="muted">(' + esc(r.type) + ')</span>' : '') +
+             ' <span class="muted" style="cursor:pointer" ' +
+                   'onclick="cliToggle(' + r.row + ')">[fermer]</span>' +
+             '<table style="margin:8px 0">' +
+               cliLigne('T&eacute;l&eacute;phone', r.tel ? esc(r.tel) : '&mdash;') +
+               cliLigne('Dernier prix/alevin', cliAr(r.prixAl)) +
+               cliLigne('Dernier prix/kg', cliAr(r.prixKg)) +
+               cliLigne('Total alevins', fmtNum(r.totAl)) +
+               cliLigne('Total kg', fmtNum(r.totKg)) +
+               cliLigne('Nb achats', fmtNum(r.nb)) +
+             '</table>' +
+             '<label>Localisation<br>' +
+               '<input id="cliLoc" type="text" style="width:100%;padding:8px" ' +
+                      'value="' + esc(r.loc) + '"></label>' +
+             '<label style="display:block;margin-top:8px">Notes<br>' +
+               '<textarea id="cliNotes" rows="3" style="width:100%;padding:8px">' +
+                 esc(r.notes) +
+               '</textarea></label>' +
+             '<button id="cliSave" style="margin-top:8px" ' +
+                     'onclick="cliSave(' + r.row + ')">Enregistrer</button>' +
+             '<p class="muted">Le t&eacute;l&eacute;phone et les chiffres ' +
+               'viennent des commandes. Seules la localisation et les notes ' +
+               's&rsquo;enregistrent ici.</p>' +
+           '</div>';
+  }
+
+  function cliLigne(k, v) {
+    return '<tr><td class="muted" style="padding-right:12px">' + k +
+           '</td><td><b>' + v + '</b></td></tr>';
+  }
+
+  /** A price, or an em dash. Never a bare 0 - same rule as prixAr. */
+  function cliAr(n) {
+    return (!n || !isFinite(n) || n <= 0) ? '—' : fmtNum(n);
+  }
+
+  function cliToggle(row) {
+    cliOpen = (cliOpen === row) ? null : row;
+    cliPaint();
+  }
+
+  function cliSave(row) {
+    const r = cliRows.filter(function (x) { return x.row === row; })[0];
+    if (!r) return;
+    const loc = el('cliLoc').value;
+    const notes = el('cliNotes').value;
+    const btn = el('cliSave');
+    if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…'; }
+    google.script.run
+      .withSuccessHandler(function () {
+        r.loc = loc.trim();
+        r.notes = notes.trim();
+        cliOpen = null;
+        cliPaint();
+        setStatusAndScroll('ok', 'Client ' + esc(r.client) + ' enregistré.');
+      })
+      .withFailureHandler(function (e) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Enregistrer'; }
+        setStatusAndScroll('err', esc(e.message));
+      })
+      .crmSaveInfo(row, r.client, loc, notes);
   }
 
   /* ---------- MODE F: Prix poisson (lecture seule) ----------

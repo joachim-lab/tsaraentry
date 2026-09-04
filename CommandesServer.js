@@ -3156,3 +3156,132 @@ function testRecurrences() {
                (r.derniereGen ? "   dernière génération " + r.derniereGen : ""));
   });
 }
+
+
+/***************************************************************
+ * CLIENTS (CRM) - eighth tab on the Commandes screen.
+ *
+ * The CRM tab lives in the SAME spreadsheet as the orders
+ * (CMD_CFG.SS_ID). It is BUILT by another project:
+ * automatismescommande -> 06_crm.gs -> crmRebuild(), run from the
+ * spreadsheet menu CRM > Actualiser la table.
+ *
+ * THIS SCREEN NEVER AGGREGATES. It reads what that rebuild wrote and
+ * writes back two manual columns. If the two ever disagreed about how
+ * a total is computed, the disagreement would be invisible - so there
+ * is one owner of the arithmetic, and it is not this file.
+ *
+ * Row 1 = headers, data from row 2. Columns:
+ *   A Client  B Telephone  C Localisation  D Type client
+ *   E Dernier prix/alevin  F Dernier prix/kg
+ *   G Total alevins  H Total kg  I Nb achats  J Notes
+ *   L1 = the rebuild stamp, printed at the top of the tab so a worker
+ *        can see the age of the numbers.
+ *
+ * WRITEABLE FROM HERE: C and J only. Everything else is overwritten by
+ * the next rebuild, so an edit to it would vanish without a message -
+ * the worst kind of failure. The client name is NOT writeable either:
+ * renaming here would not rename the order rows the totals come from,
+ * and the next rebuild would re-append the old name as a second row.
+ *
+ * ROW NUMBERS ARE THE HANDLE, as in Reservations and Pre-commandes:
+ * the save re-reads the row and compares the client name against what
+ * the browser last saw. Mismatch = stale screen, refuse. A rebuild can
+ * append rows while a screen is open, but it never reorders or deletes,
+ * so a matching name at a matching row is proof enough.
+ ***************************************************************/
+
+const CRM_SHEET = "CRM";
+const CRM_START = 2;                       // row 1 = headers
+const CRM_COLS = 10;                       // A..J
+const CRM_COL_LOC = 3;                     // C
+const CRM_COL_NOTES = 10;                  // J
+const CRM_COL_STAMP = 12;                  // L1
+
+function crmEntrySheet() {
+  const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
+  const sh = ss.getSheetByName(CRM_SHEET);
+  if (!sh) {
+    throw new Error('Onglet "' + CRM_SHEET + '" introuvable. Kim doit ' +
+                    'lancer le menu CRM > Actualiser la table une fois.');
+  }
+  return sh;
+}
+
+/** Same canonical form as 06_crm.gs. Used ONLY to compare the name the
+ *  browser saw against the name now in the sheet. */
+function crmCanonName(s) {
+  return String(s == null ? "" : s).trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+/** Every client row, in sheet order, plus the rebuild stamp.
+ *  Rows with an empty name are skipped: a blank line in the middle of
+ *  the table is a hand-editing accident, not a client. */
+function crmClientList() {
+  const sh = crmEntrySheet();
+  const last = sh.getLastRow();
+  const stamp = String(sh.getRange(1, CRM_COL_STAMP).getValue() || "").trim();
+  if (last < CRM_START) return { stamp: stamp, rows: [] };
+
+  const vals = sh.getRange(CRM_START, 1, last - CRM_START + 1, CRM_COLS).getValues();
+  const out = [];
+  for (var i = 0; i < vals.length; i++) {
+    const name = String(vals[i][0] == null ? "" : vals[i][0]).trim();
+    if (!name) continue;
+    out.push({
+      row: CRM_START + i,
+      client: name,
+      tel: String(vals[i][1] == null ? "" : vals[i][1]).trim(),
+      loc: String(vals[i][2] == null ? "" : vals[i][2]).trim(),
+      type: String(vals[i][3] == null ? "" : vals[i][3]).trim(),
+      prixAl: cmdToNum(vals[i][4]),
+      prixKg: cmdToNum(vals[i][5]),
+      totAl: cmdToNum(vals[i][6]),
+      totKg: cmdToNum(vals[i][7]),
+      nb: cmdToNum(vals[i][8]),
+      notes: String(vals[i][9] == null ? "" : vals[i][9]).trim()
+    });
+  }
+  return { stamp: stamp, rows: out };
+}
+
+/**
+ * Write Localisation (C) and Notes (J) for one client row.
+ * clientSeen is the name the browser displayed; it is the staleness
+ * proof, not a value to write.
+ */
+function crmSaveInfo(row, clientSeen, loc, notes) {
+  const r = Math.floor(Number(row));
+  if (!(r >= CRM_START)) throw new Error("Ligne invalide.");
+
+  const sh = crmEntrySheet();
+  if (r > sh.getLastRow()) {
+    throw new Error("\u00c9cran p\u00e9rim\u00e9 : cette ligne n'existe plus. " +
+                    "Rechargez la page.");
+  }
+  const nameNow = sh.getRange(r, 1).getValue();
+  if (crmCanonName(nameNow) !== crmCanonName(clientSeen)) {
+    throw new Error("\u00c9cran p\u00e9rim\u00e9 : la ligne " + r + " contient " +
+                    'maintenant "' + String(nameNow).trim() + '". Rechargez la page.');
+  }
+
+  sh.getRange(r, CRM_COL_LOC).setValue(String(loc == null ? "" : loc).trim());
+  sh.getRange(r, CRM_COL_NOTES).setValue(String(notes == null ? "" : notes).trim());
+  SpreadsheetApp.flush();
+  return true;
+}
+
+/** MANUAL CHECK (editor Run dropdown, project TSARA Entry).
+ *  Read-only. Prints the stamp and every client with its row handle. */
+function crmDumpList() {
+  const res = crmClientList();
+  Logger.log("Stamp : " + (res.stamp || "(vide)"));
+  Logger.log("Clients : " + res.rows.length);
+  res.rows.forEach(function (r) {
+    Logger.log("  L" + r.row + "  " + r.client +
+               "  tel=" + (r.tel || "-") +
+               "  loc=" + (r.loc || "-") +
+               "  " + r.type +
+               "  achats=" + r.nb);
+  });
+}
