@@ -365,7 +365,7 @@
         cliRows.sort(function (a, b) {
           return a.client.localeCompare(b.client, 'fr', { sensitivity: 'base' });
         });
-        cliOpen = null;
+        cliOpen = null; cliAddOpen = false;
         pane.innerHTML = cliHtml(res && res.stamp);
         const f = el('cliFiltre');
         if (f) f.oninput = cliPaint;
@@ -388,7 +388,10 @@
              '<input id="cliFiltre" type="text" autocomplete="off" ' +
                     'placeholder="Chercher un nom, un t&eacute;l&eacute;phone, ' +
                     'une localisation&hellip;" style="width:100%;padding:8px">' +
+             '<button id="cliNewBtn" style="margin-top:10px" ' +
+                     'onclick="cliNewToggle()">Nouveau client</button>' +
            '</div>' +
+           '<div id="cliAjout"></div>' +
            '<div id="cliListe"></div>';
   }
 
@@ -423,9 +426,17 @@
                '</span>' +
              '</div>';
     }
+    // The title line closes the card, mirroring the closed card that
+    // was clicked to open it. Only the line is clickable: the inputs
+    // below must take clicks without folding the card.
     return '<div class="card">' +
-             '<b>' + esc(r.client) + '</b>' +
-             (r.type ? ' <span class="muted">(' + esc(r.type) + ')</span>' : '') +
+             '<div onclick="cliToggle(' + r.row + ')" style="cursor:pointer" ' +
+                  'title="Cliquer pour fermer">' +
+               '<b>' + esc(r.client) + '</b>' +
+               (r.type ? ' <span class="muted">(' + esc(r.type) + ')</span>' : '') +
+               '<span class="muted" style="float:right;font-size:14px">' +
+                 '&#9650; fermer</span>' +
+             '</div>' +
              '<table style="margin:8px 0">' +
                cliLigne('Dernier prix/alevin', cliAr(r.prixAl)) +
                cliLigne('Dernier prix/kg', cliAr(r.prixKg)) +
@@ -458,6 +469,76 @@
   /** A price, or an em dash. Never a bare 0 - same rule as prixAr. */
   function cliAr(n) {
     return (!n || !isFinite(n) || n <= 0) ? '—' : fmtNum(n);
+  }
+
+  var cliAddOpen = false;   // the Nouveau client form is on screen
+
+  function cliNewToggle() {
+    cliAddOpen = !cliAddOpen;
+    cliNewPaint();
+  }
+
+  function cliNewPaint() {
+    const z = el('cliAjout');
+    if (!z) return;
+    if (!cliAddOpen) { z.innerHTML = ''; return; }
+    z.innerHTML =
+      '<div class="card">' +
+        '<div onclick="cliNewToggle()" style="cursor:pointer" ' +
+             'title="Cliquer pour fermer">' +
+          '<b>Nouveau client</b>' +
+          '<span class="muted" style="float:right;font-size:14px">' +
+            '&#9650; fermer</span>' +
+        '</div>' +
+        '<label style="display:block;margin-top:8px">Nom<br>' +
+          '<input id="cnNom" type="text" style="width:100%;padding:8px"></label>' +
+        '<label style="display:block;margin-top:8px">T&eacute;l&eacute;phone<br>' +
+          '<input id="cnTel" type="text" style="width:100%;padding:8px"></label>' +
+        '<label style="display:block;margin-top:8px">Localisation<br>' +
+          '<input id="cnLoc" type="text" style="width:100%;padding:8px"></label>' +
+        '<label style="display:block;margin-top:8px">Notes<br>' +
+          '<textarea id="cnNotes" rows="3" style="width:100%;padding:8px">' +
+          '</textarea></label>' +
+        // The rebuild drops a name-only row as an orphan; the form
+        // says so BEFORE the refusal, not after.
+        '<p class="muted">Nom obligatoire, plus au moins un des trois ' +
+          'autres champs &mdash; une ligne sans t&eacute;l&eacute;phone, ' +
+          'localisation ni notes est supprim&eacute;e &agrave; la ' +
+          'prochaine actualisation de la table.</p>' +
+        '<button id="cnSave" onclick="cliNewSave()">Enregistrer</button>' +
+        ' <button onclick="cliNewToggle()">Fermer</button>' +
+      '</div>';
+    const f = el('cnNom');
+    if (f) f.focus();
+  }
+
+  function cliNewSave() {
+    const p = {
+      client: el('cnNom').value.trim(),
+      tel: el('cnTel').value.trim(),
+      loc: el('cnLoc').value.trim(),
+      notes: el('cnNotes').value.trim()
+    };
+    // Instant refusal naming the gap; the server is the authority.
+    if (!p.client) { setStatusAndScroll('err', 'Nom requis.'); return; }
+    if (!p.tel && !p.loc && !p.notes) {
+      setStatusAndScroll('err', 'Remplir au moins un champ : téléphone, ' +
+        'localisation ou notes.');
+      return;
+    }
+    const b = el('cnSave');
+    if (b) b.disabled = true;
+    setStatus('banner', 'Enregistrement…');
+    google.script.run
+      .withSuccessHandler(function () {
+        setStatus('ok', 'Client ' + esc(p.client) + ' ajouté.');
+        renderCli();                       // re-lists; also closes the form
+      })
+      .withFailureHandler(function (e) {
+        if (b) b.disabled = false;
+        setStatusAndScroll('err', esc(e.message));
+      })
+      .crmClientAdd(p);
   }
 
   function cliToggle(row) {

@@ -3308,6 +3308,51 @@ function crmSaveInfo(row, clientSeen, tel, loc, notes) {
   return true;
 }
 
+/**
+ * Append one hand-entered client: A name, B tel, C loc, J notes.
+ * D-I stay empty - the rebuild owns them.
+ *
+ * WHY ONE OF TEL/LOC/NOTES IS MANDATORY: crmRebuild (06_crm.js,
+ * automatismescommande) drops any row whose name is in no order and
+ * no pré-commande unless B, C or J is filled. A name-only row would
+ * vanish at the next Actualiser la table, without a message.
+ *
+ * WHY DUPLICATES ARE REFUSED: the rebuild merges by canonical name
+ * and updates only the FIRST matching row, so a second row for the
+ * same client would freeze forever.
+ */
+function crmClientAdd(p) {
+  const name = String(p && p.client != null ? p.client : "").trim();
+  if (!name) throw new Error("Nom requis.");
+  const tel = String(p && p.tel != null ? p.tel : "").trim();
+  const loc = String(p && p.loc != null ? p.loc : "").trim();
+  const notes = String(p && p.notes != null ? p.notes : "").trim();
+  if (!tel && !loc && !notes) {
+    throw new Error("Remplir au moins un champ : téléphone, localisation " +
+                    "ou notes. Sans cela, la ligne serait supprimée à la " +
+                    "prochaine actualisation de la table.");
+  }
+
+  const sh = crmEntrySheet();
+  const canon = crmCanonName(name);
+  const last = sh.getLastRow();
+  if (last >= CRM_START) {
+    const names = sh.getRange(CRM_START, 1, last - CRM_START + 1, 1).getValues();
+    for (var i = 0; i < names.length; i++) {
+      if (crmCanonName(names[i][0]) === canon) {
+        throw new Error('"' + String(names[i][0]).trim() +
+                        '" existe déjà (ligne ' + (CRM_START + i) + ').');
+      }
+    }
+  }
+
+  const row = Math.max(last + 1, CRM_START);
+  sh.getRange(row, 1, 1, CRM_COLS).setValues(
+    [[name, tel, loc, "", "", "", "", "", "", notes]]);
+  SpreadsheetApp.flush();
+  return { row: row };
+}
+
 /** MANUAL CHECK (editor Run dropdown, project TSARA Entry).
  *  Read-only. Prints the stamp and every client with its row handle. */
 function crmDumpList() {
