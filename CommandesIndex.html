@@ -219,11 +219,11 @@
     // order form is built ONCE here. Commander (demCommander) calls
     // switchMode('new') and expects to find the fields already there.
     // Then land on Pré-commandes, which is the tab the day starts on.
-    // Reopen the tab the person was on before a reload (Kim, 2026-09-04).
-    // The tab is remembered in this browser only; a fresh browser lands
-    // on Pré-commandes as before. 'new' is never restored: the order form
-    // is a hand-off target, not a place to start the day.
-    .withSuccessHandler(o => { OPTS = o; renderNew(); switchMode(lastTab()); })
+    // Always land on Pré-commandes (Kim, 2026-09-05). This replaced
+    // the 2026-09-04 tab memory: the day starts on the queue, every
+    // time, on every machine. renderNew() still runs first - switchMode
+    // has no 'new' branch, and Commander needs the order form built.
+    .withSuccessHandler(o => { OPTS = o; renderNew(); switchMode('dem'); })
     .withFailureHandler(e => setStatus('err', 'Erreur chargement : ' + esc(e.message)))
     .cmdGetOptions();
 
@@ -280,25 +280,8 @@
       'l\'enregistrement. Pr\u00e9venir Kim.</div>';
   }
 
-  const TAB_KEY = 'tsara.commandes.tab';
-  const TABS_RESTORE = ['dem', 'rec', 'ful', 'hist', 'prix', 'cli', 'res'];
-
-  function lastTab() {
-    try {
-      const t = localStorage.getItem(TAB_KEY);
-      return TABS_RESTORE.indexOf(t) >= 0 ? t : 'dem';
-    } catch (e) { return 'dem'; }
-  }
-
-  function rememberTab(m) {
-    try {
-      if (TABS_RESTORE.indexOf(m) >= 0) localStorage.setItem(TAB_KEY, m);
-    } catch (e) { /* storage blocked: nothing to remember, nothing breaks */ }
-  }
-
   function switchMode(m) {
     mode = m;
-    rememberTab(m);
     el('tabNew').className = 'tab' + (m === 'new' ? ' active' : '');
     el('tabFul').className = 'tab' + (m === 'ful' ? ' active' : '');
     el('tabRes').className = 'tab' + (m === 'res' ? ' active' : '');
@@ -1112,10 +1095,18 @@
       // Nothing may act on a queue the server has not seen: an edit
       // would reload the list and silently drop the unsaved order.
       var dis = demDirty ? ' disabled' : '';
-      // The form is below the table; the tint is what ties the two
-      // together when both cannot be on screen at once.
-      var demEditRowBg = (demEdit === r.row) ? ';background:#fef7e0' : '';
-      h += '<tr style="border-bottom:1px solid #e8eaed' + demEditRowBg + '">' +
+      // The verdict fills the whole row - the glance answer. Green
+      // serve, orange wrong size, red not enough fish.
+      var vRow = demStock ? demStock[r.row] : null;
+      var rowBg = '';
+      if (vRow && vRow.statut === 'DISPONIBLE') rowBg = ';background:#e6f4ea';
+      else if (vRow && vRow.statut === 'PM') rowBg = ';background:#fdebd3';
+      else if (vRow && vRow.statut) rowBg = ';background:#fce8e6';
+      // The edit tint still wins: it is transient, it ties the row to
+      // the form below, and the verdict comes back when the edit ends.
+      // Its yellow is kept apart from the PM orange on purpose.
+      if (demEdit === r.row) rowBg = ';background:#fef7e0';
+      h += '<tr style="border-bottom:1px solid #e8eaed' + rowBg + '">' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(demFmtDate(r.date)) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.client) + '</td>' +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.contact) + '</td>' +
