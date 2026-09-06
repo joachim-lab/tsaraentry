@@ -2311,6 +2311,32 @@ function demPendingMap() {
  * @return {Object} { lots:[{key,avail,pm,al,gr}], pool:{Alevins,Poisson},
  *                    skipped:[{key,avail,pm,why}] }
  */
+/**
+ * True when a lot key belongs to BROODSTOCK.
+ *
+ * Key = <lotId>-<basin>-<A|B|C|L>, resolved on the text before the
+ * FIRST hyphen. Grow-out lotIds carry a digit (15, 26-2); broodstock
+ * lotIds are family names (Mirana, DANIE, ERWIN, MAX; NG legacy).
+ * No digit in the lotId = broodstock.
+ */
+function cmdIsBroodstockKey(key) {
+  const id = String(key == null ? "" : key).split("-")[0];
+  return id !== "" && !/[0-9]/.test(id);
+}
+
+/** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> testBroodstockKeys
+ *  Read-only. Prints the verdict for every lot key in Stock Poisson. */
+function testBroodstockKeys() {
+  const r = demSellableLots();
+  const seen = {};
+  r.lots.forEach(function (l) { seen[l.key] = true; });
+  r.skipped.forEach(function (x) { seen[x.key] = true; });
+  Object.keys(seen).sort().forEach(function (k) {
+    Logger.log("  " + k + "   " +
+               (cmdIsBroodstockKey(k) ? "GÉNITEURS" : "grossissement"));
+  });
+}
+
 function demSellableLots() {
   // Stock Poisson lot block: N=id, O=nombre, P=PM - the block
   // updateStockPoisson rewrites each night (same read as buildLotPmMap).
@@ -2332,6 +2358,12 @@ function demSellableLots() {
       const key = cmdCanonKey(vals[i][0]);
       if (!key) continue;
       if (notSellable[key]) { skipped.push({ key: key, why: "lot bloqué" }); continue; }
+      // Breeders are not stock for sale. POOL FIGURE ONLY - the order
+      // gate still accepts a broodstock lot if one is typed in.
+      if (cmdIsBroodstockKey(key)) {
+        skipped.push({ key: key, why: "géniteurs" });
+        continue;
+      }
       const r = resv[key];
       if (r === "TOUT") { skipped.push({ key: key, why: "réservé TOUT" }); continue; }
       const count = cmdToNum(vals[i][1]);
