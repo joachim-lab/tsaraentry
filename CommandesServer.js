@@ -2300,7 +2300,18 @@ function demPendingMap() {
   return out;
 }
 
-function demCheckStock() {
+/**
+ * The sellable lots and the two pools, in ONE place.
+ *
+ * Extracted from demCheckStock (2026-09-05) so the screen, the
+ * nightly mail and grPoolDetail all describe the same arithmetic.
+ * `skipped` is filled for the diagnostic only - it costs nothing and
+ * it is the answer to "which lots are NOT counted, and why".
+ *
+ * @return {Object} { lots:[{key,avail,pm,al,gr}], pool:{Alevins,Poisson},
+ *                    skipped:[{key,avail,pm,why}] }
+ */
+function demSellableLots() {
   // Stock Poisson lot block: N=id, O=nombre, P=PM - the block
   // updateStockPoisson rewrites each night (same read as buildLotPmMap).
   const ss = SpreadsheetApp.openById(STOCK_PM_CFG.SS_ID);
@@ -2309,6 +2320,7 @@ function demCheckStock() {
   const lastRow = sh.getLastRow();
   const lots = [];                                   // {key, avail, pm, al, gr}
   const pool = { Alevins: 0, Poisson: 0 };
+  const skipped = [];
   if (lastRow >= STOCK_PM_CFG.START_ROW) {
     const vals = sh.getRange(STOCK_PM_CFG.START_ROW, 14,
                              lastRow - STOCK_PM_CFG.START_ROW + 1, 3).getValues();
@@ -2318,14 +2330,18 @@ function demCheckStock() {
     const fryMax = cmdFryMaxPm();
     for (var i = 0; i < vals.length; i++) {
       const key = cmdCanonKey(vals[i][0]);
-      if (!key || notSellable[key]) continue;
+      if (!key) continue;
+      if (notSellable[key]) { skipped.push({ key: key, why: "lot bloqué" }); continue; }
       const r = resv[key];
-      if (r === "TOUT") continue;
+      if (r === "TOUT") { skipped.push({ key: key, why: "réservé TOUT" }); continue; }
       const count = cmdToNum(vals[i][1]);
       if (count == null || count <= 0) continue;
       const avail = count - (r || 0) - (pend[key] || 0);
-      if (avail <= 0) continue;
       const pm = cmdToNum(vals[i][2]);
+      if (avail <= 0) {
+        skipped.push({ key: key, avail: avail, pm: pm, why: "rien de libre" });
+        continue;
+      }
       const lot = {
         key: key, avail: avail, pm: pm,
         al: cmdLotTypeVerdict(true,  pm, fryMax).level !== "block",
@@ -2339,10 +2355,48 @@ function demCheckStock() {
       // never reads this number. No PM on the lot = 0 kg added,
       // rather than a weight invented for it.
       if (lot.gr && pm != null) pool.Poisson += avail * pm / 1000;
+      if (!lot.gr) {
+        skipped.push({ key: key, avail: avail, pm: pm,
+                       why: "PM < " + cmdGrBounds().block });
+      }
     }
   }
   pool.Poisson = Math.round(pool.Poisson);
+  return { lots: lots, pool: pool, skipped: skipped };
+}
 
+/** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> grPoolDetail
+ *  Read-only. Which lots make up the poisson pool, and which do not. */
+function grPoolDetail() {
+  const b = cmdGrBounds();
+  const r = demSellableLots();
+  Logger.log("Poids minimal de vente : " + b.block + " g");
+  Logger.log("Lots comptés dans le pool poisson :");
+  var n = 0;
+  r.lots.forEach(function (l) {
+    if (!l.gr || l.pm == null) return;
+    n++;
+    Logger.log("  " + l.key + "   " + l.avail + " poissons x " + l.pm +
+               " g = " + Math.round(l.avail * l.pm / 1000) + " kg");
+  });
+  if (!n) Logger.log("  (aucun)");
+  Logger.log("TOTAL " + r.pool.Poisson + " kg   —   pool alevins " +
+             r.pool.Alevins + " alevins");
+  Logger.log("Lots écartés :");
+  if (!r.skipped.length) Logger.log("  (aucun)");
+  r.skipped.forEach(function (x) {
+    Logger.log("  " + x.key + "   " +
+               (x.avail != null ? x.avail + " poissons" : "") +
+               (x.pm != null ? " à " + x.pm + " g" : "") +
+               "  (" + x.why + ")");
+  });
+}
+
+function demCheckStock() {
+  const scan = demSellableLots();
+  const lots = scan.lots;
+  const pool = scan.pool;
+  const ss = SpreadsheetApp.openById(STOCK_PM_CFG.SS_ID);
   // grBlock rides along so the screen can NAME the floor the pool
   // was computed at - "2 374 kg" alone does not say 2 374 kg OF WHAT.
   const out = { pool: pool, tol: DEM_PM_TOL,
