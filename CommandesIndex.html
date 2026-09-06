@@ -931,9 +931,31 @@
 
   /** The pool line, for the type on screen. Blank until a check ran. */
   function demPoolLine() {
-    if (!el('demPool')) return;
-    el('demPool').textContent = demPools
-      ? 'Disponible : ' + fmtNum(demPools[demType]) : '';
+    const n = el('demPool');
+    if (!n) return;
+    if (!demPools) { n.textContent = ''; return; }
+    var h = 'Disponible : ' + fmtNum(demPools[demType]);
+    // What this tab's queue cannot deliver for lack of fish. Only
+    // INDISPONIBLE counts: a PM row has the fish at the wrong size,
+    // which is not "too little stock". Alevins tab totals fish,
+    // poisson tab totals kg (nombre x poids / 1000).
+    if (demStock) {
+      var tot = 0;
+      demVisible().forEach(function (r) {
+        const v = demStock[r.row];
+        if (!v || v.statut !== 'INDISPONIBLE' || r.nombre == null) return;
+        tot += (demType === 'Poisson')
+          ? (r.poids != null ? r.nombre * r.poids / 1000 : 0)
+          : r.nombre;
+      });
+      if (tot > 0) {
+        h += ' &nbsp;&middot;&nbsp; ' +
+          '<span style="color:#d93025;font-weight:bold">Indisponible : ' +
+          fmtNum(Math.round(tot * 10) / 10) +
+          (demType === 'Poisson' ? ' kg' : '') + '</span>';
+      }
+    }
+    n.innerHTML = h;
   }
 
   /**
@@ -1303,6 +1325,9 @@
     var ia = demRows.indexOf(vis[at]), ib = demRows.indexOf(vis[to]);
     var tmp = demRows[ia]; demRows[ia] = demRows[ib]; demRows[ib] = tmp;
     demDirty = true; demArmed = 0; demStock = null;
+    // The verdicts were computed on the OLD queue and are gone; the
+    // red Indisponible total was computed from them, so it goes too.
+    demPoolLine();
     drawDemList();
   }
 
