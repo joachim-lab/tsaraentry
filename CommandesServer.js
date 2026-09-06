@@ -1149,6 +1149,32 @@ function cmdGrBounds() {
   return CMD_GR_BOUNDS_CACHE;
 }
 
+/**
+ * Set the GR floor from the screen. Kim only: the floor refuses real
+ * grossis orders, so a worker mis-tap must not move it. Blank = back
+ * to the default (the property is deleted), same idiom as the price
+ * field. 50-2000 g: outside that is a typo, not a decision.
+ */
+function grSetBlock(v) {
+  const email = String(Session.getActiveUser().getEmail() || "");
+  if (email !== "joachim@jdsresearch.com") {
+    throw new Error("Seuil réservé à Kim — connecté : " + (email || "inconnu"));
+  }
+  const p = PropertiesService.getScriptProperties();
+  const raw = String(v == null ? "" : v).trim();
+  if (raw === "") {
+    p.deleteProperty("CMD_GR_BLOCK_PM");
+  } else {
+    const n = cmdToNum(raw);
+    if (n == null || n < 50 || n > 2000) {
+      throw new Error("Seuil invalide : " + raw + " (entre 50 et 2000 g).");
+    }
+    p.setProperty("CMD_GR_BLOCK_PM", String(Math.round(n)));
+  }
+  CMD_GR_BOUNDS_CACHE = null;
+  return cmdGrBounds();
+}
+
 /** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> grShowBounds
  *  Read-only. Prints the boundaries in force and where they come from. */
 function grShowBounds() {
@@ -2317,7 +2343,10 @@ function demCheckStock() {
   }
   pool.Poisson = Math.round(pool.Poisson);
 
-  const out = { pool: pool, tol: DEM_PM_TOL, rows: [] };
+  // grBlock rides along so the screen can NAME the floor the pool
+  // was computed at - "2 374 kg" alone does not say 2 374 kg OF WHAT.
+  const out = { pool: pool, tol: DEM_PM_TOL,
+                grBlock: cmdGrBounds().block, rows: [] };
   demList().forEach(function (d) {
     const v = { row: d.row, statut: null, manque: null, bande: null,
                 lots: [], proche: [] };

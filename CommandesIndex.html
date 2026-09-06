@@ -874,6 +874,7 @@
   let demType = 'Alevins';
   let demNbPoisson = null;   // Poisson form: count computed from the kg
   let demPools = null;       // last pools per type, for the pool line
+  let demGrBlock = null;     // GR floor the last check was computed at
 
   /** The rows this tab shows. The alevins tab takes every row that is
    *  not Poisson, so a legacy row with a blank type stays visible. */
@@ -903,7 +904,8 @@
           'style="background:#188038;color:#fff;border-color:#188038">' +
           'Actualiser le stock</button> ' +
         '<span id="demOrderBtns"></span>' +
-        '<span id="demPool" class="muted"></span></div>' +
+        '<span id="demPool" class="muted"></span>' +
+        '<span id="demFloorWrap" class="muted" style="float:right"></span></div>' +
       '<div id="demList">Chargement…</div>' +
       '<div id="demForm"></div>';
     demMarkSubtabs();
@@ -930,12 +932,47 @@
   }
 
   /** The pool line, for the type on screen. Blank until a check ran. */
+  /**
+   * The floor field, Poisson sub-tab only - the floor is a grossis
+   * concept. Saving re-runs the stock check so pool, verdicts and row
+   * colours follow at once. Empty field = back to the default (149 g).
+   * The server refuses anyone but Kim; the field does not hide,
+   * because a visible refusal beats an invisible rule.
+   */
+  function demFloorPaint() {
+    const z = el('demFloorWrap');
+    if (!z) return;
+    if (demType !== 'Poisson' || demGrBlock == null) { z.innerHTML = ''; return; }
+    z.innerHTML = 'Seuil grossis : ' +
+      '<input id="dFloor" type="number" min="50" max="2000" ' +
+        'style="width:70px;padding:4px" value="' + demGrBlock + '"> g ' +
+      '<button class="demBtn" onclick="demFloorSave()">Changer</button>';
+  }
+
+  function demFloorSave() {
+    const v = el('dFloor') ? el('dFloor').value : '';
+    setStatus('banner', 'Changement du seuil…');
+    google.script.run
+      .withSuccessHandler(function (b) {
+        demGrBlock = b.block;
+        setStatus('ok', 'Seuil grossis : ' + b.block + ' g.');
+        demVerifStock();               // pool + verdicts at the new floor
+      })
+      .withFailureHandler(function (e) {
+        demFloorPaint();               // put the real value back
+        setStatusAndScroll('err', esc(e.message));
+      })
+      .grSetBlock(v);
+  }
+
   function demPoolLine() {
     const n = el('demPool');
     if (!n) return;
     if (!demPools) { n.textContent = ''; return; }
     var h = 'Disponible : ' + fmtNum(demPools[demType]) +
-            (demType === 'Poisson' ? ' kg' : ' alevins');
+            (demType === 'Poisson'
+              ? ' kg' + (demGrBlock != null ? ' (&ge; ' + demGrBlock + ' g)' : '')
+              : ' alevins');
     // What this tab's queue cannot deliver for lack of fish. Only
     // INDISPONIBLE counts: a PM row has the fish at the wrong size,
     // which is not "too little stock". Alevins tab totals fish,
@@ -970,6 +1007,7 @@
     demEdit = 0; demArmed = 0;
     demMarkSubtabs();
     demPoolLine();
+    demFloorPaint();
     drawDemList(); drawDemForm();
     setStatus('', '');
   }
@@ -1010,6 +1048,8 @@
         res.rows.forEach(function (v) { demStock[v.row] = v; });
         if (res.tol) demTol = Math.round(res.tol * 100);
         demPools = res.pool;
+        demGrBlock = (res.grBlock != null) ? res.grBlock : null;
+        demFloorPaint();
         demPoolLine();
         drawDemList();
       })
