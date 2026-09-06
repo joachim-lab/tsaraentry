@@ -2264,9 +2264,15 @@ function demCheckStock() {
       };
       lots.push(lot);
       if (lot.al) pool.Alevins += avail;
-      if (lot.gr) pool.Poisson += avail;
+      // The Poisson pool is DISPLAY ONLY (screen, mail, editor log)
+      // and is reported in KG (Kim, 2026-09-05): avail x PM / 1000.
+      // The verdicts below keep counting FISH per lot - allocation
+      // never reads this number. No PM on the lot = 0 kg added,
+      // rather than a weight invented for it.
+      if (lot.gr && pm != null) pool.Poisson += avail * pm / 1000;
     }
   }
+  pool.Poisson = Math.round(pool.Poisson);
 
   const out = { pool: pool, tol: DEM_PM_TOL, rows: [] };
   demList().forEach(function (d) {
@@ -2343,8 +2349,8 @@ function testDemCheckStock() {
   const r = demCheckStock();
   const byRow = {};
   demList().forEach(function (d) { byRow[d.row] = d; });
-  Logger.log("Pool Alevins=" + r.pool.Alevins + "  Poisson=" + r.pool.Poisson +
-             "   bande ±" + Math.round(r.tol * 100) + " %");
+  Logger.log("Pool Alevins=" + r.pool.Alevins + " alevins  Poisson=" +
+             r.pool.Poisson + " kg   bande ±" + Math.round(r.tol * 100) + " %");
   r.rows.forEach(function (v) {
     const d = byRow[v.row] || {};
     Logger.log("  ligne " + v.row + "  " + d.client + "  " + d.nombre + " " + d.type +
@@ -2476,8 +2482,8 @@ function demBuildReport() {
     body += p[1] + " (" + n[p[0]] + ")\n" +
             (sections[p[0]].length ? sections[p[0]].join("\n") : "  (aucune)\n") + "\n";
   });
-  body += "Stock disponible : Alevins " + check.pool.Alevins +
-          "  —  Poisson " + check.pool.Poisson + "\n\n" +
+  body += "Stock disponible : " + check.pool.Alevins + " alevins  —  " +
+          check.pool.Poisson + " kg de poisson\n\n" +
           "À VÉRIFIER avant de confirmer au client :\n" +
           "  - le poids est jugé à ±" + Math.round(DEM_PM_TOL * 100) +
           " % du poids demandé, sur le PM du lot\n" +
