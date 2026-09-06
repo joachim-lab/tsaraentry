@@ -1105,10 +1105,13 @@ function cmdToNum(v) {
  * BOUNDARIES — where each number comes from:
  *   AL max  = top of the fry grid, READ FROM the Tarifs sheet (20 g
  *             today). Not a constant: raise the grid and this follows.
- *   GR block = 149 g. Below this the farm does not sell as grossis.
- *   GR warn  = 200 g. Between 149 and 200 the sale is allowed but
- *             flagged — a commercial judgement, not an error, so it
- *             must not cost a sale.
+ *   GR block = 149 g by default. Below this the farm does not sell
+ *             as grossis. Overridable live via Script property
+ *             CMD_GR_BLOCK_PM — see cmdGrBounds().
+ *   GR warn  = 200 g by default (property CMD_GR_WARN_PM). Between
+ *             block and warn the sale is allowed but flagged — a
+ *             commercial judgement, not an error, so it must not
+ *             cost a sale.
  *
  * WHY NOT 350 g: 350 is the production model's target harvest weight,
  * not a commercial floor. On 2026-08-12 the heaviest live lot was
@@ -1117,8 +1120,47 @@ function cmdToNum(v) {
  * live Stock Poisson data before this was written.
  * ============================================================= */
 
-var CMD_GR_BLOCK_PM = 149;   // below this: refuse a grossis order
-var CMD_GR_WARN_PM  = 200;   // below this: allow, but flag it
+var CMD_GR_BLOCK_DEFAULT = 149;   // below this: refuse a grossis order
+var CMD_GR_WARN_DEFAULT  = 200;   // below this: allow, but flag it
+
+/**
+ * The GR boundaries in force. Script properties CMD_GR_BLOCK_PM and
+ * CMD_GR_WARN_PM override the defaults WITHOUT a deploy (editor ->
+ * Project Settings -> Script properties); delete a property to fall
+ * back. Absent or invalid = default. A warn below the floor is
+ * unreachable, so it is raised to the floor.
+ *
+ * Cached per execution: cmdLotTypeVerdict runs inside demCheckStock's
+ * lot loop, and a PropertiesService read per call is an in-loop cost
+ * for a value that cannot change mid-execution.
+ */
+var CMD_GR_BOUNDS_CACHE = null;
+function cmdGrBounds() {
+  if (CMD_GR_BOUNDS_CACHE) return CMD_GR_BOUNDS_CACHE;
+  const p = PropertiesService.getScriptProperties();
+  function readNum(key, dflt) {
+    const v = Number(p.getProperty(key));
+    return (isFinite(v) && v > 0) ? v : dflt;
+  }
+  const block = readNum("CMD_GR_BLOCK_PM", CMD_GR_BLOCK_DEFAULT);
+  var warn = readNum("CMD_GR_WARN_PM", CMD_GR_WARN_DEFAULT);
+  if (warn < block) warn = block;
+  CMD_GR_BOUNDS_CACHE = { block: block, warn: warn };
+  return CMD_GR_BOUNDS_CACHE;
+}
+
+/** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> grShowBounds
+ *  Read-only. Prints the boundaries in force and where they come from. */
+function grShowBounds() {
+  const p = PropertiesService.getScriptProperties();
+  const b = cmdGrBounds();
+  Logger.log("GR block = " + b.block + " g " +
+             (p.getProperty("CMD_GR_BLOCK_PM") ? "(Script property)"
+                                               : "(défaut " + CMD_GR_BLOCK_DEFAULT + ")"));
+  Logger.log("GR warn  = " + b.warn + " g " +
+             (p.getProperty("CMD_GR_WARN_PM") ? "(Script property)"
+                                              : "(défaut " + CMD_GR_WARN_DEFAULT + ")"));
+}
 
 /** Top of the fry grid, from Tarifs. Never hardcode this. */
 function cmdFryMaxPm() {
@@ -1139,13 +1181,14 @@ function cmdLotTypeVerdict(isAlevins, pm, fryMax) {
     }
     return { level: "ok", msg: "" };
   }
-  if (pm < CMD_GR_BLOCK_PM) {
-    return { level: "block", msg: "PM du lot " + pm + " g < " + CMD_GR_BLOCK_PM +
+  const gb = cmdGrBounds();
+  if (pm < gb.block) {
+    return { level: "block", msg: "PM du lot " + pm + " g < " + gb.block +
       " g — trop petit pour être vendu en grossis" };
   }
-  if (pm < CMD_GR_WARN_PM) {
+  if (pm < gb.warn) {
     return { level: "warn", msg: "PM du lot " + pm + " g — en dessous de " +
-      CMD_GR_WARN_PM + " g ; vente possible mais à confirmer" };
+      gb.warn + " g ; vente possible mais à confirmer" };
   }
   return { level: "ok", msg: "" };
 }
@@ -1391,8 +1434,8 @@ function cmdGetLotGateData() {
     reservedAll: buildReservedAllMap(),
     notSellable: getNotSellableMap(),
     fryMax: cmdFryMaxPm(),
-    grBlock: CMD_GR_BLOCK_PM,
-    grWarn: CMD_GR_WARN_PM
+    grBlock: cmdGrBounds().block,
+    grWarn: cmdGrBounds().warn
   };
 }
 
