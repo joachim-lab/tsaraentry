@@ -1356,6 +1356,15 @@ function buildNotSellableMap() {
   });
 
   const out = {};
+
+  // Breeders are never stock for sale. Marked HERE, before the lot-file
+  // loop below: that loop returns early when a lot number has no file
+  // ("no lot file -> stays selectable"), and broodstock has none, which
+  // is exactly why it stayed selectable until now (Kim, 2026-09-06).
+  Object.keys(cmdGetLotPmMap()).forEach(function (k) {
+    if (cmdIsBroodstockKey(k)) out[k] = true;
+  });
+
   Object.keys(byLot).forEach(function (lotNum) {
     var fileId = null;
     for (var i = 0; i < list.length; i++) {
