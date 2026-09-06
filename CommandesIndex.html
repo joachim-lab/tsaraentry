@@ -943,7 +943,7 @@
     const z = el('demFloorWrap');
     if (!z) return;
     if (demType !== 'Poisson' || demGrBlock == null) { z.innerHTML = ''; return; }
-    z.innerHTML = 'Seuil grossis : ' +
+    z.innerHTML = 'Poids minimal de vente : ' +
       '<input id="dFloor" type="number" min="50" max="2000" ' +
         'style="width:70px;padding:4px" value="' + demGrBlock + '"> g ' +
       '<button class="demBtn" onclick="demFloorSave()">Changer</button>';
@@ -955,7 +955,7 @@
     google.script.run
       .withSuccessHandler(function (b) {
         demGrBlock = b.block;
-        setStatus('ok', 'Seuil grossis : ' + b.block + ' g.');
+        setStatus('ok', 'Poids minimal de vente : ' + b.block + ' g.');
         demVerifStock();               // pool + verdicts at the new floor
       })
       .withFailureHandler(function (e) {
