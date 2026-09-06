@@ -1397,6 +1397,36 @@ function refreshNotSellableMap() {
 }
 
 /**
+ * RUN FROM EDITOR when a broodstock lot must genuinely be sold.
+ *
+ * Removes the breeder keys from the STORED not-sellable map, so the
+ * lot dropdown accepts them at once - no push, no version cut. It
+ * does NOT touch buildNotSellableMap, so:
+ *   - refreshNotSellableMap() restores the block immediately, and
+ *   - the nightly trigger restores it anyway.
+ * A forgotten restore therefore closes itself by the next morning.
+ *
+ * After the sale: run refreshNotSellableMap.
+ */
+function allowBroodstockSale() {
+  const map = getNotSellableMap();
+  const freed = [];
+  Object.keys(map).forEach(function (k) {
+    if (cmdIsBroodstockKey(k)) { delete map[k]; freed.push(k); }
+  });
+  if (!freed.length) {
+    Logger.log("Aucun lot de géniteurs n'était bloqué — rien à faire.");
+    return [];
+  }
+  PropertiesService.getScriptProperties()
+    .setProperty(NOT_SELLABLE_PROP_KEY, JSON.stringify(map));
+  Logger.log("Géniteurs débloqués (" + freed.length + ") : " + freed.join(", "));
+  Logger.log("ATTENTION : blocage rétabli par le rebuild de cette nuit,");
+  Logger.log("ou tout de suite en lançant refreshNotSellableMap.");
+  return freed;
+}
+
+/**
  * RUN FROM EDITOR ONCE. Installs the nightly rebuild. Deletes any
  * existing trigger for the same handler first, so running it twice
  * cannot leave two triggers rebuilding the same map.
