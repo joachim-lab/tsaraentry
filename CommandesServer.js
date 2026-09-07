@@ -90,13 +90,18 @@ function findNextCommandeRow(sh) {
   const physical = sh.getLastRow();
   if (physical < CMD_CFG.START_ROW) return CMD_CFG.START_ROW;
   const C = CMD_CFG.COL;
-  const vals = sh.getRange(CMD_CFG.START_ROW, 1,
-    physical - CMD_CFG.START_ROW + 1, C.CLIENT).getDisplayValues();
+  const n = physical - CMD_CFG.START_ROW + 1;
+  // Two narrow value reads (A:B and R), not one 18-column
+  // getDisplayValues over ~2050 rows. That single read cost 2.8 s and
+  // ran three times per order save (TIMING probe, 2026-09-07).
+  // A, B and R hold typed data, never formulas, so getValues is exact.
+  const ab = sh.getRange(CMD_CFG.START_ROW, C.LOT, n, 2).getValues();      // A:B
+  const cl = sh.getRange(CMD_CFG.START_ROW, C.CLIENT, n, 1).getValues();   // R
   let lastData = CMD_CFG.START_ROW - 1;
-  for (let i = 0; i < vals.length; i++) {
-    if (String(vals[i][C.LOT - 1] || "").trim() !== "" ||
-        String(vals[i][C.ORDER_NO - 1] || "").trim() !== "" ||
-        String(vals[i][C.CLIENT - 1] || "").trim() !== "") {
+  for (let i = 0; i < n; i++) {
+    if (String(ab[i][0] || "").trim() !== "" ||
+        String(ab[i][1] || "").trim() !== "" ||
+        String(cl[i][0] || "").trim() !== "") {
       lastData = CMD_CFG.START_ROW + i;
     }
   }
