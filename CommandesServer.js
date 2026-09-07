@@ -718,7 +718,10 @@ function cmdGetOrderLines(rows) {
       pmAl: cmdToNum(v[C.ALEVINS_PM - 1]),
       kg: cmdToNum(v[C.POISSON_KG - 1]),
       pmGr: cmdToNum(v[C.POISSON_PM - 1]),
-      prix: cmdToNum(isAl ? v[C.ALEVINS_PRIX - 1] : v[C.PRIX_KG - 1])
+      prix: cmdToNum(isAl ? v[C.ALEVINS_PRIX - 1] : v[C.PRIX_KG - 1]),
+      // Column Y non-empty = the engine has already taken these fish
+      // from the lot file. The lot can no longer be re-pointed.
+      deducted: String(v[C.LOG - 1] || "").trim() !== ""
     };
   });
 }
@@ -923,8 +926,34 @@ function cmdModifyOrder(payload) {
     const pm = cmdToNum(ln.pm);
     if (pm == null || pm <= 0) throw new Error("Ligne " + r + " : PM invalide.");
 
+    // ---- LOT CHANGE (2026-09-07) ----
+    // Column A may be re-pointed ONLY while column Y is empty. The Y
+    // stamp records a quantity, never the lot it was taken from, and
+    // every reader resolves the lot from A live. On a deducted row a
+    // re-point therefore mis-targets the engine's re-credit pass, its
+    // pending add-back into Stock Poisson column O, and the stock
+    // reconcile further down THIS function - all silently, because
+    // nothing compares A against the key that was actually debited.
+    // Y empty means nothing has moved: the engine deducts from the new
+    // key tonight. An empty ln.lot means "keep the current lot", so an
+    // untouched dropdown can never re-point A.
+    const newLot = String(ln.lot == null ? "" : ln.lot).trim();
+    const newKey = newLot ? cmdCanonKey(newLot) : "";
+    var lotChange = null;
+    if (newKey && newKey !== key) {
+      if (y.trim() !== "") {
+        throw new Error(
+          "Ligne " + r + " : les poissons ont déjà été " +
+          "déduits du lot " + String(v[C.LOT - 1] || "") +
+          " — changement de lot impossible. Annuler la commande " +
+          "et la recréer sur le bon lot.");
+      }
+      lotChange = { from: String(v[C.LOT - 1] || ""), to: newLot };
+    }
+
     var job = {
-      row: r, key: key, isAl: isAl, pm: pm, y: y, stampQty: stampQty,
+      row: r, key: lotChange ? newKey : key, isAl: isAl, pm: pm,
+      y: y, stampQty: stampQty, lotChange: lotChange,
       zFilled: String(v[C.ERROR - 1] || "").trim() !== ""
     };
     if (isAl) {
@@ -946,7 +975,13 @@ function cmdModifyOrder(payload) {
   // ---- stock guard: validate the INCREASE only ----
   const incLines = jobs
     .map(function (j) {
-      const base = (j.stampQty != null) ? j.stampQty : (j.oldDed || 0);
+      // A lot change moves the WHOLE quantity onto a lot that has
+      // never carried it, so the delta rule does not apply: the new lot
+      // must cover newDed in full, the same check order creation runs.
+      // The old lot needs no check - Y is empty, nothing left it.
+      const base = j.lotChange
+        ? 0
+        : ((j.stampQty != null) ? j.stampQty : (j.oldDed || 0));
       return { lot: j.key, qty: j.newDed - base, pm: j.pm };
     })
     .filter(function (l) { return l.qty > 0; });
@@ -979,6 +1014,21 @@ function cmdModifyOrder(payload) {
       put(C.POISSON_KG, j.kg, "Kg poisson");
       put(C.POISSON_PM, j.pm, "PM");
     }
+    if (j.lotChange) {
+      put(C.LOT, j.lotChange.to, "Lot");
+      // Z carries the engine's sticky refusal from the OLD lot
+      // (PAS ASSEZ DE POISSON, NOT FOUND), and a filled Z keeps the row
+      // skipped for ever. Those rows are exactly the ones a lot change
+      // is FOR. The new lot has just passed the same stock check the
+      // engine applies, so the old refusal is void. Font back to black,
+      // as tt_clearReservedFlags does in engine_core.js.
+      if (j.zFilled) {
+        sh.getRange(j.row, C.ERROR).clearContent();
+        sh.getRange(j.row, 1, 1, 26).setFontColor("black");
+        j.zFilled = false;
+        j.zCleared = true;
+      }
+    }
   });
   SpreadsheetApp.flush();
 
@@ -986,6 +1036,14 @@ function cmdModifyOrder(payload) {
   const stock = [];
   jobs.forEach(function (j) {
     if (j.stampQty == null) {
+      if (j.lotChange) {
+        stock.push("Lot " + j.lotChange.from + " → " + j.lotChange.to +
+          " : rien n'avait encore été déduit de l'ancien lot.");
+        if (j.zCleared) {
+          stock.push("Colonne Z effacée (erreur de l'ancien lot) " +
+            "— la ligne est de nouveau traitée par le moteur.");
+        }
+      }
       stock.push(j.key + " : pas encore d\u00e9duit \u2014 le moteur d\u00e9duira la nouvelle quantit\u00e9 cette nuit.");
       if (j.zFilled) {
         stock.push("\u26a0 " + j.key + " : la colonne Z contient une erreur \u2014 le moteur ignorera cette ligne tant que Kim ne l'a pas effac\u00e9e.");

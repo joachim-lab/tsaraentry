@@ -3165,8 +3165,23 @@
             (o.coutLivraison ? o.coutLivraison : '') + '"></div>' +
           lines.map((ln, i) =>
             '<div class="row" style="margin-top:8px">' +
-              '<div style="align-self:center;font-weight:600;padding-top:14px">' +
-                esc(ln.lot) + '</div>' +
+              ((qtyOn && !ln.deducted)
+                ? '<div><label>Lot</label><select id="modLot' + i + '">' +
+                    '<option value="">— garder ' + esc(ln.lot) + ' —</option>' +
+                    OPTS.lots
+                      .filter(function (l) { return canonKey(l) !== canonKey(ln.lot); })
+                      .map(function (l) {
+                        return '<option value="' + esc(l) + '">' + esc(l) + '</option>';
+                      }).join('') +
+                  '</select></div>'
+                : '<div style="align-self:center;font-weight:600;padding-top:14px">' +
+                    esc(ln.lot) +
+                    (ln.deducted
+                      ? '<div class="muted" style="font-weight:400;font-size:13px">' +
+                          'déjà déduit — pour changer de lot, ' +
+                          'annuler et recréer la commande</div>'
+                      : '') +
+                  '</div>') +
               (!qtyOn ? '' :
                 (ln.isAlevins
                   ? '<div><label>Nombre d\'alevins</label>' +
@@ -3276,9 +3291,12 @@
     const lines = modLines.map((ln, i) => {
       const q = el('modQ' + i).value;
       const p = el('modP' + i).value;
+      // Empty = keep the current lot. The server reads "" as no
+      // change, so an untouched dropdown cannot re-point column A.
+      const lot = (el('modLot' + i) || {}).value || '';
       return ln.isAlevins
-        ? { row: ln.row, nombre: q, pm: p }
-        : { row: ln.row, kg: q, pm: p };
+        ? { row: ln.row, nombre: q, pm: p, lot: lot }
+        : { row: ln.row, kg: q, pm: p, lot: lot };
     });
     google.script.run
       .withSuccessHandler(res => modDone(pres, res, dres))
