@@ -244,13 +244,32 @@ function cmdCreateOrder(payload) {
 
   const lastRow = firstRow + lines.length - 1;
 
-  // NOTE: the app does NOT copy formulas into new rows. Columns K, N,
-  // Q and W are already pre-filled with formulas far below the last
-  // data row (this is why getLastRow reports ~2051 while real orders
-  // end around row 180), so new rows inherit them automatically.
-  // An earlier version copied them from the row above; that was
-  // removed because it would propagate a gap if the preceding row ever
-  // had its formulas cleared by hand.
+  // FORMULAS ON THE NEW ROWS (2026-09-07).
+  //
+  // Until today these came from a block of formulas pre-filled far
+  // below the data, and nothing else ever created them. When that
+  // block ran out, N was blank, cmdDeduction returned null and the
+  // nightly engine skipped the row IN SILENCE - no error, no Z
+  // message, sold fish still in stock. The app now writes them.
+  //
+  // Only the four columns the sheet owns and put() never writes.
+  // NOT H: it is a typed value here (browser seeds round(nb*1.05),
+  // staff override it). Blank H on a grossis row is correct -
+  // cmdDeduction uses H only when H > 0, so the row falls through to N.
+  //
+  // setFormulas queues like the puts above and is paid by the flush
+  // that follows, so this costs no extra round trip. Re-writing the
+  // same formula on a row that already has it is a no-op.
+  const nRows = lastRow - firstRow + 1;
+  function col(colIndex, make) {
+    const a = [];
+    for (var r = firstRow; r <= lastRow; r++) a.push([make(r)]);
+    sh.getRange(firstRow, colIndex, nRows, 1).setFormulas(a);
+  }
+  col(C.ARGENT_ALEVINS, function (r) { return "=(F" + r + "*I" + r + ")+J" + r; });
+  col(C.POISSON_NB,     function (r) { return "=IFERROR((L" + r + "*1000)/M" + r + ",0)"; });
+  col(C.ARGENT_POISSON, function (r) { return "=(O" + r + "*L" + r + ")+P" + r; });
+  col(C.LIVRE,          function (r) { return "=IF(V" + r + "<>\"\",\"x\",\"\")"; });
 
   SpreadsheetApp.flush();
 
