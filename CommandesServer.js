@@ -266,10 +266,15 @@ function cmdCreateOrder(payload) {
     for (var r = firstRow; r <= lastRow; r++) a.push([make(r)]);
     sh.getRange(firstRow, colIndex, nRows, 1).setFormulas(a);
   }
+  // SEPARATOR: the Commandes file is FRENCH locale, so arguments are
+  // separated by ";" and "," is the decimal separator. setFormula
+  // writes the string as typed - it is not translated to the sheet's
+  // locale - so a comma gives #ERROR! (proven live 2026-09-07, N192).
+  // K and Q take no arguments, so they carry no separator at all.
   col(C.ARGENT_ALEVINS, function (r) { return "=(F" + r + "*I" + r + ")+J" + r; });
-  col(C.POISSON_NB,     function (r) { return "=IFERROR((L" + r + "*1000)/M" + r + ",0)"; });
+  col(C.POISSON_NB,     function (r) { return "=IFERROR((L" + r + "*1000)/M" + r + ";0)"; });
   col(C.ARGENT_POISSON, function (r) { return "=(O" + r + "*L" + r + ")+P" + r; });
-  col(C.LIVRE,          function (r) { return "=IF(V" + r + "<>\"\",\"x\",\"\")"; });
+  col(C.LIVRE,          function (r) { return "=IF(V" + r + "<>\"\";\"x\";\"\")"; });
 
   SpreadsheetApp.flush();
 
