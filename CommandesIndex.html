@@ -931,35 +931,95 @@
     });
   }
 
-  /** The pool line, for the type on screen. Blank until a check ran. */
   /**
-   * The floor field, Poisson sub-tab only - the floor is a grossis
-   * concept. Saving re-runs the stock check so pool, verdicts and row
-   * colours follow at once. Empty field = back to the default (149 g).
-   * The server refuses anyone but Kim; the field does not hide,
-   * because a visible refusal beats an invisible rule.
+   * THE STOCK BAR — one definition, three panes (Kim 2026-09-07).
+   *
+   * sfx is the pane suffix ('New', 'Rec'); Pré-commandes keeps its own
+   * markup because its bar also carries the queue save/cancel buttons.
+   * Every id is suffixed: all panes live in the DOM at once, so a
+   * duplicate id would silently bind the wrong field.
+   */
+  function stockBarHtml(sfx) {
+    return '<div class="warn" style="margin-top:0;margin-bottom:10px">' +
+      '<button class="demBtn" onclick="demVerifStock()" ' +
+        'style="background:#188038;color:#fff;border-color:#188038">' +
+        'Actualiser le stock</button> ' +
+      '<span id="pool' + sfx + '" class="muted"></span>' +
+      '<span id="floorWrap' + sfx + '" class="muted" style="float:right"></span></div>';
+  }
+
+  /** Both pools in one sentence. '' until a check has run. */
+  function stockPoolText() {
+    if (!demPools) return '';
+    return 'Disponible : ' + fmtNum(demPools.Alevins) + ' alevins' +
+           ' &nbsp;&middot;&nbsp; ' + fmtNum(demPools.Poisson) + ' kg' +
+           (demGrBlock != null ? ' (&ge; ' + demGrBlock + ' g)' : '');
+  }
+
+  /** The floor field for one bar. Blank until a check has run. */
+  function floorFieldHtml(inputId) {
+    if (demGrBlock == null) return '';
+    return 'Poids minimal de vente : ' +
+      '<input id="' + inputId + '" type="number" min="50" max="2000" ' +
+        'style="width:70px;padding:4px" value="' + demGrBlock + '"> g ' +
+      '<button class="demBtn" onclick="demFloorSave(\'' + inputId + '\')">Changer</button>';
+  }
+
+  /** Repaint every bar that is currently in the DOM. */
+  function paintStockBars() {
+    ['New', 'Rec'].forEach(function (sfx) {
+      var p = el('pool' + sfx);
+      if (p) p.innerHTML = demPools ? stockPoolText() : '';
+      var f = el('floorWrap' + sfx);
+      if (f) f.innerHTML = floorFieldHtml('flr' + sfx);
+    });
+    demPoolLine();
+    demFloorPaint();
+  }
+
+  /**
+   * The floor field on the Pré-commandes bar. Saving re-runs the stock
+   * check so pool, verdicts and row colours follow at once. Empty
+   * field = back to the default (149 g). The server accepts the farm
+   * team and refuses anyone else (grSetBlock, 2026-09-07); the field
+   * does not hide, because a visible refusal beats an invisible rule.
    */
   function demFloorPaint() {
     const z = el('demFloorWrap');
     if (!z) return;
-    if (demType !== 'Poisson' || demGrBlock == null) { z.innerHTML = ''; return; }
-    z.innerHTML = 'Poids minimal de vente : ' +
-      '<input id="dFloor" type="number" min="50" max="2000" ' +
-        'style="width:70px;padding:4px" value="' + demGrBlock + '"> g ' +
-      '<button class="demBtn" onclick="demFloorSave()">Changer</button>';
+    // Shown on both sub-tabs now: the bar states both pools, so the
+    // floor that qualifies the kg figure belongs beside it either way.
+    z.innerHTML = floorFieldHtml('dFloor');
   }
 
-  function demFloorSave() {
-    const v = el('dFloor') ? el('dFloor').value : '';
+  /**
+   * Save the floor from whichever bar the click came from.
+   *
+   * GATE.grBlock is updated here, not only demGrBlock. GATE is read
+   * once at boot and is what greys "incompatible" lots in the Nouvelle
+   * commande dropdown; without this the dropdown would keep judging by
+   * the old floor until the screen reloads — invisible and wrong.
+   */
+  function demFloorSave(inputId) {
+    const src = el(inputId || 'dFloor');
+    const v = src ? src.value : '';
     setStatus('banner', 'Changement du seuil…');
     google.script.run
       .withSuccessHandler(function (b) {
         demGrBlock = b.block;
+        if (GATE) {
+          GATE.grBlock = b.block;
+          if (GATE.grWarn != null && GATE.grWarn < b.block) GATE.grWarn = b.block;
+          // The dropdown verdicts are computed at render time from
+          // GATE, so they only follow the new floor if the lines are
+          // rebuilt. stashLines first: a half-typed order must survive.
+          if (mode === 'new' && el('linesWrap')) { stashLines(); renderLines(); }
+        }
         setStatus('ok', 'Poids minimal de vente : ' + b.block + ' g.');
         demVerifStock();               // pool + verdicts at the new floor
       })
       .withFailureHandler(function (e) {
-        demFloorPaint();               // put the real value back
+        paintStockBars();              // put the real value back
         setStatusAndScroll('err', esc(e.message));
       })
       .grSetBlock(v);
@@ -969,10 +1029,7 @@
     const n = el('demPool');
     if (!n) return;
     if (!demPools) { n.textContent = ''; return; }
-    var h = 'Disponible : ' + fmtNum(demPools[demType]) +
-            (demType === 'Poisson'
-              ? ' kg' + (demGrBlock != null ? ' (&ge; ' + demGrBlock + ' g)' : '')
-              : ' alevins');
+    var h = stockPoolText();
     // What this tab's queue cannot deliver for lack of fish. Only
     // INDISPONIBLE counts: a PM row has the fish at the wrong size,
     // which is not "too little stock". Alevins tab totals fish,
@@ -1042,6 +1099,10 @@
     // alone: this now runs after every load, including the one that
     // follows a save, and it must not wipe "Pré-commande ajoutée".
     if (el('demPool')) el('demPool').textContent = 'Vérification du stock…';
+    ['New', 'Rec'].forEach(function (sfx) {
+      var p = el('pool' + sfx);
+      if (p) p.textContent = 'Vérification du stock…';
+    });
     google.script.run
       .withSuccessHandler(function (res) {
         demStock = {};
@@ -1049,13 +1110,12 @@
         if (res.tol) demTol = Math.round(res.tol * 100);
         demPools = res.pool;
         demGrBlock = (res.grBlock != null) ? res.grBlock : null;
-        demFloorPaint();
-        demPoolLine();
+        paintStockBars();
         drawDemList();
       })
       .withFailureHandler(function (e) {
         demPools = null;
-        el('demPool').textContent = '';
+        paintStockBars();
         setStatusAndScroll('err', 'Stock non vérifié : ' + esc(e.message));
       })
       .demCheckStock();
@@ -1628,8 +1688,10 @@
 
   function renderRec() {
     el('paneRec').innerHTML =
+      stockBarHtml('Rec') +
       '<div id="recList">Chargement…</div>' +
       '<div id="recForm"></div>';
+    paintStockBars();
     loadRec();
   }
 
@@ -1940,6 +2002,7 @@
       .map(t => '<option value="'+esc(t)+'">'+esc(typeLabel(t))+'</option>').join('');
 
     el('paneNew').innerHTML =
+      stockBarHtml('New') +
       '<div class="card"><h3>Commande</h3>' +
         '<div class="row">' +
           '<div><label>Type</label><select id="fType" onchange="renderLines()">' +
@@ -1990,6 +2053,10 @@
       '<div class="card"><h3>Prix total</h3><div id="totalAmount" class="totalAmount">—</div></div>' +
       '<button class="go" id="btnCreate" onclick="doCreate()">Enregistrer la commande</button>';
     renderLines();
+    // Boot order is renderNew() then switchMode('dem'), so the pools
+    // are not known yet on the first call; the check that runs on the
+    // Pré-commandes load repaints this bar when it returns.
+    paintStockBars();
   }
 
   /** Cosmetic label for a raw order-type code. Unknown codes pass through. */
