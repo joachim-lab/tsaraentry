@@ -164,6 +164,8 @@
   <div id="panePrix" style="display:none"></div>
   <div id="paneCli" style="display:none"></div>
 
+  <datalist id="dlClients"></datalist>
+
 <script>
 
   // Back link -> menu (same web app URL, no ?screen parameter)
@@ -223,7 +225,7 @@
     // the 2026-09-04 tab memory: the day starts on the queue, every
     // time, on every machine. renderNew() still runs first - switchMode
     // has no 'new' branch, and Commander needs the order form built.
-    .withSuccessHandler(o => { OPTS = o; renderNew(); switchMode('dem'); })
+    .withSuccessHandler(o => { OPTS = o; renderNew(); switchMode('dem'); dlRefresh(); })
     .withFailureHandler(e => setStatus('err', 'Erreur chargement : ' + esc(e.message)))
     .cmdGetOptions();
 
@@ -334,6 +336,102 @@
    * two people may be editing notes on the same client.
    */
 
+  /* ---------- Client datalist + duplicate guard ----------
+   *
+   * One shared <datalist id="dlClients"> feeds the Client field of
+   * Nouvelle commande (#fClient), Pré-commandes (#dClient) and
+   * Récurrentes (#rcClient). The list is the CRM tab, fetched once at
+   * boot (dlRefresh) and again on every Clients-tab visit (renderCli).
+   *
+   * dlDupWarn runs at save, on NEW entries only: an edited row keeps
+   * its historical name without nagging. Exact canonical matches
+   * (same rule as crmCanonName server-side) are silent because the
+   * CRM rebuild merges them; the double-entry risk is the NEAR match
+   * ("Rakoto J." next to "Rakoto Jean", or a one-letter misspelling).
+   * Advisory only: the save continues either way, and an empty list
+   * (fetch failed) checks nothing.
+   */
+
+  var dlClientNames = [];
+
+  /** Same canonical form as crmCanonName (CommandesServer.js). */
+  function dlCanon(s) {
+    return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toUpperCase();
+  }
+
+  function dlFill(names) {
+    dlClientNames = (names || []).filter(function (n) { return n; });
+    dlClientNames.sort(function (a, b) {
+      return a.localeCompare(b, 'fr', { sensitivity: 'base' });
+    });
+    var d = el('dlClients');
+    if (d) d.innerHTML = dlClientNames.map(function (n) {
+      return '<option value="' + esc(n) + '">';
+    }).join('');
+  }
+
+  function dlRefresh() {
+    google.script.run
+      .withSuccessHandler(function (res) {
+        dlFill(((res && res.rows) || []).map(function (r) { return r.client; }));
+      })
+      .withFailureHandler(function () {})   // advisory: silence is safe
+      .crmClientList();
+  }
+
+  /** Looser form for the NEAR-match tests only: punctuation defeats
+   *  both the substring test and the distance test ("Rakoto J." vs
+   *  "Rakoto Jean"), so it is removed here. dlCanon stays untouched
+   *  because it must mirror the server rule. */
+  function dlLoose(s) {
+    return dlCanon(s).replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+  }
+
+  /** Levenshtein distance, plain DP. Client names are short. */
+  function dlDist(a, b) {
+    var m = a.length, n = b.length, i, j;
+    if (!m) return n;
+    if (!n) return m;
+    var prev = [], cur = [];
+    for (j = 0; j <= n; j++) prev[j] = j;
+    for (i = 1; i <= m; i++) {
+      cur[0] = i;
+      for (j = 1; j <= n; j++) {
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1,
+          prev[j - 1] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1));
+      }
+      prev = cur.slice();
+    }
+    return prev[n];
+  }
+
+  /** Warn on a NEAR match with an existing client. Rewrites the field
+   *  when the worker confirms it is the same client. */
+  function dlDupWarn(id) {
+    var inp = el(id);
+    if (!inp) return;
+    var typed = inp.value.trim();
+    if (typed.length < 4) return;
+    var c = dlCanon(typed), cl = dlLoose(typed), near = '';
+    for (var i = 0; i < dlClientNames.length; i++) {
+      if (dlCanon(dlClientNames[i]) === c) return;   // exact: the rebuild merges it
+      if (near) continue;
+      var n = dlLoose(dlClientNames[i]);
+      var shorter = Math.min(n.length, cl.length);
+      if (shorter < 4) continue;
+      if (n.indexOf(cl) >= 0 || cl.indexOf(n) >= 0 ||
+          dlDist(n, cl) <= (shorter >= 8 ? 2 : 1)) near = dlClientNames[i];
+    }
+    if (!near) return;
+    if (confirm('Un client "' + near + '" existe d\u00e9j\u00e0 dans la ' +
+                'liste des clients.\nEst-ce le m\u00eame client que "' +
+                typed + '" ?\n\n' +
+                'OK = oui, utiliser "' + near + '".\n' +
+                'Annuler = non, garder "' + typed + '".')) {
+      inp.value = near;
+    }
+  }
+
   var cliRows = [];        // last list from the server
   var cliOpen = null;      // row number of the open detail, or null
 
@@ -343,6 +441,7 @@
     google.script.run
       .withSuccessHandler(function (res) {
         cliRows = (res && res.rows) || [];
+        dlFill(cliRows.map(function (r) { return r.client; }));
         // Alphabetical, accent-blind via localeCompare('fr'): "Éla"
         // sorts next to "Elie", not off at the end past "Z".
         cliRows.sort(function (a, b) {
@@ -1273,7 +1372,7 @@
         '<input id="dDate" type="date" value="' +
         esc(cur && cur.date ? cur.date : todayISO()) + '"></label></div>' +
       '<div style="margin-bottom:10px"><label>Client<br>' +
-        '<input id="dClient" type="text" size="30" value="' + esc(cur ? cur.client : '') + '"></label></div>' +
+        '<input id="dClient" type="text" size="30" list="dlClients" autocomplete="off" value="' + esc(cur ? cur.client : '') + '"></label></div>' +
       '<div style="margin-bottom:10px"><label>Contact<br>' +
         '<input id="dContact" type="text" size="30" value="' + esc(cur ? cur.contact : '') + '"></label></div>' +
       (type === 'Poisson'
@@ -1484,6 +1583,7 @@
   }
 
   function demSave() {
+    if (!demEdit) dlDupWarn('dClient');
     var p = {
       date: el('dDate').value,
       client: el('dClient').value.trim(),
@@ -1765,7 +1865,7 @@
         (recEdit ? 'Modifier la commande récurrente' : 'Nouvelle commande récurrente') +
       '</h3>' +
       '<div style="margin-bottom:10px"><label>Client<br>' +
-        '<input id="rcClient" type="text" size="30" value="' +
+        '<input id="rcClient" type="text" size="30" list="dlClients" autocomplete="off" value="' +
         esc(cur ? cur.client : '') + '"></label></div>' +
       '<div style="margin-bottom:10px"><label>Contact<br>' +
         '<input id="rcContact" type="text" size="30" value="' +
@@ -1827,6 +1927,7 @@
   }
 
   function recSave() {
+    if (!recEdit) dlDupWarn('rcClient');
     var p = {
       client:    el('rcClient').value,
       contact:   el('rcContact').value,
@@ -2010,7 +2111,7 @@
           '<div><label>Date commande</label><input type="date" id="fDate" value="'+todayISO()+'"></div>' +
         '</div>' +
         '<div class="row">' +
-          '<div><label>Client</label><input type="text" id="fClient"></div>' +
+          '<div><label>Client</label><input type="text" id="fClient" list="dlClients" autocomplete="off"></div>' +
           '<div><label>Contact</label><input type="text" id="fContact"></div>' +
         '</div>' +
         // No N° facture here, deliberately. AutoCommandes mints it when a
@@ -2600,6 +2701,7 @@
   }
 
   function doCreate() {
+    dlDupWarn('fClient');
     stashLines();
     const btn = el('btnCreate');
     btn.disabled = true;
