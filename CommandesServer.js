@@ -345,9 +345,16 @@ function cmdNumFromDisplay_(s) {
  * closed and never listed. The two flags narrow the rest:
  *   wantDeliveredUnpaid — delivered, not paid
  *   wantUndelivered     — not delivered
- * Neither flag (or both) lists both groups.
+ * Both flags list both groups. NEITHER flag lists nothing: each flag
+ * INCLUDES a category, it does not exclude one.
+ *
+ * wantAlevins / wantPoisson narrow that list by CONTENT. An order shows
+ * when either of the things it holds is ticked, so a mixed order stays
+ * visible under either box. An order carrying no quantity at all is
+ * never hidden this way — see the test below for why.
  */
-function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
+function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
+                       wantAlevins, wantPoisson) {
   const sh = cmdSheet();
   const C = CMD_CFG.COL;
   const lastRow = findNextCommandeRow(sh) - 1;
@@ -469,6 +476,25 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
     const keep = (wantDeliveredUnpaid && delivered) ||
                  (wantUndelivered && !delivered);
     if (!keep) continue;
+
+    // Content filter, mirroring Historique: EITHER content ticked shows
+    // the order, so a mixed alevins+poisson order stays visible under
+    // either box. It sits HERE, after the totals above, so those totals
+    // keep describing the whole category whatever is ticked.
+    //
+    // It also sits BEFORE the 25-order cap below. That is the whole
+    // reason this filter is on the server: applied after the cap it
+    // would filter 25 rows instead of the year, and quietly show the
+    // wrong 25.
+    //
+    // An order carrying neither quantity is exempt. Historique may hide
+    // such a row - it only reads. This screen records payment, so an
+    // order nobody can see is money nobody can mark paid.
+    const hasAlevins = g.alevinsTotal > 0;
+    const hasPoisson = g.poissonKgTotal > 0;
+    if (hasAlevins || hasPoisson) {
+      if (!((wantAlevins && hasAlevins) || (wantPoisson && hasPoisson))) continue;
+    }
 
     // One order should hold one price per kg. The sheet does not
     // enforce it, so distinct values are kept and the card shows all
@@ -1124,12 +1150,12 @@ function testCommandesServer() {
   Logger.log("Types: " + opts.types.join(" | "));
 
   Logger.log("--- 3 dernières commandes (groupées) ---");
-  cmdFindOrders("", false).orders.slice(0, 3).forEach(o =>
+  cmdFindOrders("", true, true, true, true).orders.slice(0, 3).forEach(o =>
     Logger.log(o.orderNumber + " | " + o.client + " | lots: " + o.lots.join(", ") +
       " | lignes: " + o.rows.join(",") + " | payé: " + (o.paiement || "non")));
 
   Logger.log("--- commandes non soldées (max 3) ---");
-  cmdFindOrders("", true).orders.slice(0, 3).forEach(o =>
+  cmdFindOrders("", true, false, true, true).orders.slice(0, 3).forEach(o =>
     Logger.log(o.orderNumber + " / " + o.client + " / lots: " + o.lots.join(", ") +
       " / lignes: " + o.rows.join(",")));
 

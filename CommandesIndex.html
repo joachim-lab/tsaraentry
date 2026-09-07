@@ -2867,12 +2867,26 @@
           'Commandes livrées et non-payées <span class="muted" id="fTotDeliveredUnpaid"></span></label>' +
         '<label style="font-weight:normal"><input type="checkbox" id="fUndelivered" checked style="width:auto"> ' +
           'Commandes non-livrées <span class="muted" id="fTotUndelivered"></span></label>' +
+        // Content filter, the same pair as Historique. It narrows the
+        // two boxes above by what the order holds, so it is a second
+        // axis and gets its own row rather than a third stacked line.
+        // No total beside it: the two totals above describe the whole
+        // category on purpose and do not move with these boxes.
+        '<div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:10px">' +
+          '<label class="chk"><input type="checkbox" id="fAlevins" checked>Alevins</label>' +
+          '<label class="chk"><input type="checkbox" id="fPoisson" checked>Poisson</label>' +
+        '</div>' +
       '</div>' +
       '<div id="fulForm"></div>' +
       '<div id="hits"></div>';
     el('ficherche').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
     el('fDeliveredUnpaid').addEventListener('change', () => doSearch());
     el('fUndelivered').addEventListener('change', () => doSearch());
+    // A re-search, not a local redraw. The list is capped at 25 orders
+    // server-side, so filtering the rows already on screen would filter
+    // the cap instead of the year. See patch_fultype_srv_20260907r.py.
+    el('fAlevins').addEventListener('change', () => doSearch());
+    el('fPoisson').addEventListener('change', () => doSearch());
 
     // One delegated listener on the container: survives every re-render
     // of the results list, so nothing has to be re-attached.
@@ -2952,8 +2966,14 @@
         if (keepMsg) setStatusAndScroll(keepMsg.cls, keepMsg.html); else setStatus('', '');
         // Nothing ticked selects nothing. Said plainly, because an
         // empty list with no explanation reads as a broken search.
-        const empty = (!el('fDeliveredUnpaid').checked && !el('fUndelivered').checked)
-          ? 'Cocher au moins une case pour afficher des commandes.'
+        // Two independent reasons for a blank list. Each is named: an
+        // empty list with no explanation reads as a broken search.
+        const noCat  = !el('fDeliveredUnpaid').checked && !el('fUndelivered').checked;
+        const noType = !el('fAlevins').checked && !el('fPoisson').checked;
+        const empty = noCat
+          ? 'Cocher au moins une case : livrées et non-payées, ou non-livrées.'
+          : noType
+          ? 'Cocher Alevins ou Poisson pour afficher des commandes.'
           : (res.closedMatches > 0
               ? (res.closedMatches === 1
                   ? 'Commande livrée et payée.'
@@ -2973,7 +2993,8 @@
       })
       .withFailureHandler(e => setStatus('err', esc(e.message)))
       .cmdFindOrders(el('ficherche').value,
-        el('fDeliveredUnpaid').checked, el('fUndelivered').checked);
+        el('fDeliveredUnpaid').checked, el('fUndelivered').checked,
+        el('fAlevins').checked, el('fPoisson').checked);
   }
 
   /**
