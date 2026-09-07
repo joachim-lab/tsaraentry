@@ -307,6 +307,10 @@ function cmdCreateOrder(payload) {
   // no longer makes its own cmdValidateOrderLines round trip (2026-08-30,
   // it doubled the save time), so this is how PM-mismatch and lot/type
   // warnings reach the screen.
+  // The contact reaches the Clients tab and the client drop-down now,
+  // not at the next CRM > Actualiser la table.
+  crmFillContact(f.client, f.contact);
+
   return { firstRow: firstRow, lastRow: lastRow, orderNumber: orderNumber,
            rowCount: lines.length, warnings: verdict.warnings || [] };
 }
@@ -2432,6 +2436,7 @@ function demAdd(p) {
     [[c.date, c.client, c.contact, c.type, c.nombre, c.commentaires, c.poids,
       rang + 1, c.categorie, c.livraison, c.prix,
       c.km == null ? "" : c.km]]);
+  crmFillContact(c.client, c.contact);
   return { row: row };
 }
 
@@ -3395,6 +3400,7 @@ function recAdd(p) {
       c.actif ? "x" : "", c.remarques]]);
   sh.getRange(row, 11, 1, 2).setValues(
     [[c.livraison, c.km == null ? "" : c.km]]);
+  crmFillContact(c.client, c.contact);
   // A rule saved after this Monday's 05h run must not lose its week:
   // generate immediately when due. Idempotent by marker.
   var gen = 0;
@@ -3803,6 +3809,67 @@ function crmSaveInfo(row, clientSeen, tel, loc, notes) {
  * and updates only the FIRST matching row, so a second row for the
  * same client would freeze forever.
  */
+/**
+ * Write a contact into the CRM tab at save time.
+ *
+ * WHY: column B of the CRM was filled only by crmRebuild (06_crm.js,
+ * automatismescommande), which runs from the menu CRM > Actualiser la
+ * table and from nowhere else — there is no trigger. A phone typed on
+ * an order was therefore invisible in the Clients tab, and in the
+ * client drop-down of the three order forms, until someone remembered
+ * to click that menu.
+ *
+ * RULES
+ * - Blank client or blank contact: nothing happens.
+ * - Client already in the CRM: column B is written ONLY when it is
+ *   blank. A phone entered on the Clients tab is never overwritten —
+ *   the same rule crmRebuild applies to that column.
+ * - Client absent: one row is appended, name and phone only, D-I left
+ *   to the rebuild. A filled column B marks the row as hand-entered,
+ *   so the next rebuild keeps it instead of dropping it as an orphan.
+ * - Every failure is logged and swallowed. This is a convenience. It
+ *   runs after the order is already on the sheet and must never turn a
+ *   saved order into an error message.
+ *
+ * TWO WRITERS, NO CONFLICT: crmRebuild also creates rows and fills
+ * column B. Both fill only a BLANK column B and both match on the
+ * canonical name, so neither can overwrite the other.
+ *
+ * COST: crmEntrySheet opens CMD_CFG.SS_ID, the spreadsheet the caller
+ * already has open in the same execution, so this adds no new
+ * spreadsheet open — one getValues of columns A:B and at most one
+ * write.
+ */
+function crmFillContact(client, tel) {
+  try {
+    const name = String(client == null ? "" : client).trim();
+    const phone = String(tel == null ? "" : tel).trim();
+    if (!name || !phone) return;
+
+    const sh = crmEntrySheet();
+    const canon = crmCanonName(name);
+    const last = sh.getLastRow();
+
+    if (last >= CRM_START) {
+      const vals = sh.getRange(CRM_START, 1, last - CRM_START + 1, 2).getValues();
+      for (var i = 0; i < vals.length; i++) {
+        if (crmCanonName(vals[i][0]) !== canon) continue;
+        if (String(vals[i][1] == null ? "" : vals[i][1]).trim() === "") {
+          sh.getRange(CRM_START + i, CRM_COL_TEL).setValue(phone);
+        }
+        return;                      // found: filled, or it already had one
+      }
+    }
+
+    // Not in the table: append. Column B carries the "@" text format
+    // set when the tab was created, so a leading 0 survives.
+    sh.getRange(Math.max(last + 1, CRM_START), 1, 1, CRM_COLS)
+      .setValues([[name, phone, "", "", "", "", "", "", "", ""]]);
+  } catch (err) {
+    Logger.log("crmFillContact(" + client + "): " + err);
+  }
+}
+
 function crmClientAdd(p) {
   const name = String(p && p.client != null ? p.client : "").trim();
   if (!name) throw new Error("Nom requis.");
