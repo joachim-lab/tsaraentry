@@ -385,22 +385,25 @@
       .crmClientList();
   }
 
-  /** A client was picked from the list, or typed in full: copy the CRM
-   *  contact into the Contact field.
+  /** A client was picked from the list, or typed in full: the Contact
+   *  field follows that client.
    *
-   *  The field is written only when it is empty, or when it still holds
-   *  the value written for the PREVIOUS selection — so changing client
-   *  corrects the contact, while a number the worker typed by hand
-   *  survives. Same rule as the CRM rebuild, which writes column B only
-   *  when it is blank. A client with no contact in the CRM clears
-   *  nothing: an empty CRM cell is missing data, not a correction. */
+   *  WRITTEN when the field is empty, or when it still holds the value
+   *  written for the PREVIOUS selection. A number the worker typed
+   *  himself is never touched.
+   *
+   *  CLEARED when the newly selected client has no phone in the CRM.
+   *  Leaving the previous client's number there was worse than an
+   *  empty box: the order saved under the new client carried the old
+   *  client's contact, and crmFillContact then copied that wrong
+   *  number into the client list (2026-09-07). An empty field is
+   *  visibly missing; a wrong number is not. */
   function dlPickContact(nameId, contactId) {
     var inp = el(nameId), con = el(contactId);
     if (!inp || !con) return;
     var cur = String(con.value).trim();
     if (cur !== '' && cur !== dlAuto[contactId]) return;   // typed by hand
-    var tel = dlTel[dlCanon(inp.value)];
-    if (!tel) return;
+    var tel = dlTel[dlCanon(inp.value)] || '';
     con.value = tel;
     dlAuto[contactId] = tel;
   }
