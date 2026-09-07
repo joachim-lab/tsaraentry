@@ -2199,19 +2199,27 @@
     return t.toUpperCase().indexOf('AL') === 0;
   }
 
-  function renderLines() {
-    const wrap = el('linesWrap');
-    if (!wrap) return;
-    const t = (el('fType') && el('fType').value) || '';
-    if (!t) { wrap.innerHTML = ''; return; }
-
+  /**
+   * The lot <option> list. ONE builder for the order form and for
+   * the lot change on Modifier la commande. Moved out of
+   * renderLines() unchanged (2026-09-07) rather than copied: two
+   * lists would drift apart the first time the labelling changes.
+   *
+   * @param alSel   true to judge the lots as alevins, false as grossis.
+   * @param skipKey canon key to leave out, or null. The modify form
+   *                passes the order's current lot: its "garder"
+   *                option already carries it, and that option must
+   *                stay selectable even when the lot would now be
+   *                greyed out.
+   */
+  function lotOptionsHtml(alSel, skipKey) {
     // Lots incompatible with the chosen type are shown but DISABLED -
     // visible and greyed, never hidden. A lot missing from Stock Poisson
     // has no PM, so it stays selectable and falls through to the normal
     // per-lot check: a gap in one sheet must not make a real lot vanish.
-    const alSel = isAlevins();
-    const lotOpts = OPTS.lots.map(l => {
+    return OPTS.lots.map(l => {
       const key = canonKey(l);
+      if (skipKey && key === skipKey) return '';
       // A TOUT reservation blocks regardless of PM or type, so it is
       // tested first and its label wins - "incompatible" would send
       // someone looking at the wrong problem.
@@ -2243,6 +2251,16 @@
       return '<option value="'+esc(l)+'"' + (v.level === 'block' ? ' disabled' : '') + '>' +
              esc(l) + tag + '</option>';
     }).join('');
+  }
+
+  function renderLines() {
+    const wrap = el('linesWrap');
+    if (!wrap) return;
+    const t = (el('fType') && el('fType').value) || '';
+    if (!t) { wrap.innerHTML = ''; return; }
+
+    const alSel = isAlevins();
+    const lotOpts = lotOptionsHtml(alSel, null);
     const al = isAlevins();
     if (el('provendeWrap')) el('provendeWrap').style.display = al ? '' : 'none';
     if (el('qualiteWrap'))  el('qualiteWrap').style.display  = al ? 'none' : '';
@@ -3166,13 +3184,10 @@
           lines.map((ln, i) =>
             '<div class="row" style="margin-top:8px">' +
               ((qtyOn && !ln.deducted)
-                ? '<div><label>Lot</label><select id="modLot' + i + '">' +
+                ? '<div><label>Lot</label>' +
+                    '<select id="modLot' + i + '" onchange="modLotChanged(' + i + ')">' +
                     '<option value="">— garder ' + esc(ln.lot) + ' —</option>' +
-                    OPTS.lots
-                      .filter(function (l) { return canonKey(l) !== canonKey(ln.lot); })
-                      .map(function (l) {
-                        return '<option value="' + esc(l) + '">' + esc(l) + '</option>';
-                      }).join('') +
+                    lotOptionsHtml(!!ln.isAlevins, canonKey(ln.lot)) +
                   '</select></div>'
                 : '<div style="align-self:center;font-weight:600;padding-top:14px">' +
                     esc(ln.lot) +
@@ -3228,6 +3243,28 @@
         : null;
       if (el('uModCout')) el('uModCout').value = (amt == null) ? '' : amt;
     }
+  }
+
+  /**
+   * A real lot change re-seeds the PM field with the new lot's
+   * average weight. On a grossis line the sheet computes
+   * N = (L x 1000) / M, so PM decides how many fish leave the lot:
+   * a PM left over from the previous lot over-deducts in silence.
+   * The field stays editable.
+   *
+   * "garder" (empty value) is not a change and must not touch PM.
+   * A lot absent from Stock Poisson has no PM here; the field is
+   * left as typed and the save-time check still reports the gap.
+   */
+  function modLotChanged(i) {
+    const sel = el('modLot' + i);
+    const fld = el('modP' + i);
+    if (!sel || !fld) return;
+    const key = canonKey(sel.value);
+    if (!key) return;
+    const pm = (GATE && GATE.pm) ? GATE.pm[key] : undefined;
+    if (pm === undefined || pm === null || !isFinite(pm)) return;
+    fld.value = pm;
   }
 
   function doModify() {
