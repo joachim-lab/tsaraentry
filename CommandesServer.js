@@ -40,7 +40,11 @@ const CMD_CFG = {
     ARGENT_POISSON: 17,
     CLIENT: 18, REMARQUES: 19, CONTACT: 20,
     PAIEMENT: 21, DATE_LIVRAISON: 22, LIVRE: 23, MOYEN_PAIEMENT: 24,
-    LOG: 25, ERROR: 26, ANNULE: 27
+    LOG: 25, ERROR: 26, ANNULE: 27,
+    // Delivery choice, appended 2026-09-07: AB + AC. The COST stays
+    // where it always was: J (Prix transport, AL) / P (Frais
+    // additionnels, GR) — plain values feeding the K/Q formulas.
+    LIVRAISON: 28, KM: 29
   }
 };
 
@@ -227,6 +231,10 @@ function cmdCreateOrder(payload) {
     put(C.CLIENT, f.client);
     put(C.REMARQUES, f.remarques);
     put(C.CONTACT, f.contact);
+    // The delivery choice repeats on every row too (Kim 2026-09-07);
+    // its COST went into line 1's J/P via the browser's auto-fill.
+    put(C.LIVRAISON, f.livraison);
+    put(C.KM, f.km);
   });
 
   const lastRow = firstRow + lines.length - 1;
@@ -317,7 +325,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
   }
 
   const n = lastRow - CMD_CFG.START_ROW + 1;
-  const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.ANNULE).getDisplayValues();
+  const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.KM).getDisplayValues();
   const q = String(query || "").trim().toLowerCase();
 
   const groups = {};
@@ -353,7 +361,10 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
         prixAl: [],
         alevinsTotal: 0,
         poissonKgTotal: 0,
-        montantAr: 0
+        montantAr: 0,
+        livraison: r[C.LIVRAISON - 1],
+        km: r[C.KM - 1],
+        coutLivraison: 0
       };
       order.push(key);
     }
@@ -375,6 +386,12 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered) {
     g.poissonKgTotal += cmdNumFromDisplay_(r[C.POISSON_KG - 1]);
     g.montantAr += cmdNumFromDisplay_(r[C.ARGENT_ALEVINS - 1]) +
                    cmdNumFromDisplay_(r[C.ARGENT_POISSON - 1]);
+    // Sum over the rows: legacy orders can carry a typed cost on any
+    // line. The display shows the sum; the edit writes line 1 only.
+    g.coutLivraison += cmdNumFromDisplay_(r[C.TRANSPORT - 1]) +
+                       cmdNumFromDisplay_(r[C.FRAIS - 1]);
+    if (!g.livraison && r[C.LIVRAISON - 1]) g.livraison = r[C.LIVRAISON - 1];
+    if (!g.km && r[C.KM - 1]) g.km = r[C.KM - 1];
     // Any row carrying fulfilment data represents the order's state.
     if (!g.paiement && r[C.PAIEMENT - 1]) g.paiement = r[C.PAIEMENT - 1];
     if (!g.dateLivraison && r[C.DATE_LIVRAISON - 1]) g.dateLivraison = r[C.DATE_LIVRAISON - 1];
@@ -757,6 +774,87 @@ function cmdUpdateOrderPrices(payload) {
   });
 
   return { changed: changed, totals: totals };
+}
+
+/***************************************************************
+ * LIVRAISON — edit the delivery choice and cost of an order
+ * (2026-09-07). Moves no fish, so like the price edit it stays
+ * possible after delivery; cancelled orders are refused. Writes
+ * AB (Livraison) + AC (Km) on every row of the order, and the cost
+ * into the FIRST row's J (Prix transport, alevins) or P (Frais
+ * additionnels, poisson) — the same cell the order form auto-fills
+ * at creation. K/Q are sheet formulas fed by those cells and
+ * recompute alone. A cost cell holding a formula is refused, never
+ * overwritten. An empty cost CLEARS the cell — switching back to
+ * Enlèvement must not leave a stale charge behind.
+ *
+ * payload = { rows, livraison, km, cout }
+ ***************************************************************/
+function cmdUpdateDelivery(payload) {
+  const f = payload || {};
+  const rows = (f.rows || []).map(Number);
+  if (!rows.length) throw new Error("Aucune ligne de commande.");
+
+  const livraison = String(f.livraison || "").trim();
+  if (["enlevement", "environs", "ambohim"].indexOf(livraison) < 0) {
+    throw new Error("Livraison invalide : " + livraison);
+  }
+  var km = cmdToNum(f.km);
+  if (livraison !== "ambohim") km = null;
+  if (livraison === "ambohim" && (km == null || km <= 0)) {
+    throw new Error("Km requis pour une livraison Ambohimangakely.");
+  }
+  const cout = cmdToNum(f.cout);   // null = clear the cell
+
+  const sh = cmdSheet();
+  const C = CMD_CFG.COL;
+  const lastRow = findNextCommandeRow(sh) - 1;
+  rows.forEach(function (r) {
+    if (!isFinite(r) || r < CMD_CFG.START_ROW || r > lastRow) {
+      throw new Error("Ligne " + r + " invalide.");
+    }
+    if (String(sh.getRange(r, C.ANNULE).getValue() || "").trim() !== "") {
+      throw new Error("Commande annulée — modification impossible.");
+    }
+  });
+
+  const first = rows[0];
+  const isAl = cmdToNum(sh.getRange(first, C.ALEVINS_NB).getValue()) != null;
+  const costCol = isAl ? C.TRANSPORT : C.FRAIS;
+  if (String(sh.getRange(first, costCol).getFormula() || "") !== "") {
+    throw new Error("La cellule du coût de livraison contient une formule — " +
+                    "modification refusée.");
+  }
+
+  rows.forEach(function (r) {
+    sh.getRange(r, C.LIVRAISON, 1, 2).setValues(
+      [[livraison, km == null ? "" : km]]);
+  });
+  sh.getRange(first, costCol).setValue(cout == null ? "" : cout);
+  SpreadsheetApp.flush();
+
+  // Read the money formula back: proof it recomputed, not a value
+  // this function calculated.
+  const montant = sh.getRange(first,
+    isAl ? C.ARGENT_ALEVINS : C.ARGENT_POISSON).getDisplayValue();
+  return { montant: "L" + first + " montant : " + montant };
+}
+
+/**
+ * RUN FROM EDITOR ONCE: tsaraentry -> CommandesServer.js -> cmdAddDeliveryHeaders
+ * Writes the appended headers on "2026": AB1 "Livraison", AC1 "Km".
+ * Touches blank cells only, so a re-run changes nothing.
+ */
+function cmdAddDeliveryHeaders() {
+  const sh = cmdSheet();
+  const C = CMD_CFG.COL;
+  if (!sh.getRange(1, C.LIVRAISON).getValue()) {
+    sh.getRange(1, C.LIVRAISON).setValue("Livraison").setFontWeight("bold");
+  }
+  if (!sh.getRange(1, C.KM).getValue()) {
+    sh.getRange(1, C.KM).setValue("Km").setFontWeight("bold");
+  }
+  Logger.log("En-têtes Livraison/Km en place sur " + CMD_CFG.SHEET + ".");
 }
 
 /** payload.lines = [{row, nombre, pm}] (alevins) or [{row, kg, pm}]. */

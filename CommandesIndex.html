@@ -2547,6 +2547,9 @@
       // facture is not sent: column C belongs to the AutoCommandes generator.
       bl: el('fBl').value,
       remarques: el('fRemarques').value,
+      livraison: (el('fLivraison') || {}).value || '',
+      km: ((el('fLivraison') || {}).value === 'ambohim')
+        ? num((el('fKm') || {}).value) : null,
       lines: lines.map(ln => {
         const o = { lot: ln.lot || '' };
         if (al) {
@@ -2789,6 +2792,13 @@
     if (o.prixKg && o.prixKg.length) prixParts.push(fmtPrix(o.prixKg) + ' Ar / kg');
     const prixTxt = prixParts.join(' · ');
     const montantTxt = Number(o.montantAr || 0).toLocaleString('fr-FR') + ' Ar';
+    const LIV_LABELS = { enlevement: 'Enlèvement à la ferme',
+                         environs: 'Livraison environs de la ferme',
+                         ambohim: 'Livraison Ambohimangakely' };
+    const livCode = String(o.livraison || '').trim();
+    const livTxt = (LIV_LABELS[livCode] || livCode || '—') +
+      (o.km ? ' · ' + o.km + ' km' : '') +
+      (o.coutLivraison ? ' · ' + fmtAr(o.coutLivraison) : '');
 
     el('fulForm').innerHTML =
       // The title bar closes the card: it is the only zone with no
@@ -2808,6 +2818,8 @@
           '<div>' +
             '<div style="font-size:18px;font-weight:600;padding:4px 0">' + esc(montantTxt) + '</div></div>' +
         '</div>' +
+        '<div class="muted" style="font-size:15px;padding-bottom:6px">' +
+          'Livraison : ' + esc(livTxt) + '</div>' +
         '<div class="row">' +
           '<div><label>Paiement reçu le</label><input type="date" id="uPaiement" value="'+esc(toISO(o.paiement))+'"></div>' +
           '<div><label>Date livraison</label><input type="date" id="uLivraison" value="'+esc(toISO(o.dateLivraison))+'"></div>' +
@@ -2940,7 +2952,22 @@
         setStatus('', '');
         modLines = lines;
         const qtyOn = !modDelivered;
+        const lv = String(o.livraison || '').trim() || 'enlevement';
         el('modZone').innerHTML =
+          '<div class="row" style="margin-top:8px">' +
+            '<div><label>Livraison</label>' +
+              '<select id="uModLiv" onchange="modLivChanged(true)">' +
+                '<option value="enlevement"' + (lv === 'enlevement' ? ' selected' : '') + '>Enl\u00e8vement \u00e0 la ferme</option>' +
+                '<option value="environs"' + (lv === 'environs' ? ' selected' : '') + '>Livraison environs de la ferme</option>' +
+                '<option value="ambohim"' + (lv === 'ambohim' ? ' selected' : '') + '>Livraison Ambohimangakely</option>' +
+              '</select></div>' +
+            '<div id="uModKmWrap" style="display:none"><label>Km depuis Ambohimangakely</label>' +
+              '<input type="text" inputmode="decimal" id="uModKm" oninput="modLivChanged(true)" value="' +
+              esc(String(o.km || '')) + '"></div>' +
+          '</div>' +
+          '<div style="max-width:260px"><label>Co\u00fbt livraison (Ar)</label>' +
+            '<input type="text" inputmode="decimal" id="uModCout" value="' +
+            (o.coutLivraison ? o.coutLivraison : '') + '"></div>' +
           lines.map((ln, i) =>
             '<div class="row" style="margin-top:8px">' +
               '<div style="align-self:center;font-weight:600;padding-top:14px">' +
@@ -2967,6 +2994,7 @@
             'sont modifiables.</div>') +
           '<button class="go" id="btnModSave" onclick="doModify()">' +
             'Enregistrer les modifications</button>';
+        modLivChanged();
       })
       .withFailureHandler(e => {
         el('btnMod').disabled = false;
@@ -2975,12 +3003,50 @@
       .cmdGetOrderLines(o.rows);
   }
 
+  /**
+   * Km visibility + cost recompute. On load (no argument) the stored
+   * cost is kept; a USER change of livraison or km rewrites the cost
+   * from the same km rule as the order form. The field stays editable.
+   */
+  function modLivChanged(fromUser) {
+    const liv = (el('uModLiv') || {}).value;
+    const w = el('uModKmWrap');
+    if (w) w.style.display = (liv === 'ambohim') ? '' : 'none';
+    if (fromUser) {
+      const amt = (liv === 'ambohim')
+        ? transportAmount(num((el('uModKm') || {}).value))
+        : null;
+      if (el('uModCout')) el('uModCout').value = (amt == null) ? '' : amt;
+    }
+  }
+
   function doModify() {
     if (!modLines.length) return;
     const btn = el('btnModSave');
     btn.disabled = true;
     setStatus('banner', 'Enregistrement\u2026');
+    const o = hits.filter(h => h.key === selectedKey)[0];
+    if (!o) { btn.disabled = false; return; }
+    // Delivery first. Its write is idempotent, so a refusal of prices
+    // or quantities later can be corrected and re-saved without the
+    // delivery fields drifting.
+    google.script.run
+      .withSuccessHandler(function (dres) { modSavePrices(dres, btn); })
+      .withFailureHandler(function (e) {
+        btn.disabled = false;
+        setStatusAndScroll('err', esc(e.message));
+      })
+      .cmdUpdateDelivery({
+        rows: o.rows,
+        livraison: (el('uModLiv') || {}).value,
+        km: (el('uModKm') || {}).value,
+        cout: (el('uModCout') || {}).value
+      });
+  }
 
+  /** Prices, then quantities — rules unchanged from before the
+   *  delivery stage was added. dres rides along into modDone. */
+  function modSavePrices(dres, btn) {
     // Empty price fields are NOT sent. cmdUpdateOrderPrices refuses an
     // empty price, so sending them would block a quantity-only edit on
     // a line whose price is not set yet.
@@ -2989,12 +3055,10 @@
       .filter(p => String(p.prix).trim() !== '');
 
     if (!modPrices.length) {
-      if (modDelivered) {
-        btn.disabled = false;
-        setStatusAndScroll('err', 'Aucun prix saisi.');
-        return;
-      }
-      modSaveQty(null, btn);
+      // Delivered + no prices typed: the delivery write above is the
+      // whole edit — a legitimate save, no longer an error.
+      if (modDelivered) { modDone(null, null, dres); return; }
+      modSaveQty(null, btn, dres);
       return;
     }
 
@@ -3002,8 +3066,8 @@
       .withSuccessHandler(pres => {
         // Delivered: the quantity fields were never rendered and the
         // server would refuse them. Stop here.
-        if (modDelivered) { modDone(pres, null); return; }
-        modSaveQty(pres, btn);
+        if (modDelivered) { modDone(pres, null, dres); return; }
+        modSaveQty(pres, btn, dres);
       })
       .withFailureHandler(e => {
         btn.disabled = false;
@@ -3012,8 +3076,8 @@
       .cmdUpdateOrderPrices({ lines: modPrices });
   }
 
-  /** Second call. pres is the price result, or null if none was sent. */
-  function modSaveQty(pres, btn) {
+  /** Quantity call. pres is the price result, or null if none was sent. */
+  function modSaveQty(pres, btn, dres) {
     const lines = modLines.map((ln, i) => {
       const q = el('modQ' + i).value;
       const p = el('modP' + i).value;
@@ -3022,7 +3086,7 @@
         : { row: ln.row, kg: q, pm: p };
     });
     google.script.run
-      .withSuccessHandler(res => modDone(pres, res))
+      .withSuccessHandler(res => modDone(pres, res, dres))
       .withFailureHandler(e => {
         btn.disabled = false;
         // If a price was already written, say so, or the next attempt
@@ -3040,8 +3104,9 @@
    * and needs Kim. changed/totals state what the price write did.
    * Nothing is swallowed into a generic "OK".
    */
-  function modDone(pres, res) {
+  function modDone(pres, res, dres) {
     const parts = []
+      .concat((dres && dres.montant) ? [dres.montant] : [])
       .concat((pres && pres.changed) || [])
       .concat((pres && pres.totals) || [])
       .concat((res && res.stock) || [])
