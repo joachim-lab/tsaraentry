@@ -935,12 +935,12 @@ function testCommandesServer() {
   Logger.log("Types: " + opts.types.join(" | "));
 
   Logger.log("--- 3 dernières commandes (groupées) ---");
-  cmdFindOrders("", false).slice(0, 3).forEach(o =>
+  cmdFindOrders("", false).orders.slice(0, 3).forEach(o =>
     Logger.log(o.orderNumber + " | " + o.client + " | lots: " + o.lots.join(", ") +
       " | lignes: " + o.rows.join(",") + " | payé: " + (o.paiement || "non")));
 
   Logger.log("--- commandes non soldées (max 3) ---");
-  cmdFindOrders("", true).slice(0, 3).forEach(o =>
+  cmdFindOrders("", true).orders.slice(0, 3).forEach(o =>
     Logger.log(o.orderNumber + " / " + o.client + " / lots: " + o.lots.join(", ") +
       " / lignes: " + o.rows.join(",")));
 
