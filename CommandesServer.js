@@ -3018,6 +3018,11 @@ function histList() {
 
   const n = lastRow - CMD_CFG.START_ROW + 1;
   const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.ANNULE).getDisplayValues();
+  // Raw date, not the display string: the sort must follow the real
+  // date in the cell, not the row it happens to sit on. Row order and
+  // date order usually agree (orders are appended as they happen) but
+  // are not the same thing, and a hand-typed backfill can break them.
+  const dateRaw = sh.getRange(CMD_CFG.START_ROW, C.DATE_CMD, n, 1).getValues();
 
   const groups = {};
   const order = [];
@@ -3027,6 +3032,8 @@ function histList() {
     const rowNum = CMD_CFG.START_ROW + i;
     const orderNo = String(r[C.ORDER_NO - 1] || "").trim();
     const key = orderNo || ("__row" + rowNum);
+    const rowDate = dateRaw[i][0];
+    const rowDateMs = (rowDate instanceof Date) ? rowDate.getTime() : 0;
 
     if (!groups[key]) {
       groups[key] = {
@@ -3034,6 +3041,7 @@ function histList() {
         key: key,
         client: r[C.CLIENT - 1],
         dateCommande: r[C.DATE_CMD - 1],
+        dateSortMs: rowDateMs,
         paiement: r[C.PAIEMENT - 1],
         dateLivraison: r[C.DATE_LIVRAISON - 1],
         facture: r[C.FACTURE - 1],
@@ -3054,6 +3062,7 @@ function histList() {
     if (!g.facture && r[C.FACTURE - 1]) g.facture = r[C.FACTURE - 1];
     if (!g.client && r[C.CLIENT - 1]) g.client = r[C.CLIENT - 1];
     if (!g.dateCommande && r[C.DATE_CMD - 1]) g.dateCommande = r[C.DATE_CMD - 1];
+    if (!g.dateSortMs && rowDateMs) g.dateSortMs = rowDateMs;
     if (!g.paiement && r[C.PAIEMENT - 1]) g.paiement = r[C.PAIEMENT - 1];
     if (!g.dateLivraison && r[C.DATE_LIVRAISON - 1]) g.dateLivraison = r[C.DATE_LIVRAISON - 1];
     if (!g.annule && String(r[C.ANNULE - 1] || "").trim()) {
@@ -3062,7 +3071,7 @@ function histList() {
   }
 
   const out = [];
-  for (var j = order.length - 1; j >= 0; j--) {     // newest first
+  for (var j = 0; j < order.length; j++) {
     const g = groups[order[j]];
     const delivered = String(g.dateLivraison || "").trim() !== "";
     const paid      = String(g.paiement || "").trim() !== "";
@@ -3073,6 +3082,8 @@ function histList() {
              : "Ouvert";
     out.push(g);
   }
+  // Most recent date on top, oldest at the bottom.
+  out.sort(function (a, b) { return b.dateSortMs - a.dateSortMs; });
   return { orders: out, annee: CMD_CFG.SHEET };
 }
 

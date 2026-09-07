@@ -2040,9 +2040,11 @@
 
   function renderHist() {
     el('paneHist').innerHTML =
-      '<div style="margin-bottom:10px">' +
+      '<div style="margin-bottom:10px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">' +
         '<input type="text" id="hSearch" placeholder="Filtrer : n° commande, client ou statut" ' +
-          'style="max-width:420px" oninput="drawHist()">' +
+          'style="max-width:420px;flex:1 1 260px" oninput="drawHist()">' +
+        '<label style="white-space:nowrap"><input type="checkbox" id="hAlevins" checked onchange="drawHist()"> Alevins</label>' +
+        '<label style="white-space:nowrap"><input type="checkbox" id="hPoisson" checked onchange="drawHist()"> Poisson</label>' +
       '</div>' +
       '<div id="histInfo" class="muted" style="margin-bottom:8px">Chargement…</div>' +
       '<div id="histTable"></div>';
@@ -2073,12 +2075,19 @@
 
   function drawHist() {
     const q = (el('hSearch') ? el('hSearch').value : '').trim().toLowerCase();
+    const showAlevins = el('hAlevins') ? el('hAlevins').checked : true;
+    const showPoisson = el('hPoisson') ? el('hPoisson').checked : true;
+    const typed = histRows.filter(function (o) {
+      const hasAlevins = Number(o.alevinsTotal || 0) > 0;
+      const hasPoisson = Number(o.poissonNbTotal || 0) > 0;
+      return (showAlevins && hasAlevins) || (showPoisson && hasPoisson);
+    });
     const rows = q
-      ? histRows.filter(function (o) {
+      ? typed.filter(function (o) {
           return (o.orderNumber + ' ' + o.client + ' ' + o.statut)
                  .toLowerCase().indexOf(q) !== -1;
         })
-      : histRows;
+      : typed;
 
     if (!rows.length) {
       el('histTable').innerHTML = '<div class="warn">Aucune commande.</div>';
