@@ -1244,8 +1244,8 @@
 
   /**
    * Type-dependent fields, mirroring Nouvelle commande exactly:
-   * Alevins - poids dropdown, Type de client, Livraison.
-   * Poisson - free grams, Qualité, no livraison.
+   * Alevins - poids dropdown, Type de client, Livraison + km.
+   * Poisson - free grams, Qualité, Livraison + km (Kim 2026-09-07).
    */
   function demTypeChanged() {
     var cur = null;
@@ -1280,14 +1280,28 @@
         '</select></label>';
 
     var liv = (cur && cur.livraison) ? cur.livraison : 'enlevement';
-    el('dLivWrap').innerHTML = al
-      ? '<label>Livraison<br><select id="dLiv" onchange="demRecalcPrix()">' +
-          '<option value="enlevement"' + (liv === 'enlevement' ? ' selected' : '') + '>Enlèvement à la ferme</option>' +
-          '<option value="environs"' + (liv === 'environs' ? ' selected' : '') + '>Livraison environs de la ferme</option>' +
-          '<option value="ambohim"' + (liv === 'ambohim' ? ' selected' : '') + '>Livraison Ambohimangakely</option>' +
-        '</select></label>'
-      : '';
+    var km = (cur && cur.km != null) ? cur.km : '';
+    el('dLivWrap').innerHTML =
+      '<label>Livraison<br><select id="dLiv" onchange="demLivChanged()">' +
+        '<option value="enlevement"' + (liv === 'enlevement' ? ' selected' : '') + '>Enlèvement à la ferme</option>' +
+        '<option value="environs"' + (liv === 'environs' ? ' selected' : '') + '>Livraison environs de la ferme</option>' +
+        '<option value="ambohim"' + (liv === 'ambohim' ? ' selected' : '') + '>Livraison Ambohimangakely</option>' +
+      '</select></label>' +
+      '<span id="dKmWrap" style="display:none;margin-left:10px">' +
+        '<label>Km depuis Ambohimangakely<br>' +
+        '<input id="dKm" type="number" min="0.1" step="any" value="' +
+        esc(String(km)) + '"></label></span>';
+    demLivChanged();
     if (al) demRecalcPrix(); else demKgChanged();
+  }
+
+  /** Show the km field only for Ambohimangakely; livraison moves the
+   *  alevin tarif column, so recompute the price too. */
+  function demLivChanged() {
+    var w = el('dKmWrap');
+    if (w) w.style.display =
+      (el('dLiv') && el('dLiv').value === 'ambohim') ? '' : 'none';
+    demRecalcPrix();
   }
 
   /** Poisson: the kg typed is the request; the fish COUNT is what
@@ -1420,6 +1434,7 @@
       poids: el('dPoids') ? el('dPoids').value : '',
       categorie: el('dCat') ? el('dCat').value : '',
       livraison: el('dLiv') ? el('dLiv').value : '',
+      km: el('dKm') ? el('dKm').value : '',
       prix: el('dPrix').value
     };
     // All fields mandatory except Commentaires. The server re-checks;
@@ -1434,6 +1449,7 @@
       missing.push('Nombre');
     }
     if (num(p.poids) === null || !(num(p.poids) > 0)) missing.push('Poids (g)');
+    if (p.livraison === 'ambohim' && !(num(p.km) > 0)) missing.push('Km');
     if (num(p.prix) === null || !(num(p.prix) > 0)) missing.push('Prix');
     if (missing.length) {
       setStatusAndScroll('err',
@@ -1527,10 +1543,11 @@
     el('fType').value = typeVal;
     if (wantAL) {
       if (el('fProvende')) el('fProvende').value = cur.categorie || 'avec';
-      if (el('fLivraison')) el('fLivraison').value = cur.livraison || 'enlevement';
     } else {
       if (el('fQualite')) el('fQualite').value = cur.categorie || 'detail';
     }
+    if (el('fLivraison')) el('fLivraison').value = cur.livraison || 'enlevement';
+    if (el('fKm')) el('fKm').value = (cur.km != null ? cur.km : '');
 
     var px = (cur.prix != null) ? cur.prix : '';
     if (plan.length) {
@@ -1651,7 +1668,10 @@
           (r.contact ? '<br><span class="muted">' + esc(r.contact) + '</span>' : '') +
         '</td>' +
         '<td style="padding:6px 8px">' + (r.kg == null ? '' : fmtNum(r.kg)) + '</td>' +
-        '<td style="padding:6px 8px">' + esc(r.qualite) + '</td>' +
+        '<td style="padding:6px 8px">' + esc(r.qualite) +
+          (r.livraison ? '<br><span class="muted">' + esc(r.livraison) +
+            (r.km != null ? ' \u00b7 ' + r.km + ' km' : '') + '</span>' : '') +
+        '</td>' +
         '<td style="padding:6px 8px">' + esc(r.debut) + ' → ' + esc(r.fin) + '</td>' +
         '<td style="padding:6px 8px">' +
           (r.actif ? '<b style="color:#188038">actif</b>' :
@@ -1677,6 +1697,7 @@
     if (recEdit && !cur) recEdit = 0;          // row vanished under us
 
     var qual = cur ? cur.qualite : 'gros';
+    var livr = (cur && cur.livraison) ? cur.livraison : 'enlevement';
     el('recForm').innerHTML =
       '<h3 style="margin:0 0 10px">' +
         (recEdit ? 'Modifier la commande récurrente' : 'Nouvelle commande récurrente') +
@@ -1695,6 +1716,16 @@
         '<option value="gros"' + (qual === 'gros' ? ' selected' : '') + '>Gros</option>' +
         '<option value="detail"' + (qual === 'detail' ? ' selected' : '') + '>Détail</option>' +
         '</select></label></div>' +
+      '<div style="margin-bottom:10px"><label>Livraison<br>' +
+        '<select id="rcLiv" onchange="recLivChanged()">' +
+        '<option value="enlevement"' + (livr === 'enlevement' ? ' selected' : '') + '>Enlèvement à la ferme</option>' +
+        '<option value="environs"' + (livr === 'environs' ? ' selected' : '') + '>Livraison environs de la ferme</option>' +
+        '<option value="ambohim"' + (livr === 'ambohim' ? ' selected' : '') + '>Livraison Ambohimangakely</option>' +
+        '</select></label></div>' +
+      '<div style="margin-bottom:10px;display:none" id="rcKmWrap">' +
+        '<label>Km depuis Ambohimangakely<br>' +
+        '<input id="rcKm" type="number" min="0.1" step="any" value="' +
+        (cur && cur.km != null ? cur.km : '') + '"></label></div>' +
       '<div style="margin-bottom:10px"><label>Première semaine (début)<br>' +
         '<input id="rcDebut" type="date" value="' +
         esc(cur ? cur.debut : todayISO()) + '"></label></div>' +
@@ -1714,6 +1745,14 @@
         esc(cur ? cur.remarques : '') + '"></label></div>' +
       '<button onclick="recSave()">' + (recEdit ? 'Enregistrer' : 'Ajouter') + '</button>' +
       (recEdit ? ' <button onclick="recCancelEdit()">Annuler</button>' : '');
+    recLivChanged();
+  }
+
+  /** Show the km field only for Ambohimangakely. */
+  function recLivChanged() {
+    var w = el('rcKmWrap');
+    if (w) w.style.display =
+      (el('rcLiv') && el('rcLiv').value === 'ambohim') ? '' : 'none';
   }
 
   function recStartEdit(row) {
@@ -1731,6 +1770,8 @@
       contact:   el('rcContact').value,
       kg:        el('rcKg').value,
       qualite:   el('rcQual').value,
+      livraison: el('rcLiv').value,
+      km:        el('rcKm') ? el('rcKm').value : '',
       debut:     el('rcDebut').value,
       fin:       el('rcFin').value,
       actif:     el('rcActif').checked,
@@ -1743,17 +1784,23 @@
       p.row = recEdit;
       p.seenClient = cur ? cur.client : '';
       google.script.run
-        .withSuccessHandler(function () {
+        .withSuccessHandler(function (r) {
           recEdit = 0;
-          setStatusAndScroll('ok', 'Commande récurrente modifiée.');
+          setStatusAndScroll('ok', 'Commande récurrente modifiée.' +
+            (r && r.generated
+              ? ' Pré-commande de cette semaine créée — onglet Pré-commandes, sous-onglet Poisson.'
+              : ''));
           loadRec();
         })
         .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
         .recUpdate(p);
     } else {
       google.script.run
-        .withSuccessHandler(function () {
-          setStatusAndScroll('ok', 'Commande récurrente ajoutée.');
+        .withSuccessHandler(function (r) {
+          setStatusAndScroll('ok', 'Commande récurrente ajoutée.' +
+            (r && r.generated
+              ? ' Pré-commande de cette semaine créée — onglet Pré-commandes, sous-onglet Poisson.'
+              : ''));
           loadRec();
         })
         .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
@@ -2005,9 +2052,11 @@
     const al = isAlevins();
     if (el('provendeWrap')) el('provendeWrap').style.display = al ? '' : 'none';
     if (el('qualiteWrap'))  el('qualiteWrap').style.display  = al ? 'none' : '';
-    // GR has no livraison logic at all: flat Detail/Gros price, frais
-    // additionnels typed by hand (Kim 2026-08-12). Hide the whole row.
-    if (el('livRow')) el('livRow').style.display = al ? '' : 'none';
+    // Livraison shows for BOTH types (Kim 2026-09-07, reversing
+    // 2026-08-12): AL prices the tarif column by livraison; GR gets
+    // the Ambohimangakely km transport auto-filled into Frais
+    // additionnels (editable).
+    if (el('livRow')) el('livRow').style.display = '';
 
     wrap.innerHTML = lines.map((ln, i) =>
       '<div class="card"><div class="lineHead"><h3>Lot ' + (i+1) + '</h3>' +
@@ -2429,18 +2478,19 @@
   }
 
   /**
-   * Transport: AL orders only, Ambohimangakely only, line 1 only (one
-   * delivery per order). Any other state CLEARS an auto-filled amount -
-   * switching back to Enlevement must not leave a stale charge behind.
-   * GR : frais additionnels is typed by hand, never auto.
+   * Transport: Ambohimangakely only, line 1 only (one delivery per
+   * order). AL writes Prix transport; GR writes Frais additionnels
+   * (Kim 2026-09-07, same km rule). Any other state CLEARS an
+   * auto-filled amount - switching back to Enlevement must not leave
+   * a stale charge behind. A hand-typed amount is user-owned and is
+   * never touched (setAuto ownership rules).
    */
   function recomputeTransport() {
-    if (!isAlevins()) return;
     const liv = (el('fLivraison') || {}).value;
     const amt = (liv === 'ambohim')
       ? transportAmount(num((el('fKm') || {}).value))
       : null;
-    setAuto(0, 'transport', amt);
+    setAuto(0, isAlevins() ? 'transport' : 'frais', amt);
   }
 
   /**

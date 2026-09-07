@@ -1165,15 +1165,22 @@ function cmdGrBounds() {
 }
 
 /**
- * Set the GR floor from the screen. Kim only: the floor refuses real
- * grossis orders, so a worker mis-tap must not move it. Blank = back
- * to the default (the property is deleted), same idiom as the price
- * field. 50-2000 g: outside that is a typo, not a decision.
+ * Set the GR floor from the screen. Farm team only (Kim 2026-09-07;
+ * was Kim-only): the floor refuses real grossis orders, so an unknown
+ * account must not move it. Blank = back to the default (the property
+ * is deleted), same idiom as the price field. 50-2000 g: outside that
+ * is a typo, not a decision.
  */
+var GR_FLOOR_EDITORS = [
+  "joachim@jdsresearch.com",
+  "hasina@jdsresearch.com",
+  "audry@jdsresearch.com",
+  "charles@jdsresearch.com"
+];
 function grSetBlock(v) {
-  const email = String(Session.getActiveUser().getEmail() || "");
-  if (email !== "joachim@jdsresearch.com") {
-    throw new Error("Seuil réservé à Kim — connecté : " + (email || "inconnu"));
+  const email = String(Session.getActiveUser().getEmail() || "").toLowerCase();
+  if (GR_FLOOR_EDITORS.indexOf(email) < 0) {
+    throw new Error("Seuil réservé à l'équipe ferme — connecté : " + (email || "inconnu"));
   }
   const p = PropertiesService.getScriptProperties();
   const raw = String(v == null ? "" : v).trim();
@@ -2056,7 +2063,7 @@ function demList() {
   const sh = demSheet();
   const lastRow = sh.getLastRow();
   if (lastRow < DEM_START) return [];
-  const vals = sh.getRange(DEM_START, 1, lastRow - DEM_START + 1, 11).getValues();
+  const vals = sh.getRange(DEM_START, 1, lastRow - DEM_START + 1, 12).getValues();
   const tz = Session.getScriptTimeZone();
   const out = [];
   for (var i = 0; i < vals.length; i++) {
@@ -2079,7 +2086,8 @@ function demList() {
       rang: cmdToNum(vals[i][7]),
       categorie: String(vals[i][8] == null ? "" : vals[i][8]).trim(),
       livraison: String(vals[i][9] == null ? "" : vals[i][9]).trim(),
-      prix: cmdToNum(vals[i][10])
+      prix: cmdToNum(vals[i][10]),
+      km: cmdToNum(vals[i][11])
     });
   }
   // Manual priority (column H) decides the queue, and the queue decides
@@ -2177,21 +2185,23 @@ function demClean(p) {
   }
 
   // The commercial choices behind the price. Alevins price the grid by
-  // provende and delivery; Poisson is flat Détail/Gros with no delivery
-  // choice - livraison is forced blank so a stale value cannot survive
-  // a type change.
+  // provende and delivery; Poisson is flat Détail/Gros, and its
+  // livraison + km feed the transport auto-fill at order time
+  // (Kim 2026-09-07, reversing 2026-08-12).
   const categorie = String(p && p.categorie != null ? p.categorie : "").trim();
   const catOk = (type === "Alevins") ? ["avec", "sans"] : ["detail", "gros"];
   if (catOk.indexOf(categorie) < 0) {
     throw new Error((type === "Alevins" ? "Type de client" : "Qualité") +
                     " invalide : " + categorie);
   }
-  var livraison = "";
-  if (type === "Alevins") {
-    livraison = String(p && p.livraison != null ? p.livraison : "").trim();
-    if (["enlevement", "environs", "ambohim"].indexOf(livraison) < 0) {
-      throw new Error("Livraison invalide : " + livraison);
-    }
+  const livraison = String(p && p.livraison != null ? p.livraison : "").trim();
+  if (["enlevement", "environs", "ambohim"].indexOf(livraison) < 0) {
+    throw new Error("Livraison invalide : " + livraison);
+  }
+  var km = cmdToNum(p && p.km);
+  if (livraison !== "ambohim") km = null;
+  if (livraison === "ambohim" && (km == null || km <= 0)) {
+    throw new Error("Km requis pour une livraison Ambohimangakely.");
   }
   const prix = cmdToNum(p.prix);
   if (prix == null || prix <= 0) throw new Error("Prix requis (Ar).");
@@ -2207,6 +2217,7 @@ function demClean(p) {
     poids: poids,
     categorie: categorie,
     livraison: livraison,
+    km: km,
     prix: prix
   };
 }
@@ -2232,9 +2243,10 @@ function demAdd(p) {
   // has been waiting. Kim re-ranks with the arrows when it is urgent.
   var rang = 0;
   demList().forEach(function (d) { if (d.rang != null && d.rang > rang) rang = d.rang; });
-  sh.getRange(row, 1, 1, 11).setValues(
+  sh.getRange(row, 1, 1, 12).setValues(
     [[c.date, c.client, c.contact, c.type, c.nombre, c.commentaires, c.poids,
-      rang + 1, c.categorie, c.livraison, c.prix]]);
+      rang + 1, c.categorie, c.livraison, c.prix,
+      c.km == null ? "" : c.km]]);
   return { row: row };
 }
 
@@ -2247,7 +2259,8 @@ function demUpdate(p) {
   // record, and an edit must not move the line in the queue.
   sh.getRange(row, 1, 1, 7).setValues(
     [[c.date, c.client, c.contact, c.type, c.nombre, c.commentaires, c.poids]]);
-  sh.getRange(row, 9, 1, 3).setValues([[c.categorie, c.livraison, c.prix]]);
+  sh.getRange(row, 9, 1, 4).setValues(
+    [[c.categorie, c.livraison, c.prix, c.km == null ? "" : c.km]]);
   return { row: row };
 }
 
@@ -2996,7 +3009,8 @@ const REC_MAIL_TO = "joachim@tilapia4food.com,charles@jdsresearch.com," +
                     "audry@jdsresearch.com,hasina@jdsresearch.com";
 
 const REC_HEADERS = ["Client", "Contact", "Kg", "Qualité", "Début", "Fin",
-                     "Actif", "Remarques", "Dernier PM", "Dernière génération"];
+                     "Actif", "Remarques", "Dernier PM", "Dernière génération",
+                     "Livraison", "Km"];
 
 function recSheet() {
   const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
@@ -3028,6 +3042,26 @@ function recEnsureSheet() {
   Logger.log('Onglet "' + REC_SHEET + '" créé en position ' + sh.getIndex() +
              " sur " + ss.getNumSheets() + ".");
   return sh.getIndex();
+}
+
+/**
+ * RUN FROM EDITOR ONCE: tsaraentry -> CommandesServer.js -> recAddLivraisonHeaders
+ * Writes the new delivery headers: Récurrentes K1 "Livraison", L1 "Km";
+ * Demandes L2 "Km" (row 2 = headers there). Touches blank cells only,
+ * so a re-run changes nothing.
+ */
+function recAddLivraisonHeaders() {
+  const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
+  const rec = ss.getSheetByName(REC_SHEET);
+  if (rec) {
+    if (!rec.getRange(1, 11).getValue()) rec.getRange(1, 11).setValue("Livraison").setFontWeight("bold");
+    if (!rec.getRange(1, 12).getValue()) rec.getRange(1, 12).setValue("Km").setFontWeight("bold");
+  }
+  const dem = ss.getSheetByName(DEM_SHEET);
+  if (dem) {
+    if (!dem.getRange(2, 12).getValue()) dem.getRange(2, 12).setValue("Km").setFontWeight("bold");
+  }
+  Logger.log("En-têtes Livraison/Km en place.");
 }
 
 /** Midnight local date, or null. Mirrors cmdParseDate. */
@@ -3069,7 +3103,7 @@ function recList() {
   const sh = recSheet();
   const lastRow = sh.getLastRow();
   if (lastRow < REC_START) return [];
-  const vals = sh.getRange(REC_START, 1, lastRow - REC_START + 1, 10).getValues();
+  const vals = sh.getRange(REC_START, 1, lastRow - REC_START + 1, 12).getValues();
   const out = [];
   for (var i = 0; i < vals.length; i++) {
     const client = String(vals[i][0] == null ? "" : vals[i][0]).trim();
@@ -3085,7 +3119,9 @@ function recList() {
       actif: String(vals[i][6] == null ? "" : vals[i][6]).trim() !== "",
       remarques: String(vals[i][7] == null ? "" : vals[i][7]).trim(),
       dernierPm: cmdToNum(vals[i][8]),
-      derniereGen: recIso(vals[i][9])
+      derniereGen: recIso(vals[i][9]),
+      livraison: String(vals[i][10] == null ? "" : vals[i][10]).trim(),
+      km: cmdToNum(vals[i][11])
     });
   }
   return out;
@@ -3109,6 +3145,16 @@ function recClean(p, excludeRow) {
 
   const qualite = String(p && p.qualite != null ? p.qualite : "").trim().toLowerCase();
   if (REC_QUALITES.indexOf(qualite) < 0) throw new Error("Qualité invalide : " + qualite);
+
+  const livraison = String(p && p.livraison != null ? p.livraison : "").trim();
+  if (["enlevement", "environs", "ambohim"].indexOf(livraison) < 0) {
+    throw new Error("Livraison invalide : " + livraison);
+  }
+  var km = cmdToNum(p && p.km);
+  if (livraison !== "ambohim") km = null;
+  if (livraison === "ambohim" && (km == null || km <= 0)) {
+    throw new Error("Km requis pour une livraison Ambohimangakely.");
+  }
 
   const debut = recParseDate(p && p.debut);
   if (!debut) throw new Error("Date de début requise.");
@@ -3136,6 +3182,7 @@ function recClean(p, excludeRow) {
 
   return {
     client: client, contact: contact, kg: kg, qualite: qualite,
+    livraison: livraison, km: km,
     debut: debut, fin: fin, actif: actif,
     remarques: String(p && p.remarques != null ? p.remarques : "").trim()
   };
@@ -3156,11 +3203,18 @@ function recAdd(p) {
   const sh = recSheet();
   const row = Math.max(sh.getLastRow() + 1, REC_START);
   // Columns I and J (dernier PM, dernière génération) belong to the
-  // generator alone and stay empty here.
+  // generator alone and stay empty here. K and L carry the delivery
+  // choice the generator copies into each pré-commande.
   sh.getRange(row, 1, 1, 8).setValues(
     [[c.client, c.contact, c.kg, c.qualite, c.debut, c.fin,
       c.actif ? "x" : "", c.remarques]]);
-  return { row: row };
+  sh.getRange(row, 11, 1, 2).setValues(
+    [[c.livraison, c.km == null ? "" : c.km]]);
+  // A rule saved after this Monday's 05h run must not lose its week:
+  // generate immediately when due. Idempotent by marker.
+  var gen = 0;
+  if (c.actif) { SpreadsheetApp.flush(); gen = recGenerateDue(new Date()); }
+  return { row: row, generated: gen };
 }
 
 function recUpdate(p) {
@@ -3171,7 +3225,13 @@ function recUpdate(p) {
   sh.getRange(row, 1, 1, 8).setValues(
     [[c.client, c.contact, c.kg, c.qualite, c.debut, c.fin,
       c.actif ? "x" : "", c.remarques]]);
-  return { row: row };
+  sh.getRange(row, 11, 1, 2).setValues(
+    [[c.livraison, c.km == null ? "" : c.km]]);
+  // Same catch-up as recAdd: an edit that (re)activates a due rule
+  // generates its week at once. Idempotent by marker.
+  var gen = 0;
+  if (c.actif) { SpreadsheetApp.flush(); gen = recGenerateDue(new Date()); }
+  return { row: row, generated: gen };
 }
 
 function recDelete(p) {
@@ -3227,13 +3287,19 @@ function recGrossisPm() {
 }
 
 /**
- * The rules due on `monday` that have not been generated for it yet.
- * Returns [{rule, marker}]. Pure read - used by the preview and by the
- * generator, so what the preview shows is what the generator writes.
+ * The rules due in the week of `ref` (any date) that have not been
+ * generated for that week yet. The marker week is the Monday of ref's
+ * week; a rule is due when [début, fin] OVERLAPS Monday..Sunday of
+ * that week, so no timing of rule creation can lose the first week.
+ * Returns [{rule, marker}]. Pure read - used by the preview, the
+ * Monday trigger and the save-time catch-up, so what the preview
+ * shows is what the generator writes.
  */
-function recDueRules(monday) {
+function recDueRules(ref) {
+  const monday = recMondayOf(ref);
   const mondayIso = recIso(monday);
-  const t = monday.getTime();
+  const weekEnd = new Date(monday.getFullYear(), monday.getMonth(),
+                           monday.getDate() + 6).getTime();
   const seen = {};
   demList().forEach(function (d) {
     const md = recMarkerDate(d.commentaires);
@@ -3246,7 +3312,7 @@ function recDueRules(monday) {
     if (rule.kg == null || rule.kg <= 0) return;
     const deb = recParseDate(rule.debut), fin = recParseDate(rule.fin);
     if (!deb || !fin) return;
-    if (t < deb.getTime() || t > fin.getTime()) return;
+    if (deb.getTime() > weekEnd || fin.getTime() < monday.getTime()) return;
     if (seen[rule.client.toLowerCase() + "|" + mondayIso]) return;
     out.push({ rule: rule, marker: recMarker(rule.kg, mondayIso) });
   });
@@ -3259,7 +3325,7 @@ function recDueRules(monday) {
  */
 function recPreviewWeekly() {
   const monday = recMondayOf(new Date());
-  const due = recDueRules(monday);
+  const due = recDueRules(new Date());
   const pm = recGrossisPm();
   Logger.log("Lundi de la semaine : " + recIso(monday));
   Logger.log("PM grossis pondéré  : " + (pm == null ? "AUCUN STOCK" : pm + " g"));
@@ -3275,14 +3341,17 @@ function recPreviewWeekly() {
 }
 
 /**
- * THE MONDAY JOB. Writes one pré-commande per due rule, places them at
- * the head of the queue, stamps the rules, then mails whatever is
- * overdue. Installed by installRecTrigger.
+ * Write one pré-commande per rule due at `ref`, place the new rows at
+ * the head of the queue, stamp the rules. Idempotent by weekly marker,
+ * so the Monday 05h trigger and the save-time catch-up (recAdd /
+ * recUpdate) share this one path (Kim 2026-09-07). Returns the number
+ * of rows written.
  */
-function recGenerateWeekly() {
-  const monday = recMondayOf(new Date());
+function recGenerateDue(ref) {
+  const monday = recMondayOf(ref);
   const mondayIso = recIso(monday);
-  const due = recDueRules(monday);
+  const due = recDueRules(ref);
+  var written = 0;
   Logger.log("Génération récurrentes — lundi " + mondayIso +
              " — " + due.length + " règle(s) due(s).");
 
@@ -3303,10 +3372,11 @@ function recGenerateWeekly() {
       // Column H (rang) is left blank so demList sorts this row last;
       // the reorder below puts it first. Column K (prix) is left blank
       // on purpose - the order form prices from Tarifs at order time.
-      sh.getRange(row, 1, 1, 11).setValues(
+      sh.getRange(row, 1, 1, 12).setValues(
         [[monday, d.rule.client, d.rule.contact, "Poisson", nombre,
           d.marker + (d.rule.remarques ? " — " + d.rule.remarques : ""),
-          use, "", d.rule.qualite, "", ""]]);
+          use, "", d.rule.qualite, d.rule.livraison || "", "",
+          d.rule.km == null ? "" : d.rule.km]]);
       newRows.push(row);
       // Stamp the rule: I = PM used, J = date generated.
       recSheet().getRange(d.rule.row, 9, 1, 2).setValues([[use, monday]]);
@@ -3327,9 +3397,18 @@ function recGenerateWeekly() {
       head.sort(function (a, b) { return newRows.indexOf(a.row) - newRows.indexOf(b.row); });
       demWriteRanks(head.concat(tail));
     }
+    written = newRows.length;
   }
+  return written;
+}
 
-  recMailOverdue(monday);
+/**
+ * THE MONDAY JOB. Generates what is due, then mails whatever is
+ * overdue. Installed by installRecTrigger.
+ */
+function recGenerateWeekly() {
+  recGenerateDue(new Date());
+  recMailOverdue(recMondayOf(new Date()));
 }
 
 /**
