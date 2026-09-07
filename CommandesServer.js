@@ -69,17 +69,32 @@ function cmdParseDate(isoStr) {
 }
 
 /**
- * First row after the last real order. Scans column A — getLastRow()
- * overshoots badly here (reports 2051 when real data ends at 180).
+ * First row after the last real order. getLastRow() overshoots badly
+ * here (reports 2051 when real data ends at 180), so the sheet is
+ * scanned for the last row that holds data.
+ *
+ * A row is DATA if lot (A), order number (B) or client (R) holds a
+ * value. Column A alone is NOT a safe test: the nightly engine blanks
+ * A when a lot key leaves the allowed list
+ * (tt_clearInvalidCommandesColumnA_ in TSARAENGINE), so an old
+ * cancelled row can sit with A empty while B and R still hold its
+ * identity. Keying on A alone made cmdCreateOrder overwrite such a
+ * row (GR-26-83, 2026-09-07): the new order inherited the old "x"
+ * in AA and vanished from every screen.
  */
 function findNextCommandeRow(sh) {
   const physical = sh.getLastRow();
   if (physical < CMD_CFG.START_ROW) return CMD_CFG.START_ROW;
-  const vals = sh.getRange(CMD_CFG.START_ROW, CMD_CFG.COL.LOT,
-    physical - CMD_CFG.START_ROW + 1, 1).getDisplayValues();
+  const C = CMD_CFG.COL;
+  const vals = sh.getRange(CMD_CFG.START_ROW, 1,
+    physical - CMD_CFG.START_ROW + 1, C.CLIENT).getDisplayValues();
   let lastData = CMD_CFG.START_ROW - 1;
   for (let i = 0; i < vals.length; i++) {
-    if (String(vals[i][0] || "").trim() !== "") lastData = CMD_CFG.START_ROW + i;
+    if (String(vals[i][C.LOT - 1] || "").trim() !== "" ||
+        String(vals[i][C.ORDER_NO - 1] || "").trim() !== "" ||
+        String(vals[i][C.CLIENT - 1] || "").trim() !== "") {
+      lastData = CMD_CFG.START_ROW + i;
+    }
   }
   return lastData + 1;
 }
