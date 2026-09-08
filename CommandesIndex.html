@@ -2960,6 +2960,20 @@
     return bits.length ? ' · ' + esc(bits.join(' + ')) : '';
   }
 
+  /** Unit price(s) of one order for the list row, e.g.
+   *  " · 500 Ar/alevin" or " · 500 Ar/alevin · 1 200 Ar/kg" when a
+   *  mixed order carries both. Same source and same join rule as
+   *  prixTxt in selectHit: more than one DISTINCT price in a category
+   *  means the order's rows disagree, and both are shown rather than
+   *  one being picked. */
+  function hitPrix(o) {
+    const fmt = a => (a || []).map(v => Number(v).toLocaleString('fr-FR')).join(' · ');
+    const parts = [];
+    if (o.prixAl && o.prixAl.length) parts.push(fmt(o.prixAl) + ' Ar/alevin');
+    if (o.prixKg && o.prixKg.length) parts.push(fmt(o.prixKg) + ' Ar/kg');
+    return parts.length ? ' · ' + esc(parts.join(' · ')) : '';
+  }
+
   /** "12 kg · 3 000 alevins · 1 500 000 Ar" for one category;
    *  '—' when it is empty. */
   function fmtTot(t) {
@@ -3001,7 +3015,7 @@
               '<div class="hit'+hitClass(o)+'" id="hit_'+esc(o.key)+'" data-key="'+esc(o.key)+'">' +
                 '<b>' + esc(o.orderNumber || '(sans numéro)') + '</b> · ' + esc(o.client) +
                 '<div class="muted">' + esc(o.dateCommande) + ' · lots : ' + esc(o.lots.join(', ') || '—') +
-                hitQty(o) +
+                hitQty(o) + hitPrix(o) +
                 (o.dateLivraison ? ' · livrée le ' + esc(o.dateLivraison) : ' · non livrée') +
                 (o.paiement ? ' · payée le ' + esc(o.paiement) : ' · non payée') +
                 ' · <b>' + fmtAr(o.montantAr) + '</b></div>' +
