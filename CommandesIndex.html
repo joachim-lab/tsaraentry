@@ -1392,7 +1392,10 @@
     el('demList').innerHTML = h + '</table></div>';
   }
 
-  let demPrixUser = false;   // the user typed the price; stop recomputing it
+  // A price is in the field and no tarif input has moved since. Any
+  // change of poids / nombre / categorie / livraison clears it, so the
+  // price always follows the grid (Kim 2026-09-08).
+  let demPrixUser = false;
 
   function drawDemForm() {
     var cur = null;
@@ -1418,7 +1421,7 @@
               ? Math.round(cur.nombre * cur.poids / 100) / 10 : '') + '"></label>' +
             '<div class="muted" id="dNbNote"></div></div>'
         : '<div style="margin-bottom:10px"><label>Nombre<br>' +
-            '<input id="dNombre" type="number" min="1" step="1" oninput="demRecalcPrix()" value="' +
+            '<input id="dNombre" type="number" min="1" step="1" oninput="demTarifChanged()" value="' +
             (cur && cur.nombre != null ? cur.nombre : '') + '"></label></div>') +
       '<div style="margin-bottom:10px" id="dPoidsWrap"></div>' +
       '<div style="margin-bottom:10px" id="dCatWrap"></div>' +
@@ -1454,7 +1457,7 @@
       DEM_POIDS_AL.forEach(function (v) {
         opts += '<option value="' + v + '"' + (poids === v ? ' selected' : '') + '>' + v + '</option>';
       });
-      w.innerHTML = '<label>Poids (g)<br><select id="dPoids" onchange="demRecalcPrix()">' + opts + '</select></label>';
+      w.innerHTML = '<label>Poids (g)<br><select id="dPoids" onchange="demTarifChanged()">' + opts + '</select></label>';
     } else {
       // 350 g is the usual table fish. The worker can change it; the
       // count then follows the same kg at the new weight.
@@ -1465,11 +1468,11 @@
 
     var cat = (cur && cur.categorie) ? cur.categorie : (al ? 'avec' : 'detail');
     el('dCatWrap').innerHTML = al
-      ? '<label>Type de client<br><select id="dCat" onchange="demRecalcPrix()">' +
+      ? '<label>Type de client<br><select id="dCat" onchange="demTarifChanged()">' +
           '<option value="avec"' + (cat === 'avec' ? ' selected' : '') + '>Client provende</option>' +
           '<option value="sans"' + (cat === 'sans' ? ' selected' : '') + '>Pas client provende</option>' +
         '</select></label>'
-      : '<label>Qualité<br><select id="dCat" onchange="demRecalcPrix()">' +
+      : '<label>Qualité<br><select id="dCat" onchange="demTarifChanged()">' +
           '<option value="detail"' + (cat === 'detail' ? ' selected' : '') + '>Détail</option>' +
           '<option value="gros"' + (cat === 'gros' ? ' selected' : '') + '>Gros</option>' +
         '</select></label>';
@@ -1486,17 +1489,31 @@
         '<label>Km depuis Ambohimangakely<br>' +
         '<input id="dKm" type="number" min="0.1" step="any" value="' +
         esc(String(km)) + '"></label></span>';
-    demLivChanged();
+    demKmVis();
     if (al) demRecalcPrix(); else demKgChanged();
   }
 
-  /** Show the km field only for Ambohimangakely; livraison moves the
-   *  alevin tarif column, so recompute the price too. */
-  function demLivChanged() {
+  /** Show the km field only for Ambohimangakely. No price work, so
+   *  drawing the form does not touch a stored price. */
+  function demKmVis() {
     var w = el('dKmWrap');
     if (w) w.style.display =
       (el('dLiv') && el('dLiv').value === 'ambohim') ? '' : 'none';
+  }
+
+  /** A tarif input moved: poids, nombre, type de client or livraison.
+   *  The price goes back to the grid, even a price typed by hand -
+   *  a stale price on a changed order is worse than a lost keystroke
+   *  (Kim 2026-09-08). Type the price again after the last input. */
+  function demTarifChanged() {
+    demPrixUser = false;
     demRecalcPrix();
+  }
+
+  /** Livraison moves the km field and the alevin tarif column. */
+  function demLivChanged() {
+    demKmVis();
+    demTarifChanged();
   }
 
   /** Poisson: the kg typed is the request; the fish COUNT is what
