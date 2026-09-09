@@ -44,7 +44,13 @@ const CMD_CFG = {
     // Delivery choice, appended 2026-09-07: AB + AC. The COST stays
     // where it always was: J (Prix transport, AL) / P (Frais
     // additionnels, GR) — plain values feeding the K/Q formulas.
-    LIVRAISON: 28, KM: 29
+    LIVRAISON: 28, KM: 29,
+    // AD, appended 2026-09-09: the moment the delivery confirmation was
+    // sent on WhatsApp. Its only job is to stop a second send, by any
+    // of the three senders and across a page reload. The engine reads
+    // columns 1..27 only, so nothing downstream sees this.
+    // Clear the cell to let the message be sent again.
+    WA_SENT: 30
   }
 };
 
@@ -153,6 +159,12 @@ function cmdCreateOrder(payload) {
 
   if (!f.type) throw new Error("Le type de commande est obligatoire.");
   if (!f.client) throw new Error("Le client est obligatoire.");
+  // The delivery confirmation carries the client's number to the team,
+  // so an order without one produces a message nobody can act on
+  // (Kim, 2026-09-09).
+  if (!String(f.contact || "").trim()) {
+    throw new Error("Le téléphone du client est obligatoire.");
+  }
   if (!lines.length) throw new Error("Ajouter au moins un lot à la commande.");
 
   const isAlevins = String(f.type).toUpperCase().indexOf("AL") === 0;
@@ -365,7 +377,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
   }
 
   const n = lastRow - CMD_CFG.START_ROW + 1;
-  const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.KM).getDisplayValues();
+  const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.WA_SENT).getDisplayValues();
   const q = String(query || "").trim().toLowerCase();
 
   const groups = {};
@@ -404,6 +416,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
         montantAr: 0,
         livraison: r[C.LIVRAISON - 1],
         km: r[C.KM - 1],
+        waSent: r[C.WA_SENT - 1],
         coutLivraison: 0
       };
       order.push(key);
@@ -432,6 +445,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
                        cmdNumFromDisplay_(r[C.FRAIS - 1]);
     if (!g.livraison && r[C.LIVRAISON - 1]) g.livraison = r[C.LIVRAISON - 1];
     if (!g.km && r[C.KM - 1]) g.km = r[C.KM - 1];
+    if (!g.waSent && r[C.WA_SENT - 1]) g.waSent = r[C.WA_SENT - 1];
     // Any row carrying fulfilment data represents the order's state.
     if (!g.paiement && r[C.PAIEMENT - 1]) g.paiement = r[C.PAIEMENT - 1];
     if (!g.dateLivraison && r[C.DATE_LIVRAISON - 1]) g.dateLivraison = r[C.DATE_LIVRAISON - 1];
@@ -526,6 +540,38 @@ function cmdRecordFulfilment(rows, payload) {
   const f = payload || {};
   const changed = [];
 
+  // GATE 1 (Kim, 2026-09-09) — MOYEN DE PAIEMENT IS MANDATORY.
+  // It is the agreed method (espece / mobile), known when the fish
+  // leaves, not a record that the money arrived. So it does NOT block a
+  // delivered-and-unpaid order: the payment DATE stays empty, only the
+  // method is required, and the livrees-et-non-payees list keeps working.
+  if (!String(f.moyenPaiement || "").trim()) {
+    throw new Error("Moyen de paiement obligatoire : espece ou mobile.");
+  }
+
+  // GATE 1b (Kim, 2026-09-09) — TÉLÉPHONE IS MANDATORY.
+  // The screen carries an editable Téléphone field for exactly this
+  // reason: an order recorded before this rule can be completed here
+  // instead of becoming unsaveable.
+  if (!String(f.contact || "").trim()) {
+    throw new Error("Téléphone du client obligatoire.");
+  }
+
+  // GATE 2 (Kim, 2026-09-09) — NO PAYMENT DATE WITHOUT A DELIVERY DATE.
+  // KNOWN CONSEQUENCE, accepted: a prepayment can no longer be recorded
+  // on its own. Money taken before delivery is entered on the save that
+  // records the delivery.
+  // Only a NEW payment date is refused. A row that already carries one
+  // (recorded before this rule) stays re-saveable, or setting its moyen
+  // de paiement would be impossible.
+  if (cmdParseDate(f.paiement) && !cmdParseDate(f.dateLivraison)) {
+    const firstRow = Math.min.apply(null, targets);
+    const already = sh.getRange(firstRow, C.PAIEMENT).getDisplayValue();
+    if (!String(already || "").trim()) {
+      throw new Error("Date de paiement impossible sans date de livraison.");
+    }
+  }
+
   targets.forEach(r => {
     function put(col, value, label) {
       if (value === undefined || value === null || value === "") return;
@@ -539,6 +585,7 @@ function cmdRecordFulfilment(rows, payload) {
     put(C.PAIEMENT, cmdParseDate(f.paiement), "Paiement reçu");
     put(C.DATE_LIVRAISON, cmdParseDate(f.dateLivraison), "Date livraison");
     put(C.MOYEN_PAIEMENT, f.moyenPaiement, "Moyen paiement");
+    put(C.CONTACT, f.contact, "Téléphone");
     // Invoice / delivery-note numbers usually arrive after the order is
     // placed, and apply to the whole order (Kim, 2026-08-11).
     put(C.FACTURE, f.facture, "N° facture");
@@ -554,19 +601,19 @@ function cmdRecordFulfilment(rows, payload) {
   // already carried a number, and opening it on this screen looked like
   // the click had invoiced it.
   //
-  // THE RULE IS PAYMENT, NOT DELIVERY. A number is minted only when the
-  // user records a payment date with the Enregistrer button. Opening an
-  // order, reading it and leaving writes nothing, because nothing but
-  // this button reaches this function.
+  // THE RULE IS DELIVERY (Kim, 2026-09-09). A number is minted on the
+  // save that records a Date livraison. The invoice belongs to the fish
+  // leaving the farm, not to the money arriving.
   //
-  // Both conditions are needed, and each for its own reason:
-  //   paiement      — the rule itself. No payment, no invoice.
-  //   dateLivraison — acFillFactureForRows skips any row with an empty
-  //                   col V, so without it the call would do nothing
-  //                   and the "généré" report would be a lie.
-  // A prepayment (paid, not yet delivered) is therefore NOT invoiced
-  // here. It stays listed as non-livrée and is invoiced on the save
-  // that records its delivery.
+  // This restores the pre-2026-08-30 trigger WITHOUT the fault that
+  // caused it to be dropped. Back then AutoCommandes minted from onEdit,
+  // so merely opening an order looked like the click had invoiced it.
+  // Nothing but the Enregistrer button reaches this function, so reading
+  // an order and leaving still writes nothing.
+  //
+  // One condition, and acFillFactureForRows needs exactly it: the
+  // library skips any row with an empty col V, so a delivered order is
+  // the only order it can invoice.
   //
   // Calls the library's own function, so the numbering rule lives in
   // one place. It skips any order that already holds a value in column
@@ -590,13 +637,11 @@ function cmdRecordFulfilment(rows, payload) {
   // this important must not depend on parsing a log line.
   const anyRow = Math.min.apply(null, targets);
 
-  if (!cmdParseDate(f.paiement) || !cmdParseDate(f.dateLivraison)) {
+  if (!cmdParseDate(f.dateLivraison)) {
     return {
       rows: targets, changed: changed, facture: null,
       factureNow: sh.getRange(anyRow, C.FACTURE).getDisplayValue() || null,
-      factureWhy: !cmdParseDate(f.paiement)
-        ? "la commande n'est pas encore payée"
-        : "la commande n'est pas encore livrée"
+      factureWhy: "la commande n'est pas encore livrée"
     };
   }
 
@@ -916,7 +961,10 @@ function cmdAddDeliveryHeaders() {
   if (!sh.getRange(1, C.KM).getValue()) {
     sh.getRange(1, C.KM).setValue("Km").setFontWeight("bold");
   }
-  Logger.log("En-têtes Livraison/Km en place sur " + CMD_CFG.SHEET + ".");
+  if (!sh.getRange(1, C.WA_SENT).getValue()) {
+    sh.getRange(1, C.WA_SENT).setValue("WhatsApp envoyé").setFontWeight("bold");
+  }
+  Logger.log("En-têtes Livraison/Km/WhatsApp en place sur " + CMD_CFG.SHEET + ".");
 }
 
 /** payload.lines = [{row, nombre, pm}] (alevins) or [{row, kg, pm}]. */
@@ -3952,4 +4000,160 @@ function crmDumpList() {
                "  " + r.type +
                "  achats=" + r.nb);
   });
+}
+
+
+/***************************************************************
+ * RAPPORT DE LIVRAISON WHATSAPP — ONE ORDER, ONE MESSAGE
+ *
+ * Called with the row numbers of the order that was just saved,
+ * never with a date. Keying on the rows and not on the delivery
+ * date is what keeps one message to one order: two orders that
+ * ship the same day produce two messages, each complete on its
+ * own, so a save made mid-morning can never emit a half report.
+ *
+ * Poisson and alevins both report. The heading and the quantity
+ * line follow what the order holds; a mixed order states both.
+ *
+ * Alevins are reported from column F (quantity ordered), the same
+ * figure the order cards on this screen show. Column H holds the
+ * +5% actually counted out.
+ *
+ * ROUNDING (Kim, 2026-09-09): kg and calibre are floored to a whole
+ * number. The team reads a figure it can weigh against, not a
+ * three-decimal one. Floor, never round: a report must not promise
+ * more fish than the order carries.
+ *
+ * Returns TEXT only. It does not send. No API can post into a
+ * WhatsApp group, so the text goes back to the browser and a
+ * human opens the WhatsApp app with the message ready.
+ */
+
+/**
+ * Whole-number form of a calibre cell. "356,25g" -> "356 g".
+ * A cell that is NOT one plain number (a range such as "200 a 250",
+ * or any text) is returned untouched: flooring it would invent a
+ * figure the sheet never held.
+ */
+function cmdCalibreEntier_(txt) {
+  const t = String(txt == null ? "" : txt).trim();
+  if (!/^\s*\d+([.,]\d+)?\s*g?\s*$/i.test(t)) return t;
+  return String(Math.floor(cmdNumFromDisplay_(t))) + " g";
+}
+
+function cmdWhatsappRapport(rows) {
+  if (!rows || !rows.length) return { text: "", count: 0 };
+  const sh = cmdSheet();
+  const C = CMD_CFG.COL;
+
+  const nums = rows.map(Number).filter(function (r) { return r >= CMD_CFG.START_ROW; });
+  if (!nums.length) return { text: "", count: 0 };
+  const first = Math.min.apply(null, nums);
+  const last = Math.max.apply(null, nums);
+
+  // One block read over the order's span, not a read per row.
+  const span = last - first + 1;
+  const vals = sh.getRange(first, 1, span, C.WA_SENT).getDisplayValues();
+  const liv = sh.getRange(first, C.DATE_LIVRAISON, span, 1).getValues();
+
+  const want = {};
+  for (let i = 0; i < nums.length; i++) want[nums[i]] = true;
+
+  let orderNo = "", client = "", contact = "", livraison = "", dateLiv = null;
+  let sent = "";
+  const pmPoisson = [], pmAlevins = [];
+  let kg = 0, alevins = 0;
+
+  for (let i = 0; i < span; i++) {
+    if (!want[first + i]) continue;
+    const r = vals[i];
+    if (String(r[C.ANNULE - 1] || "").trim()) continue;
+    if (!orderNo && r[C.ORDER_NO - 1]) orderNo = String(r[C.ORDER_NO - 1]).trim();
+    if (!client && r[C.CLIENT - 1]) client = String(r[C.CLIENT - 1]).trim();
+    if (!contact && r[C.CONTACT - 1]) contact = String(r[C.CONTACT - 1]).trim();
+    if (!livraison && r[C.LIVRAISON - 1]) livraison = String(r[C.LIVRAISON - 1]).trim();
+    if (!sent && r[C.WA_SENT - 1]) sent = String(r[C.WA_SENT - 1]).trim();
+    if (!dateLiv && liv[i][0] instanceof Date) dateLiv = liv[i][0];
+
+    const pp = cmdCalibreEntier_(r[C.POISSON_PM - 1]);
+    if (pp && pmPoisson.indexOf(pp) < 0) pmPoisson.push(pp);
+    const pa = cmdCalibreEntier_(r[C.ALEVINS_PM - 1]);
+    if (pa && pmAlevins.indexOf(pa) < 0) pmAlevins.push(pa);
+
+    kg += cmdNumFromDisplay_(r[C.POISSON_KG - 1]);
+    alevins += cmdNumFromDisplay_(r[C.ALEVINS_NB - 1]);
+  }
+
+  // Nothing to deliver: no report and, on screen, no card at all.
+  if (!kg && !alevins) return { text: "", count: 0, sent: "" };
+
+  const LIV_LABEL = {
+    enlevement: "Récupération à la ferme",
+    environs: "Livraison (environs)",
+    ambohim: "Livraison Ambohimangakely"
+  };
+
+  const both = kg > 0 && alevins > 0;
+  const objet = both ? "Poisson grossis + Alevins"
+                     : (kg > 0 ? "Poisson grossis" : "Alevins");
+
+  const qty = [];
+  if (kg) qty.push(String(Math.floor(kg)) + " kg");
+  if (alevins) qty.push(String(Math.floor(alevins)) + " alevins");
+
+  const dateTxt = dateLiv
+    ? Utilities.formatDate(dateLiv, Session.getScriptTimeZone(), "dd/MM/yy")
+    : "";
+
+  // An empty field drops its whole line. The blank lines around the
+  // body are built by the join below, so the filter cannot eat them.
+  const body = [
+    dateTxt ? "Date : " + dateTxt : "",
+    orderNo ? "Commande : " + orderNo : "",
+    client ? "Client : " + client : "",
+    contact ? "Téléphone : " + contact : "",
+    "Quantité : " + qty.join(" + "),
+    pmPoisson.length ? (both ? "Calibre poisson : " : "Calibre : ") + pmPoisson.join(" / ") : "",
+    pmAlevins.length ? (both ? "PM alevins : " : "PM : ") + pmAlevins.join(" / ") : "",
+    LIV_LABEL[livraison] || ""
+  ].filter(function (l) { return l !== ""; });
+
+  const text = "Bonjour,\n\nRapport de livraison " + objet + " :\n\n" +
+               body.join("\n") + "\n\nMerci";
+
+  return { text: text, count: 1, sent: sent };
+}
+
+
+/**
+ * Stamp column AD when the confirmation has been handed to WhatsApp.
+ * Written on every row of the order, so the order reads as sent
+ * whichever of its rows is looked at.
+ *
+ * The stamp is OPTIMISTIC: it records that the message was handed to
+ * the WhatsApp app, which is the last event this code can observe. If
+ * the sender then abandoned the message, clear AD on the order's rows
+ * and the box comes back.
+ *
+ * The header writes itself the first time, so the column needs no
+ * manual preparation.
+ */
+function cmdWhatsappMarkSent(rows) {
+  const sh = cmdSheet();
+  const C = CMD_CFG.COL;
+  const lastRow = findNextCommandeRow(sh) - 1;
+  const targets = (rows || []).map(Number).filter(function (r) {
+    return isFinite(r) && r >= CMD_CFG.START_ROW && r <= lastRow;
+  });
+  if (!targets.length) throw new Error("Aucune ligne de commande valide.");
+
+  if (!sh.getRange(1, C.WA_SENT).getValue()) {
+    sh.getRange(1, C.WA_SENT).setValue("WhatsApp envoyé").setFontWeight("bold");
+  }
+
+  const now = new Date();
+  targets.forEach(function (r) { sh.getRange(r, C.WA_SENT).setValue(now); });
+  SpreadsheetApp.flush();
+
+  return { sent: sh.getRange(targets[0], C.WA_SENT).getDisplayValue() };
 }

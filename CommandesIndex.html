@@ -2174,7 +2174,8 @@
         '</div>' +
         '<div class="row">' +
           '<div><label>Client</label><input type="text" id="fClient" list="dlClients" autocomplete="off" onchange="dlPickContact(\'fClient\',\'fContact\')"></div>' +
-          '<div><label>Contact</label><input type="text" id="fContact"></div>' +
+          '<div><label>Contact <span class="muted" style="font-weight:400">'
+            + '(obligatoire)</span></label><input type="text" id="fContact"></div>' +
         '</div>' +
         // No N° facture here, deliberately. AutoCommandes mints it when a
         // Date livraison is entered, and it SKIPS any order that already
@@ -2783,6 +2784,12 @@
   function doCreate() {
     dlDupWarn('fClient');
     stashLines();
+    // The delivery confirmation carries this number to the team. Checked
+    // here as well as on the server so the reason lands beside the field.
+    if (!el('fContact').value.trim()) {
+      setStatusAndScroll('err', 'Le téléphone du client est obligatoire.');
+      return;
+    }
     const btn = el('btnCreate');
     btn.disabled = true;
     setStatus('banner', 'Enregistrement…');
@@ -2871,6 +2878,166 @@
   }
 
   // ---------- MODE B: fulfilment ----------
+  /* ---------- Rapport livraison WhatsApp ----------
+   *
+   * ONE ORDER, ONE MESSAGE, AND IT LIVES WITH ITS ORDER
+   * (Kim, 2026-09-09). The box is drawn under the order's own summary
+   * line and is opened and closed BY the order box, not beside it:
+   * open the order and the message is there, close it and it goes,
+   * reopen it and it comes back with whatever was typed into it.
+   *
+   * WHAT DECIDES THE STATE — column AD (WA_SENT), read with the order:
+   *   not delivered      -> no box at all.
+   *   delivered, AD empty-> the editable message, ready to send.
+   *   delivered, AD set  -> "déjà envoyée", and no way to send twice.
+   *
+   * AD is in the sheet and not in this page, so the block survives a
+   * reload and holds across Charles, Audry and Hasina. Clearing the
+   * cell brings the box back.
+   *
+   * Remarks typed but not yet sent live in waDraft for as long as the
+   * page does. They are deliberately NOT written to the sheet: an
+   * unsent draft is not a fact about the delivery.
+   */
+  var waDraft = {};    // key -> text typed but not sent
+
+  /** Put the order box, then the whatsapp box, under one summary line. */
+  function fulAnchor(key) {
+    const card = el('hit_' + key);
+    if (!card || !card.parentNode) return;
+    card.parentNode.insertBefore(el('fulForm'), card.nextSibling);
+    card.parentNode.insertBefore(el('waZone'), el('fulForm').nextSibling);
+  }
+
+  /** Empty the box. The order's draft and its AD stamp are untouched. */
+  function waClose() {
+    const z = el('waZone');
+    if (z) z.innerHTML = '';
+  }
+
+  /** The one line an order that has already gone out is allowed to show. */
+  function waSentHtml(stamp) {
+    return '<div class="card"><div class="muted" style="font-size:15px">' +
+      '✓ Confirmation de livraison déjà envoyée par WhatsApp' +
+      (stamp ? ' — ' + esc(stamp) : '') + '</div></div>';
+  }
+
+  /**
+   * Draw the box for one order. Called when an order is opened and
+   * again after a save. `o` is the order from the hits list, so the
+   * AD stamp comes free with it and costs no server call.
+   */
+  function waShow(o) {
+    const zone = el('waZone');
+    if (!zone || !o) return;
+    waClose();
+
+    // Nothing shipped, nothing to announce.
+    if (!String(o.dateLivraison || '').trim()) return;
+
+    if (String(o.waSent || '').trim()) {
+      zone.innerHTML = waSentHtml(o.waSent);
+      return;
+    }
+
+    google.script.run
+      .withSuccessHandler(res => {
+        if (!res || !res.count) return;
+        // The sheet wins over this page: another sender may have gone
+        // first between the list being drawn and this call returning.
+        if (String(res.sent || '').trim()) {
+          o.waSent = res.sent;
+          zone.innerHTML = waSentHtml(res.sent);
+          return;
+        }
+        zone.innerHTML =
+          '<div class="card"><h3>Rapport de livraison — WhatsApp</h3>' +
+            '<label for="waText">Remarques / Instructions</label>' +
+            '<textarea id="waText" rows="14" ' +
+              'style="width:100%;box-sizing:border-box;font-size:15px"></textarea>' +
+            '<button class="go" onclick="waSend(\'' + esc(o.key) + '\')">' +
+              'Envoyer Whatsapp de livraison</button>' +
+          '</div>';
+        // A draft typed earlier in this page beats a freshly built text.
+        el('waText').value = (waDraft[o.key] != null) ? waDraft[o.key] : res.text;
+        el('waText').addEventListener('input', function () {
+          waDraft[o.key] = this.value;
+        });
+      })
+      .withFailureHandler(() => waClose())
+      .cmdWhatsappRapport(o.rows);
+  }
+
+  /**
+   * Hands the message to the WhatsApp APP, not to web.whatsapp.com.
+   * The whatsapp: scheme is what the desktop and the phone apps both
+   * register, so one link serves every sender. It carries NO phone
+   * number: the sender picks the chat, the team group included,
+   * because no API can post into a group.
+   *
+   * window.location, NOT an anchor. Spinner.html watches every <a>
+   * click and raises the "Traitement en cours..." overlay, which it
+   * deliberately never hides because a link is assumed to replace the
+   * page. A whatsapp: link hands off to the OS and the page stays, so
+   * that overlay would spin for ever. (Kim, 2026-09-09.)
+   *
+   * NOTHING IS WRITTEN HERE. This page cannot observe whether the
+   * message left WhatsApp, so it asks instead of assuming. An earlier
+   * version stamped column AD on this click and reported an abandoned
+   * message as sent.
+   */
+  function waSend(key) {
+    const box = el('waText');
+    if (!box) return;
+    const t = box.value.trim();
+    if (!t) { setStatus('err', 'Le rapport est vide.'); return; }
+    waDraft[key] = box.value;
+
+    window.location.href = 'whatsapp://send?text=' + encodeURIComponent(t);
+    waAskConfirm(key);
+  }
+
+  /** The only door to column AD: a person saying the message went out. */
+  function waAskConfirm(key) {
+    const zone = el('waZone');
+    if (!zone) return;
+    zone.innerHTML =
+      '<div class="card"><h3>Message envoyé ?</h3>' +
+        '<div class="muted" style="font-size:15px;padding-bottom:8px">' +
+          'WhatsApp a été ouvert. Répondez Oui seulement si le message est parti. ' +
+          'Le texte est conservé tant que vous ne confirmez pas.</div>' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
+          '<button class="go" onclick="waMarkSent(\'' + esc(key) + '\')">' +
+            'Oui, message envoyé</button>' +
+          '<button onclick="waBack(\'' + esc(key) + '\')" ' +
+            'style="margin-top:18px;background:#fff;color:#5f6368;' +
+            'border:1px solid #dadce0;border-radius:4px;padding:10px 14px;' +
+            'font-size:17px;cursor:pointer">Non, pas encore</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  /** Back to the editable message, with the draft intact. */
+  function waBack(key) {
+    const o = hits.filter(h => h.key === key)[0];
+    if (o) waShow(o);
+  }
+
+  function waMarkSent(key) {
+    const o = hits.filter(h => h.key === key)[0];
+    if (!o) return;
+    google.script.run
+      .withSuccessHandler(res => {
+        o.waSent = (res && res.sent) || 'envoyée';
+        delete waDraft[key];
+        const z = el('waZone');
+        if (z) z.innerHTML = waSentHtml(o.waSent);
+      })
+      .withFailureHandler(e => setStatus('err',
+        'Marquage impossible : ' + esc(e.message)))
+      .cmdWhatsappMarkSent(o.rows);
+  }
+
   function renderFul() {
     el('paneFul').innerHTML =
       '<div class="card"><h3>Trouver une commande</h3>' +
@@ -2895,6 +3062,7 @@
         '</div>' +
       '</div>' +
       '<div id="fulForm"></div>' +
+      '<div id="waZone"></div>' +
       '<div id="hits"></div>';
     el('ficherche').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
     el('fDeliveredUnpaid').addEventListener('change', () => doSearch());
@@ -2984,7 +3152,7 @@
     return bits.length ? bits.join(' · ') : '\u2014';
   }
 
-  function doSearch(keepMsg) {
+  function doSearch(keepMsg, done) {
     setStatus('banner', 'Recherche…');
     el('fulForm').innerHTML = '';
     selectedKey = null;
@@ -3010,6 +3178,14 @@
                   ? 'Commande livrée et payée.'
                   : res.closedMatches + ' commandes livrées et payées.')
               : 'Aucune commande trouvée.');
+        // hits is about to be rewritten and would take both boxes with
+        // it: they are moved INTO the list when an order is open. Park
+        // them back on the pane first. Clearing the whatsapp box here is
+        // also what removes it after a cancel, which re-runs the search.
+        waClose();
+        el('paneFul').appendChild(el('fulForm'));
+        el('paneFul').appendChild(el('waZone'));
+
         el('hits').innerHTML = hits.length
           ? hits.map(o =>
               '<div class="hit'+hitClass(o)+'" id="hit_'+esc(o.key)+'" data-key="'+esc(o.key)+'">' +
@@ -3021,6 +3197,9 @@
                 ' · <b>' + fmtAr(o.montantAr) + '</b></div>' +
               '</div>').join('')
           : '<div class="warn">' + esc(empty) + '</div>';
+        // Runs only once the list exists, so anything that anchors
+        // itself to a summary line finds one.
+        if (done) done();
       })
       .withFailureHandler(e => setStatus('err', esc(e.message)))
       .cmdFindOrders(el('ficherche').value,
@@ -3036,6 +3215,7 @@
     const wasKey = selectedKey;
     selectedKey = null;
     el('fulForm').innerHTML = '';
+    waClose();
     hits.forEach(o => {
       const n = el('hit_' + o.key);
       // className is REPLACED here too: without hitClass(o) the
@@ -3108,7 +3288,9 @@
           '<div><label>Paiement reçu le</label><input type="date" id="uPaiement" value="'+esc(toISO(o.paiement))+'"></div>' +
           '<div><label>Date livraison</label><input type="date" id="uLivraison" value="'+esc(toISO(o.dateLivraison))+'"></div>' +
         '</div>' +
-        '<label>Moyen de paiement</label><select id="uMoyen">' +
+        '<label>Téléphone <span class="muted" style="font-weight:400">(obligatoire)</span></label>' +
+        '<input type="text" id="uContact" value="'+esc(o.contact || '')+'">' +
+        '<label>Moyen de paiement <span class="muted" style="font-weight:400">(obligatoire)</span></label><select id="uMoyen">' +
           '<option value="">-- choisir --</option>' +
           '<option value="espèce"' + (mp === 'espèce' ? ' selected' : '') + '>espèce</option>' +
           '<option value="mobile"' + (mp === 'mobile' ? ' selected' : '') + '>mobile</option>' +
@@ -3149,6 +3331,25 @@
         '<div id="modZone"></div>' +
       '</div>';
 
+    // GATE (Kim, 2026-09-09): a payment date needs a delivery date.
+    // The field is locked rather than validated on save, so the rule is
+    // visible before the user types. The value is NEVER cleared: an
+    // order that already carries a payment date recorded before this
+    // rule must keep showing it.
+    function fulSyncPaiement() {
+      const on = String(el('uLivraison').value || '').trim() !== '';
+      el('uPaiement').disabled = !on;
+      el('uPaiement').style.background = on ? '' : '#f1f3f4';
+      el('uPaiement').title = on ? '' : "Renseignez d'abord la date de livraison.";
+    }
+    el('uLivraison').addEventListener('change', fulSyncPaiement);
+    el('uLivraison').addEventListener('input', fulSyncPaiement);
+    fulSyncPaiement();
+
+    // The message belongs to the order that is open, and to no other.
+    fulAnchor(key);
+    waShow(o);
+
     // The results list can be long; make sure the form is actually seen.
     const node = el('fulForm');
     if (node && node.scrollIntoView) node.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -3164,8 +3365,23 @@
   function doFulfil() {
     const o = hits.filter(h => h.key === selectedKey)[0];
     if (!o) return;
+    // Checked here as well as on the server: the user must see the
+    // reason beside the field, not as a failure of a save he thought
+    // had started.
+    if (!el('uContact').value.trim()) {
+      setStatusAndScroll('err', 'Téléphone du client obligatoire.');
+      return;
+    }
+    if (!el('uMoyen').value) {
+      setStatusAndScroll('err', 'Moyen de paiement obligatoire : espèce ou mobile.');
+      return;
+    }
+
     const btn = el('btnFul');
     btn.disabled = true;
+    const waDate = el('uLivraison').value;   // read now: the save clears the form
+    const waRows = o.rows;
+    const waKeyNow = o.key;
     setStatus('banner', 'Enregistrement…');
 
     google.script.run
@@ -3193,13 +3409,19 @@
                 esc(res.factureWhy || '')
               : 'Pas de numéro facture — ' + esc(res.factureWhy || ''));
 
-        doSearch({ cls: 'ok', html: line });
+        // Reopen the order that was just saved. The message is drawn by
+        // selectHit like any other opening, so there is ONE path that
+        // puts it on screen instead of two that can disagree.
+        doSearch({ cls: 'ok', html: line }, () => {
+          if (waDate && el('hit_' + waKeyNow)) selectHit(waKeyNow);
+        });
       })
       .withFailureHandler(e => { btn.disabled = false; setStatusAndScroll('err', esc(e.message)); })
       .cmdRecordFulfilment(o.rows, {
         paiement: el('uPaiement').value,
         dateLivraison: el('uLivraison').value,
         moyenPaiement: el('uMoyen').value,
+        contact: el('uContact').value,
         facture: el('uFacture').value,
         bl: el('uBl').value,
         remarques: el('uRemarques').value

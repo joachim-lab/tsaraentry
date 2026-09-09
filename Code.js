@@ -28,7 +28,13 @@ const CFG = {
   CONSO_KEY_COL: 3,        // C = lot key (write block C:F starts here)
   CONSO_TYPE_COL: 5,       // E = type provende (for reading the dropdown list)
   CONSO_F_COL: 6,          // F = qty given
-  CONSO_PCT_COL: 9         // I = % différence (formula copied from row above)
+  CONSO_PCT_COL: 9,        // I = % différence (formula copied from row above)
+
+  /* ---- Correction of an entry already saved ---- */
+  CONSO_DATE_COL: 4,       // D = date of the entry
+  CORR_WINDOW_DAYS: 1,     // 0 = today only, 1 = today and yesterday
+  CORR_SCAN_ROWS: 400,     // how far back to read when listing recent entries
+  CORR_LOG_SHEET: "Corrections"
 };
 
 /** Lot list for the dropdown, from Stock Poisson N3:N50 — same source actionsurstock uses. */
@@ -147,4 +153,200 @@ function testLibraryBinding() {
   const result = ConsoProvende.fillHForRows(2, 1);
   Logger.log("Library OK, fillHForRows returned: " + result);
   return "Library OK (processed " + result + " rows, as expected 0)";
+}
+
+
+/***************************************************************
+ * CORRECTION OF A SAVED ENTRY
+ *
+ * A worker who typed the wrong lot, feed type or quantity fixes
+ * the row in place. There is one row per feeding event before and
+ * after a correction, so every consumer of "Consommation provende"
+ * (projections, FCR, feed guards, monthly report) keeps working
+ * with no change.
+ *
+ * FOUR RULES, and the reason for each:
+ *
+ * 1. The date is NOT editable. The rows are in date order because
+ *    they are appended; changing a date would put a row out of
+ *    order without moving it.
+ *
+ * 2. Only today and yesterday (CORR_WINDOW_DAYS). Anything older
+ *    has already been read by the monthly report, the forecast
+ *    snapshot and the stock backup.
+ *
+ * 3. The row is identified by its number AND by a signature of its
+ *    own C:F values. If another worker appended a row in between,
+ *    or edited this one, the signature no longer matches and the
+ *    correction is refused instead of overwriting a stranger.
+ *
+ * 4. Column H (theoretical quantity) is refilled ONLY when the lot
+ *    changed. H belongs to the lot, and the library fills it from
+ *    TODAY's Stock Poisson value. Refilling it after a
+ *    quantity-only correction would silently replace the target
+ *    recorded on the day of the entry, and change column I for a
+ *    reason the worker never asked for.
+ *
+ * The operator identity comes from tracCurrentOperatorEmail() in
+ * TracabiliteServer.js — the project already has exactly one way
+ * to answer "who is this", and this screen uses it rather than
+ * declaring a second one.
+ ***************************************************************/
+
+/** yyyy-MM-dd for a cell date, in the sheet's own timezone (that is what the dates in D mean). */
+function corrDayKey_(value, tz) {
+  if (!(value instanceof Date)) return "";
+  return Utilities.formatDate(value, tz, "yyyy-MM-dd");
+}
+
+/** The days a correction is still allowed on, newest first. */
+function corrAllowedDays_(tz) {
+  const now = new Date();
+  const days = [];
+  for (let d = 0; d <= CFG.CORR_WINDOW_DAYS; d++) {
+    days.push(Utilities.formatDate(new Date(now.getTime() - d * 86400000), tz, "yyyy-MM-dd"));
+  }
+  return days;
+}
+
+/**
+ * Short fingerprint of one row's C:F values. Sent to the browser with
+ * the row, and checked again at write time: if it changed, the row is
+ * not the row the worker was looking at.
+ */
+function corrSignature_(vals) {
+  const parts = vals.map(function (v) {
+    if (v instanceof Date) return String(v.getTime());
+    return String(v === null || v === undefined ? "" : v);
+  });
+  const bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.MD5, parts.join(""), Utilities.Charset.UTF_8);
+  return bytes.slice(0, 6).map(function (b) {
+    return ("0" + (b & 0xff).toString(16)).slice(-2);
+  }).join("");
+}
+
+/** The audit tab. Created on first use; nothing else reads it. */
+function corrLogSheet_(ss) {
+  let sh = ss.getSheetByName(CFG.CORR_LOG_SHEET);
+  if (sh) return sh;
+  sh = ss.insertSheet(CFG.CORR_LOG_SHEET);
+  sh.appendRow(["Date/heure", "Opérateur", "Ligne", "Jour de la saisie",
+                "Ancien lot", "Ancien type", "Ancienne qté",
+                "Nouveau lot", "Nouveau type", "Nouvelle qté", "H recalculé"]);
+  sh.setFrozenRows(1);
+  return sh;
+}
+
+/**
+ * Entries still inside the correction window, newest first.
+ * Returns { days: [...], rows: [{ row, lot, date, type, qty, sig }] }.
+ */
+function corrListRecent() {
+  const ss = SpreadsheetApp.openById(CFG.NOURRISSAGE_SS_ID);
+  const sh = ss.getSheetByName(CFG.CONSO_SHEET);
+  if (!sh) throw new Error('Sheet not found: "' + CFG.CONSO_SHEET + '"');
+
+  const tz = ss.getSpreadsheetTimeZone() || Session.getScriptTimeZone();
+  const allowed = corrAllowedDays_(tz);
+
+  const lastRow = findNextConsoRow(sh) - 1;   // the app's one way to find the end of the data
+  if (lastRow < CFG.CONSO_START_ROW) return { days: allowed, rows: [] };
+
+  const first = Math.max(CFG.CONSO_START_ROW, lastRow - CFG.CORR_SCAN_ROWS + 1);
+  const block = sh.getRange(first, CFG.CONSO_KEY_COL, lastRow - first + 1, 4).getValues(); // C:F
+
+  const rows = [];
+  for (let i = block.length - 1; i >= 0; i--) {
+    const v = block[i];
+    const day = corrDayKey_(v[1], tz);
+    if (!day || allowed.indexOf(day) < 0) continue;
+    rows.push({
+      row: first + i,
+      lot: String(v[0]),
+      date: day,
+      type: String(v[2]),
+      qty: v[3],
+      sig: corrSignature_(v)
+    });
+  }
+  return { days: allowed, rows: rows };
+}
+
+/**
+ * Apply one correction.
+ * req: { row, sig, lot, type, qty } — lot/type/qty may be omitted to keep the current value.
+ * Returns { row, sig, hRefilled }.
+ */
+function corrApply(req) {
+  if (!req || !req.row || !req.sig) throw new Error("Requête incomplète.");
+  const row = Number(req.row);
+  if (!isFinite(row) || row < CFG.CONSO_START_ROW) throw new Error("Ligne invalide.");
+
+  const email = tracCurrentOperatorEmail();   // throws if the user is not identified
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) {
+    throw new Error("Le système est occupé. Réessayez dans un instant.");
+  }
+  try {
+    const ss = SpreadsheetApp.openById(CFG.NOURRISSAGE_SS_ID);
+    const sh = ss.getSheetByName(CFG.CONSO_SHEET);
+    if (!sh) throw new Error('Sheet not found: "' + CFG.CONSO_SHEET + '"');
+    const tz = ss.getSpreadsheetTimeZone() || Session.getScriptTimeZone();
+
+    const cur = sh.getRange(row, CFG.CONSO_KEY_COL, 1, 4).getValues()[0]; // C:F
+    if (corrSignature_(cur) !== String(req.sig)) {
+      throw new Error("Cette ligne a changé depuis l'affichage. Rechargez l'écran, puis recommencez.");
+    }
+
+    const day = corrDayKey_(cur[1], tz);
+    if (corrAllowedDays_(tz).indexOf(day) < 0) {
+      throw new Error("Cette saisie est trop ancienne pour être corrigée ici. Prévenez Kim.");
+    }
+
+    const blank = function (x) { return x === undefined || x === null || x === ""; };
+    const newLot  = blank(req.lot)  ? String(cur[0]) : String(req.lot);
+    const newType = blank(req.type) ? String(cur[2]) : String(req.type);
+    const newQty  = blank(req.qty)  ? Number(cur[3]) : Number(req.qty);
+
+    if (!isFinite(newQty) || newQty <= 0) {
+      throw new Error("La quantité doit être un nombre positif (reçu : " + req.qty + ").");
+    }
+    if (getLotList().map(String).indexOf(newLot) < 0) {
+      throw new Error("Lot inconnu : " + newLot);
+    }
+    if (getFeedTypes().map(String).indexOf(newType) < 0) {
+      throw new Error("Type de provende inconnu : " + newType);
+    }
+
+    const lotChanged = newLot !== String(cur[0]);
+    if (!lotChanged && newType === String(cur[2]) && newQty === Number(cur[3])) {
+      throw new Error("Rien n'a changé.");
+    }
+
+    // The audit tab is created BEFORE the write, so the one failure that
+    // would leave a correction unrecorded happens before anything moves.
+    const log = corrLogSheet_(ss);
+
+    sh.getRange(row, CFG.CONSO_KEY_COL).setValue(newLot);   // C
+    sh.getRange(row, CFG.CONSO_TYPE_COL).setValue(newType); // E
+    sh.getRange(row, CFG.CONSO_F_COL).setValue(newQty);     // F
+    SpreadsheetApp.flush();
+
+    let hRefilled = false;
+    if (lotChanged) {
+      ConsoProvende.fillHForRows(row, row);   // same code path as a manual sheet edit
+      hRefilled = true;
+    }
+
+    log.appendRow([new Date(), email, row, day,
+                   String(cur[0]), String(cur[2]), cur[3],
+                   newLot, newType, newQty, hRefilled ? "oui" : "non"]);
+
+    const after = sh.getRange(row, CFG.CONSO_KEY_COL, 1, 4).getValues()[0];
+    return { row: row, sig: corrSignature_(after), hRefilled: hRefilled };
+  } finally {
+    lock.releaseLock();
+  }
 }

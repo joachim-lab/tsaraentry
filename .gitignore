@@ -1,1 +1,3 @@
 patch_*.py
+.DS_Store
+*.bak-*

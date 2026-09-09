@@ -22,6 +22,12 @@
     .backlink { display:inline-block; margin-bottom:10px; font-size: 16px; color:#1a73e8; text-decoration:none; }
     .backlink:hover { text-decoration:underline; }
       input[readonly], textarea[readonly], select[disabled] { background: #f1f3f4; color: #5f6368; }
+    #corrPanel { display: none; margin-top: 28px; border-top: 2px solid #ddd; padding-top: 12px; }
+    #corrOpenBtn { background: #f1f3f4; color: #202124; border: 1px solid #ccc; border-radius: 4px; }
+    #corrForm { display: none; margin-top: 12px; background: #f8f9fa; padding: 12px; border-radius: 4px; }
+    #corrSaveBtn { background: #188038; color: white; border: none; border-radius: 4px; }
+    #corrCancelBtn { background: #f1f3f4; color: #202124; border: 1px solid #ccc; border-radius: 4px; }
+    #corrList a { color: #1a73e8; }
   </style>
   <?!= include('Theme'); ?>
   <?!= include('Spinner'); ?>
@@ -53,6 +59,32 @@
 
   <button id="submitBtn" onclick="submitAll()" disabled>Enregistrer (0)</button>
   <div id="loading">Enregistrement en cours...</div>
+
+  <button id="corrOpenBtn" onclick="corrOpen()">Corriger une saisie</button>
+
+  <div id="corrPanel">
+    <h1>Corriger une saisie</h1>
+    <p>Seules les saisies d'aujourd'hui et d'hier peuvent etre corrigees.
+       Pour une saisie plus ancienne, prevenez Kim.</p>
+    <div id="corrList"></div>
+
+    <div id="corrForm">
+      <label for="corrDate">Date (non modifiable)</label>
+      <input type="text" id="corrDate" readonly>
+
+      <label for="corrLot">Lot</label>
+      <select id="corrLot"></select>
+
+      <label for="corrType">Type provende</label>
+      <select id="corrType"></select>
+
+      <label for="corrQty">Quantite donnee (g)</label>
+      <input type="number" id="corrQty" min="1" step="1">
+
+      <button id="corrSaveBtn" onclick="corrSave()">Enregistrer la correction</button>
+      <button id="corrCancelBtn" onclick="corrCancel()">Annuler</button>
+    </div>
+  </div>
 
   <script>
 
@@ -141,6 +173,94 @@
           showMsg('err', e.message);
         })
         .submitNourrissage(pending);
+    }
+
+    /* ---------- Corriger une saisie deja enregistree ---------- */
+
+    let corrRows = [];
+    let corrSel = null;
+
+    function corrOpen() {
+      document.getElementById('corrPanel').style.display = 'block';
+      document.getElementById('corrOpenBtn').style.display = 'none';
+      corrLoad();
+    }
+
+    function corrLoad() {
+      corrSel = null;
+      document.getElementById('corrForm').style.display = 'none';
+      document.getElementById('corrList').innerHTML = 'Chargement...';
+      google.script.run
+        .withSuccessHandler(function (res) {
+          corrRows = (res && res.rows) || [];
+          corrRender();
+        })
+        .withFailureHandler(function (e) {
+          document.getElementById('corrList').innerHTML = '';
+          showMsg('err', e.message);
+        })
+        .corrListRecent();
+    }
+
+    function corrRender() {
+      const box = document.getElementById('corrList');
+      if (!corrRows.length) {
+        box.innerHTML = '<p>Aucune saisie corrigeable.</p>';
+        return;
+      }
+      box.innerHTML =
+        '<table><thead><tr><th>Lot</th><th>Date</th><th>Type</th><th>Qte (g)</th><th></th></tr></thead><tbody>' +
+        corrRows.map(function (r, i) {
+          return '<tr><td>' + r.lot + '</td><td>' + r.date + '</td><td>' + r.type + '</td><td>' + r.qty + '</td>' +
+                 '<td><a href="#" onclick="corrPick(' + i + ');return false;">Corriger</a></td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+
+    function corrPick(i) {
+      corrSel = corrRows[i];
+      if (!corrSel) return;
+      // Reuse the lists already loaded for the entry form - no extra server call.
+      document.getElementById('corrLot').innerHTML = document.getElementById('lot').innerHTML;
+      document.getElementById('corrType').innerHTML = document.getElementById('type').innerHTML;
+      document.getElementById('corrLot').value = corrSel.lot;
+      document.getElementById('corrType').value = corrSel.type;
+      document.getElementById('corrQty').value = corrSel.qty;
+      document.getElementById('corrDate').value = corrSel.date;
+      document.getElementById('corrForm').style.display = 'block';
+      hideMsg();
+    }
+
+    function corrCancel() {
+      corrSel = null;
+      document.getElementById('corrForm').style.display = 'none';
+    }
+
+    function corrSave() {
+      if (!corrSel) return;
+      const req = {
+        row: corrSel.row,
+        sig: corrSel.sig,
+        lot: document.getElementById('corrLot').value,
+        type: document.getElementById('corrType').value,
+        qty: document.getElementById('corrQty').value
+      };
+      if (!req.lot || !req.type || !req.qty || Number(req.qty) <= 0) {
+        showMsg('err', 'Merci de remplir tous les champs (quantite > 0).');
+        return;
+      }
+      document.getElementById('corrSaveBtn').disabled = true;
+      google.script.run
+        .withSuccessHandler(function (res) {
+          document.getElementById('corrSaveBtn').disabled = false;
+          showMsg('ok', 'Correction enregistree.' +
+            (res.hRefilled ? ' La quantite theorique (colonne H) a ete recalculee.' : ''));
+          corrLoad();
+        })
+        .withFailureHandler(function (e) {
+          document.getElementById('corrSaveBtn').disabled = false;
+          showMsg('err', e.message);
+        })
+        .corrApply(req);
     }
 
     function showMsg(cls, text) {
