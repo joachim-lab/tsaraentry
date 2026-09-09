@@ -1039,8 +1039,7 @@
           'style="background:#188038;color:#fff;border-color:#188038">' +
           'Actualiser le stock</button> ' +
         '<span id="demOrderBtns"></span>' +
-        '<span id="demPool" class="muted"></span>' +
-        '<span id="demFloorWrap" class="muted" style="float:right"></span></div>' +
+        '<span id="demPool" class="muted"></span></div>' +
       '<div id="demList">Chargement…</div>' +
       '<div id="demForm"></div>';
     demMarkSubtabs();
@@ -1109,22 +1108,6 @@
       if (f) f.innerHTML = floorFieldHtml('flr' + sfx);
     });
     demPoolLine();
-    demFloorPaint();
-  }
-
-  /**
-   * The floor field on the Pré-commandes bar. Saving re-runs the stock
-   * check so pool, verdicts and row colours follow at once. Empty
-   * field = back to the default (149 g). The server accepts the farm
-   * team and refuses anyone else (grSetBlock, 2026-09-07); the field
-   * does not hide, because a visible refusal beats an invisible rule.
-   */
-  function demFloorPaint() {
-    const z = el('demFloorWrap');
-    if (!z) return;
-    // Shown on both sub-tabs now: the bar states both pools, so the
-    // floor that qualifies the kg figure belongs beside it either way.
-    z.innerHTML = floorFieldHtml('dFloor');
   }
 
   /**
@@ -1136,7 +1119,7 @@
    * the old floor until the screen reloads — invisible and wrong.
    */
   function demFloorSave(inputId) {
-    const src = el(inputId || 'dFloor');
+    const src = el(inputId);
     const v = src ? src.value : '';
     setStatus('banner', 'Changement du seuil…');
     google.script.run
@@ -1199,7 +1182,6 @@
     demEdit = 0; demArmed = 0;
     demMarkSubtabs();
     demPoolLine();
-    demFloorPaint();
     drawDemList(); drawDemForm();
     setStatus('', '');
   }
@@ -3040,25 +3022,38 @@
 
   function renderFul() {
     el('paneFul').innerHTML =
-      '<div class="card"><h3>Trouver une commande</h3>' +
+      '<div class="card">' +
         '<div class="row">' +
           '<div><label>Recherche (n° commande, client ou lot)</label>' +
             '<input type="text" id="ficherche" placeholder="ex: AL-26-155 ou Adelaiade"></div>' +
           '<div style="flex:0 0 220px"><label>&nbsp;</label>' +
             '<button class="primary" style="width:100%" onclick="doSearch()">Rechercher</button></div>' +
         '</div>' +
-        '<label style="font-weight:normal"><input type="checkbox" id="fDeliveredUnpaid" checked style="width:auto"> ' +
-          'Commandes livrées et non-payées <span class="muted" id="fTotDeliveredUnpaid"></span></label>' +
-        '<label style="font-weight:normal"><input type="checkbox" id="fUndelivered" checked style="width:auto"> ' +
-          'Commandes non-livrées <span class="muted" id="fTotUndelivered"></span></label>' +
-        // Content filter, the same pair as Historique. It narrows the
-        // two boxes above by what the order holds, so it is a second
-        // axis and gets its own row rather than a third stacked line.
-        // No total beside it: the two totals above describe the whole
-        // category on purpose and do not move with these boxes.
-        '<div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:10px">' +
-          '<label class="chk"><input type="checkbox" id="fAlevins" checked>Alevins</label>' +
-          '<label class="chk"><input type="checkbox" id="fPoisson" checked>Poisson</label>' +
+        // Two columns, one block (Kim 2026-09-09). Left: the two
+        // status boxes, stacked, each with its total. Right, top: the
+        // content filter, the same pair as Historique. It narrows the
+        // status boxes by what the order holds, so it is a second axis;
+        // at the top right it costs no height. No total beside it: the
+        // two totals describe the whole category on purpose and do not
+        // move with these boxes. .chk is inline-flex, so the two status
+        // labels are set to display:flex to take a full line each. The
+        // row wraps only if the totals outgrow the left column.
+        '<div style="display:flex;gap:20px;flex-wrap:wrap;' +
+             'align-items:flex-start;margin-top:10px">' +
+          '<div style="flex:1 1 auto">' +
+            '<label class="chk" style="display:flex">' +
+              '<input type="checkbox" id="fDeliveredUnpaid" checked>' +
+              '<span>Commandes livrées et non-payées ' +
+                '<span class="muted" id="fTotDeliveredUnpaid"></span></span></label>' +
+            '<label class="chk" style="display:flex;margin-top:8px">' +
+              '<input type="checkbox" id="fUndelivered" checked>' +
+              '<span>Commandes non-livrées ' +
+                '<span class="muted" id="fTotUndelivered"></span></span></label>' +
+          '</div>' +
+          '<div style="display:flex;gap:16px;flex:0 0 auto">' +
+            '<label class="chk"><input type="checkbox" id="fAlevins" checked>Alevins</label>' +
+            '<label class="chk"><input type="checkbox" id="fPoisson" checked>Poisson</label>' +
+          '</div>' +
         '</div>' +
       '</div>' +
       '<div id="fulForm"></div>' +
