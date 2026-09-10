@@ -87,15 +87,31 @@
     }
     document.getElementById('date').value = todayISO();
 
+    // rows are sorted month desc, lot asc (mortsGetSummary) -- adjacent rows
+    // of the same month are one group, so a total prints when the month
+    // changes (or after the last row).
+    function summaryRowsHtml(rows) {
+      let html = '';
+      let monthTotal = 0;
+      rows.forEach(function (r, i) {
+        html += '<tr><td>' + esc(r.month.split('-').reverse().join('/')) + '</td><td>' +
+                esc(r.lot) + '</td><td>' + r.qty + '</td></tr>';
+        monthTotal += r.qty;
+        const isLastOfMonth = (i === rows.length - 1) || rows[i + 1].month !== r.month;
+        if (isLastOfMonth) {
+          html += '<tr style="font-weight:bold"><td>' + esc(r.month.split('-').reverse().join('/')) +
+                  '</td><td>Total</td><td>' + monthTotal + '</td></tr>';
+          monthTotal = 0;
+        }
+      });
+      return html;
+    }
+
     function loadSummary() {
       const body = document.getElementById('summaryBody');
       google.script.run
         .withSuccessHandler(function (rows) {
-          body.innerHTML = rows.length
-            ? rows.map(function (r) {
-                return '<tr><td>' + esc(r.month.split('-').reverse().join('/')) + '</td><td>' +
-                       esc(r.lot) + '</td><td>' + r.qty + '</td></tr>';
-              }).join('')
+          body.innerHTML = rows.length ? summaryRowsHtml(rows)
             : '<tr><td colspan="3">Aucune mortalité enregistrée.</td></tr>';
         })
         .withFailureHandler(function (e) {
