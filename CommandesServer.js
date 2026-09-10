@@ -391,7 +391,11 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
   }
 
   const n = lastRow - CMD_CFG.START_ROW + 1;
-  const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.REMISE).getDisplayValues();
+  const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.RECU).getDisplayValues();
+  // AF (remise %) is read RAW, never as display text. Display text
+  // follows the cell format: under a date format 50 reads "18/02/1900"
+  // and became a remise of 18 021 900 % (live test, 2026-09-10).
+  const remRaw = sh.getRange(CMD_CFG.START_ROW, C.REMISE, n, 1).getValues();
   const q = String(query || "").trim().toLowerCase();
 
   const groups = {};
@@ -432,7 +436,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
         km: r[C.KM - 1],
         waSent: r[C.WA_SENT - 1],
         reception: r[C.RECU - 1],
-        remise: cmdNumFromDisplay_(r[C.REMISE - 1]),
+        remise: cmdToNum(remRaw[i][0]) || 0,
         coutLivraison: 0
       };
       order.push(key);
@@ -463,7 +467,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
     if (!g.km && r[C.KM - 1]) g.km = r[C.KM - 1];
     if (!g.waSent && r[C.WA_SENT - 1]) g.waSent = r[C.WA_SENT - 1];
     if (!g.reception && r[C.RECU - 1]) g.reception = r[C.RECU - 1];
-    if (!g.remise) g.remise = cmdNumFromDisplay_(r[C.REMISE - 1]);
+    if (!g.remise) g.remise = cmdToNum(remRaw[i][0]) || 0;
     // Any row carrying fulfilment data represents the order's state.
     if (!g.paiement && r[C.PAIEMENT - 1]) g.paiement = r[C.PAIEMENT - 1];
     if (!g.dateLivraison && r[C.DATE_LIVRAISON - 1]) g.dateLivraison = r[C.DATE_LIVRAISON - 1];
@@ -1119,8 +1123,8 @@ function cmdOrderReceived(sh, rows) {
  * RUN FROM EDITOR ONCE, BEFORE ANY SCREEN USES THIS CODE:
  * tsaraentry -> CommandesServer.js -> cmdAddRecuHeaders
  * Adds columns AE/AF to "2026" if the tab is narrower, writes the
- * headers AE1 "Date réception" and AF1 "Remise %", and formats AE as a
- * date (the screen parses dd/mm/yyyy). A re-run changes nothing.
+ * headers AE1 "Date réception" and AF1 "Remise %", formats AE as a
+ * date (the screen parses dd/mm/yyyy) and AF as a number. Re-run safe.
  */
 function cmdAddRecuHeaders() {
   const sh = cmdSheet();
@@ -1134,6 +1138,10 @@ function cmdAddRecuHeaders() {
     sh.getRange(1, C.REMISE).setValue("Remise %").setFontWeight("bold");
   }
   sh.getRange(2, C.RECU, sh.getMaxRows() - 1, 1).setNumberFormat("dd/mm/yyyy");
+  // AF must be a NUMBER format: it was found carrying a date format,
+  // which shows a remise of 50 as 18/02/1900. The app reads AF raw, so
+  // this is for people reading the sheet. Re-run safe.
+  sh.getRange(2, C.REMISE, sh.getMaxRows() - 1, 1).setNumberFormat("0.0#");
   Logger.log("Colonnes: " + sh.getMaxColumns() + " | AE1=" +
              sh.getRange(1, C.RECU).getValue() + " | AF1=" +
              sh.getRange(1, C.REMISE).getValue());
