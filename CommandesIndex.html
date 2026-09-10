@@ -2917,6 +2917,10 @@
     // Nothing shipped, nothing to announce.
     if (!String(o.dateLivraison || '').trim()) return;
 
+    // Received (AE, Kim 2026-09-10): the delivery is over. No box at
+    // all, not even the "déjà envoyée" line.
+    if (String(o.reception || '').trim()) return;
+
     if (String(o.waSent || '').trim()) {
       zone.innerHTML = waSentHtml(o.waSent);
       return;
