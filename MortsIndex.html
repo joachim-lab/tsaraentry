@@ -60,6 +60,12 @@
   <button id="submitBtn" onclick="submitAll()" disabled>Enregistrer (0)</button>
   <div id="loading">Enregistrement en cours...</div>
 
+  <h2>Mortalité par mois</h2>
+  <table>
+    <thead><tr><th>Mois</th><th>Lot</th><th>Morts</th></tr></thead>
+    <tbody id="summaryBody"><tr><td colspan="3">Chargement...</td></tr></tbody>
+  </table>
+
   <script>
 
   google.script.run.withSuccessHandler(function (u) {
@@ -80,6 +86,24 @@
       return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
     }
     document.getElementById('date').value = todayISO();
+
+    function loadSummary() {
+      const body = document.getElementById('summaryBody');
+      google.script.run
+        .withSuccessHandler(function (rows) {
+          body.innerHTML = rows.length
+            ? rows.map(function (r) {
+                return '<tr><td>' + esc(r.month.split('-').reverse().join('/')) + '</td><td>' +
+                       esc(r.lot) + '</td><td>' + r.qty + '</td></tr>';
+              }).join('')
+            : '<tr><td colspan="3">Aucune mortalité enregistrée.</td></tr>';
+        })
+        .withFailureHandler(function (e) {
+          body.innerHTML = '<tr><td colspan="3">Erreur : ' + esc(e.message) + '</td></tr>';
+        })
+        .mortsGetSummary();
+    }
+    loadSummary();
 
     google.script.run.withSuccessHandler(function (o) {
       const sel = document.getElementById('lot');
@@ -186,6 +210,7 @@
         .withSuccessHandler(res => {
           document.getElementById('loading').style.display = 'none';
           const base = res.written + ' entrée(s) enregistrée(s).';
+          if (res.mailError) warns = warns.concat(["Email d'alerte non envoyé : " + esc(res.mailError)]);
           showMsg(warns.length ? 'warn' : 'ok', base + (warns.length
             ? '<br>Attention :<ul><li>' + warns.join('</li><li>') + '</li></ul>'
             : ''));
@@ -193,6 +218,7 @@
           AVAIL_CACHE = {};
           document.getElementById('avail').innerHTML = '';
           renderPending();
+          loadSummary();
         })
         .withFailureHandler(e => {
           document.getElementById('loading').style.display = 'none';

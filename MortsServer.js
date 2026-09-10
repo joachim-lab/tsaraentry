@@ -31,7 +31,8 @@ const MORTS_CFG = {
   SS_ID: CMD_CFG.SS_ID,   // Commandes spreadsheet — same file the engine reads
   SHEET: "Morts",
   START_ROW: 2,
-  COL: { LOT: 1, DATE: 2, QTY: 3, CAUSE: 4, LOG: 5, ERROR: 6 }
+  COL: { LOT: 1, DATE: 2, QTY: 3, CAUSE: 4, LOG: 5, ERROR: 6 },
+  MAIL_TO: "joachim@tilapia4food.com"
 };
 
 function mortsSheet() {
@@ -230,7 +231,55 @@ function mortsSubmit(entries) {
   sh.getRange(startRow, MORTS_CFG.COL.LOT, rows.length, 4).setValues(rows); // A:D
   const endRow = startRow + rows.length - 1;
 
-  return { written: rows.length, startRow: startRow, endRow: endRow };
+  // Rows are already saved. A mail failure must not look like a failed
+  // save (the user would enter the deaths twice), so it is returned.
+  var mailError = null;
+  try {
+    MailApp.sendEmail(MORTS_CFG.MAIL_TO,
+      "Tsara — mortalité saisie (" + rows.length + " entrée(s))",
+      "Nouvelle mortalité saisie dans TSARA Entry (onglet Morts, lignes " +
+      startRow + "-" + endRow + ").\n\n" +
+      rows.map(function (r, i) {
+        return "Lot " + r[0] + " | " + entries[i].date.split("-").reverse().join("/") +
+               " | " + r[2] + " poisson(s)" + (r[3] ? " | " + r[3] : "");
+      }).join("\n"));
+  } catch (e) {
+    mailError = String((e && e.message) || e);
+  }
+
+  return { written: rows.length, startRow: startRow, endRow: endRow, mailError: mailError };
+}
+
+/**
+ * Table for the Mortalité screen: dead fish per month and per lot.
+ * One read of A:C. The month is read in the spreadsheet time zone, so it
+ * is the month the sheet shows. Returns strings and numbers only.
+ * @return {Array} [{ month: "yyyy-MM", lot, qty }] newest month first, then lot
+ */
+function mortsGetSummary() {
+  const sh = mortsSheet();
+  const lastRow = findNextMortsRow(sh) - 1;
+  if (lastRow < MORTS_CFG.START_ROW) return [];
+
+  const tz = sh.getParent().getSpreadsheetTimeZone();
+  const data = sh.getRange(MORTS_CFG.START_ROW, 1, lastRow - MORTS_CFG.START_ROW + 1, 3).getValues();
+  const sums = {};
+  data.forEach(function (r) {
+    const lot = cmdCanonKey(r[0]);
+    const qty = cmdToNum(r[2]);
+    if (!lot || qty == null || qty <= 0) return;
+    if (Object.prototype.toString.call(r[1]) !== "[object Date]") return;
+    const k = Utilities.formatDate(r[1], tz, "yyyy-MM") + "|" + lot;
+    sums[k] = (sums[k] || 0) + qty;
+  });
+
+  return Object.keys(sums).map(function (k) {
+    const p = k.split("|");
+    return { month: p[0], lot: p[1], qty: sums[k] };
+  }).sort(function (a, b) {
+    if (a.month !== b.month) return a.month < b.month ? 1 : -1;
+    return a.lot.localeCompare(b.lot);
+  });
 }
 
 /** RUN FROM EDITOR: read-only checks of the Morts server side. */
