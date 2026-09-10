@@ -3211,6 +3211,8 @@
                 '<div class="muted">' + esc(o.dateCommande) + ' · lots : ' + esc(o.lots.join(', ') || '—') +
                 hitQty(o) + hitPrix(o) +
                 (o.dateLivraison ? ' · livrée le ' + esc(o.dateLivraison) : ' · non livrée') +
+                (o.reception ? ' · reçue le ' + esc(o.reception) : '') +
+                (Number(o.remise) > 0 ? ' · remise ' + esc(fmtNum(Number(o.remise))) + ' %' : '') +
                 (o.paiement ? ' · payée le ' + esc(o.paiement) : ' · non payée') +
                 ' · <b>' + fmtAr(o.montantAr) + '</b></div>' +
               '</div>').join('')
@@ -3273,7 +3275,12 @@
     if (o.prixAl && o.prixAl.length) prixParts.push(fmtPrix(o.prixAl) + ' Ar / alevin');
     if (o.prixKg && o.prixKg.length) prixParts.push(fmtPrix(o.prixKg) + ' Ar / kg');
     const prixTxt = prixParts.join(' · ');
-    const montantTxt = Number(o.montantAr || 0).toLocaleString('fr-FR') + ' Ar';
+    const montantTxt = Number(o.montantAr || 0).toLocaleString('fr-FR') + ' Ar' +
+      (Number(o.remise) > 0
+        ? ' (remise ' + Number(o.remise).toLocaleString('fr-FR') + ' % incluse)' : '');
+    // RECU (Kim, 2026-09-10): a received order is frozen. Only the
+    // payment can still be recorded; the server enforces the same rule.
+    const recu = String(o.reception || '').trim() !== '';
     const LIV_LABELS = { enlevement: 'Enlèvement à la ferme',
                          environs: 'Livraison environs de la ferme',
                          ambohim: 'Livraison Ambohimangakely' };
@@ -3302,9 +3309,18 @@
         '</div>' +
         '<div class="muted" style="font-size:15px;padding-bottom:6px">' +
           'Livraison : ' + esc(livTxt) + '</div>' +
+        (recu
+          ? '<div class="warn">Commande reçue par le client — elle ne peut plus ' +
+            'être modifiée. Seul le paiement peut être enregistré.</div>'
+          : '') +
+        // Read in the order of the steps: livraison, remise, réception, paiement.
         '<div class="row">' +
-          '<div><label>Paiement reçu le</label><input type="date" id="uPaiement" value="'+esc(toISO(o.paiement))+'"></div>' +
           '<div><label>Date livraison</label><input type="date" id="uLivraison" value="'+esc(toISO(o.dateLivraison))+'"></div>' +
+          '<div><label>Remise (%)</label><input type="text" inputmode="decimal" id="uRemise" value="'+(Number(o.remise) > 0 ? esc(String(o.remise)) : '')+'"></div>' +
+        '</div>' +
+        '<div class="row">' +
+          '<div><label>Reçue par le client le</label><input type="date" id="uReception" value="'+esc(toISO(o.reception))+'"></div>' +
+          '<div><label>Paiement reçu le</label><input type="date" id="uPaiement" value="'+esc(toISO(o.paiement))+'"></div>' +
         '</div>' +
         '<label>Téléphone <span class="muted" style="font-weight:400">(obligatoire)</span></label>' +
         '<input type="text" id="uContact" value="'+esc(o.contact || '')+'">' +
@@ -3330,12 +3346,13 @@
             'border:1px solid #dadce0;border-radius:4px;padding:10px 14px;' +
             'font-size:17px;cursor:pointer">Fermer</button>' +
         '</div>' +
-        // ALWAYS shown. A delivered order still allows a price change,
-        // so the button stays and loadModify() drops the quantity
-        // fields instead.
+        // HIDDEN once the order is received (Kim, 2026-09-10): nothing
+        // but the payment may change after that. Until then quantity,
+        // lot and price are all editable, delivered or not.
         // One row, Annuler to the right of Modifier. modZone stays
         // OUTSIDE the flex row: the edit form is a block, not a
         // third button sharing the line.
+        (recu ? '' :
         '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">' +
           '<button id="btnMod" onclick="loadModify()" ' +
             'style="background:#fff;color:#1a73e8;border:1px solid #1a73e8;' +
@@ -3345,23 +3362,36 @@
             'style="background:#fff;color:#c5221f;border:1px solid #c5221f;' +
             'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
             'Annuler la commande</button>' +
-        '</div>' +
+        '</div>') +
         '<div id="modZone"></div>' +
       '</div>';
 
-    // GATE (Kim, 2026-09-09): a payment date needs a delivery date.
-    // The field is locked rather than validated on save, so the rule is
-    // visible before the user types. The value is NEVER cleared: an
-    // order that already carries a payment date recorded before this
-    // rule must keep showing it.
-    function fulSyncPaiement() {
-      const on = String(el('uLivraison').value || '').trim() !== '';
-      el('uPaiement').disabled = !on;
-      el('uPaiement').style.background = on ? '' : '#f1f3f4';
-      el('uPaiement').title = on ? '' : "Renseignez d'abord la date de livraison.";
+    // GATES (Kim, 2026-09-10): livrée -> reçue -> payée.
+    // Réception and remise need a delivery date; paiement needs a
+    // réception date. On a received order livraison, réception and
+    // remise are read-only. Fields are locked rather than validated on
+    // save, so the rule is visible before the user types. Values are
+    // NEVER cleared: a disabled field still sends its value, so an order
+    // carrying a payment date recorded before these rules keeps it.
+    function fulLock(id, on, why) {
+      el(id).disabled = !on;
+      el(id).style.background = on ? '' : '#f1f3f4';
+      el(id).title = on ? '' : why;
     }
-    el('uLivraison').addEventListener('change', fulSyncPaiement);
-    el('uLivraison').addEventListener('input', fulSyncPaiement);
+    function fulSyncPaiement() {
+      const liv = String(el('uLivraison').value || '').trim() !== '';
+      const rec = String(el('uReception').value || '').trim() !== '';
+      const frozen = 'Commande reçue — seul le paiement est modifiable.';
+      const needLiv = "Renseignez d'abord la date de livraison.";
+      fulLock('uLivraison', !recu, frozen);
+      fulLock('uReception', !recu && liv, recu ? frozen : needLiv);
+      fulLock('uRemise', !recu && liv, recu ? frozen : needLiv);
+      fulLock('uPaiement', rec, "Renseignez d'abord la date de réception.");
+    }
+    ['uLivraison', 'uReception'].forEach(function (id) {
+      el(id).addEventListener('change', fulSyncPaiement);
+      el(id).addEventListener('input', fulSyncPaiement);
+    });
     fulSyncPaiement();
 
     // The message belongs to the order that is open, and to no other.
@@ -3438,6 +3468,8 @@
       .cmdRecordFulfilment(o.rows, {
         paiement: el('uPaiement').value,
         dateLivraison: el('uLivraison').value,
+        reception: el('uReception').value,
+        remise: el('uRemise').value,
         moyenPaiement: el('uMoyen').value,
         contact: el('uContact').value,
         facture: el('uFacture').value,
@@ -3468,7 +3500,15 @@
   function loadModify() {
     const o = hits.filter(h => h.key === selectedKey)[0];
     if (!o) return;
-    modDelivered = String(o.dateLivraison || '').trim() !== '';
+    // Kim, 2026-09-10: quantity, lot and price stay editable until the
+    // order is RECEIVED, no longer frozen at delivery. The Modifier
+    // button is hidden on a received order, so this form never opens on
+    // one. modDelivered is therefore always false and its price-only
+    // branches below are unreachable.
+    modDelivered = false;
+    // After delivery a changed fry number is the number RECEIVED and is
+    // taken from stock without the +5 % (server: cmdModifyOrder).
+    const livree = String(o.dateLivraison || '').trim() !== '';
     el('btnMod').disabled = true;
     setStatus('banner', 'Chargement\u2026');
     google.script.run
@@ -3510,7 +3550,9 @@
                   '</div>') +
               (!qtyOn ? '' :
                 (ln.isAlevins
-                  ? '<div><label>Nombre d\'alevins</label>' +
+                  ? '<div><label>Nombre d\'alevins' +
+                      (livree ? ' reçus <span class="muted" style="font-weight:400">(sans +5 %)</span>' : '') +
+                      '</label>' +
                       '<input type="text" inputmode="decimal" id="modQ' + i + '" value="' +
                       (ln.nombre == null ? '' : ln.nombre) + '"></div>'
                   : '<div><label>Poisson (kg)</label>' +

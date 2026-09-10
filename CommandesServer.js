@@ -14,7 +14,8 @@
  * same code path manual edits use. Library bound at HEAD.
  *
  * NEVER WRITTEN (formulas — the sheet owns these):
- *   K = (F*I)+J          argent alevins
+ *   K = (F*I)+J          argent alevins  (becomes (F*I*(1-AF/100))+J
+ *                        once a remise is saved — see cmdRemiseFormulas)
  *   N = (L*1000)/M       nombre poissons à livrer
  *   Q = (O*L)+P          argent poisson
  *   W = IF(V<>"";"x";"") livré
@@ -50,7 +51,12 @@ const CMD_CFG = {
     // of the three senders and across a page reload. The engine reads
     // columns 1..27 only, so nothing downstream sees this.
     // Clear the cell to let the message be sent again.
-    WA_SENT: 30
+    WA_SENT: 30,
+    // AE + AF, appended 2026-09-10 (Kim). AE = the date the client
+    // received the order: from that moment the order is frozen and only
+    // the payment can be recorded. AF = remise in percent (10 = 10 %),
+    // read by the K/Q formulas of rows that carry a remise.
+    RECU: 31, REMISE: 32
   }
 };
 
@@ -385,7 +391,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
   }
 
   const n = lastRow - CMD_CFG.START_ROW + 1;
-  const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.WA_SENT).getDisplayValues();
+  const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.REMISE).getDisplayValues();
   const q = String(query || "").trim().toLowerCase();
 
   const groups = {};
@@ -425,6 +431,8 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
         livraison: r[C.LIVRAISON - 1],
         km: r[C.KM - 1],
         waSent: r[C.WA_SENT - 1],
+        reception: r[C.RECU - 1],
+        remise: cmdNumFromDisplay_(r[C.REMISE - 1]),
         coutLivraison: 0
       };
       order.push(key);
@@ -454,6 +462,8 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
     if (!g.livraison && r[C.LIVRAISON - 1]) g.livraison = r[C.LIVRAISON - 1];
     if (!g.km && r[C.KM - 1]) g.km = r[C.KM - 1];
     if (!g.waSent && r[C.WA_SENT - 1]) g.waSent = r[C.WA_SENT - 1];
+    if (!g.reception && r[C.RECU - 1]) g.reception = r[C.RECU - 1];
+    if (!g.remise) g.remise = cmdNumFromDisplay_(r[C.REMISE - 1]);
     // Any row carrying fulfilment data represents the order's state.
     if (!g.paiement && r[C.PAIEMENT - 1]) g.paiement = r[C.PAIEMENT - 1];
     if (!g.dateLivraison && r[C.DATE_LIVRAISON - 1]) g.dateLivraison = r[C.DATE_LIVRAISON - 1];
@@ -540,7 +550,8 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
 
 /**
  * MODE B — record fulfilment across EVERY row of one order.
- * Only U / V / X are written; W (livré) is a formula driven by V.
+ * Writes U / V / X, AE (reçu) and AF (remise); W (livré) is a formula
+ * driven by V. A remise change also rewrites K and Q on its rows.
  * `rows` comes from cmdFindOrders, so the caller never guesses.
  * Returns { rows, changed: [...] }.
  */
@@ -573,19 +584,71 @@ function cmdRecordFulfilment(rows, payload) {
     throw new Error("Téléphone du client obligatoire.");
   }
 
-  // GATE 2 (Kim, 2026-09-09) — NO PAYMENT DATE WITHOUT A DELIVERY DATE.
-  // KNOWN CONSEQUENCE, accepted: a prepayment can no longer be recorded
-  // on its own. Money taken before delivery is entered on the save that
-  // records the delivery.
+  // GATE 2 (Kim, 2026-09-10) — THE ORDER MOVES livrée -> reçue -> payée.
+  //   No Date réception (AE) without a Date livraison (V).
+  //   No payment date (U) without a Date réception.
+  // KNOWN CONSEQUENCE, accepted: money handed over at delivery is
+  // entered on the save that records the reception.
   // Only a NEW payment date is refused. A row that already carries one
   // (recorded before this rule) stays re-saveable, or setting its moyen
   // de paiement would be impossible.
-  if (cmdParseDate(f.paiement) && !cmdParseDate(f.dateLivraison)) {
+  //
+  // RECEIVED = FROZEN. Once AE holds a date, V, AE and AF are no longer
+  // written here, and every other edit path (quantity, lot, price,
+  // delivery, cancel) refuses the order — see cmdOrderReceived.
+  // A wrong reception date is undone by clearing AE in the sheet.
+  const locked = cmdOrderReceived(sh, targets);
+  if (!locked && cmdParseDate(f.reception) && !cmdParseDate(f.dateLivraison)) {
+    throw new Error("Date de réception impossible sans date de livraison.");
+  }
+  if (cmdParseDate(f.paiement) && !locked && !cmdParseDate(f.reception)) {
     const firstRow = Math.min.apply(null, targets);
     const already = sh.getRange(firstRow, C.PAIEMENT).getDisplayValue();
     if (!String(already || "").trim()) {
-      throw new Error("Date de paiement impossible sans date de livraison.");
+      throw new Error("Date de paiement impossible sans date de réception.");
     }
+  }
+
+  // REMISE (Kim, 2026-09-10) — a percentage given when the delivery
+  // went wrong. Stored in AF on every row of the order. K and Q become
+  //   K = (F*I*(1-AF/100))+J        Q = (O*L*(1-AF/100))+P
+  // so the card, the list totals, Historique and the monthly CA report
+  // all read the net amount with no change of their own. A blank AF
+  // counts as 0. Formulas are rewritten ONLY on rows whose AF changes,
+  // and ONLY when K and Q hold the standard formula (plain or already
+  // discounted) or nothing: a hand-built amount is refused, never
+  // overwritten. Planned and checked here, before any write; written
+  // after the put loop below. The remise applies to the fish or fry
+  // price only, NEVER to J / P (transport) — Kim, 2026-09-10.
+  var remiseJob = null;
+  if (!locked) {
+    const remTxt = String(f.remise == null ? "" : f.remise).trim();
+    var rem = "";
+    if (remTxt !== "") {
+      rem = cmdToNum(remTxt);
+      if (rem == null || rem < 0 || rem > 100) {
+        throw new Error("Remise invalide : " + remTxt + " (de 0 à 100 %).");
+      }
+      if (rem > 0 && !cmdParseDate(f.dateLivraison)) {
+        throw new Error("Remise impossible sans date de livraison.");
+      }
+    }
+    const remRows = targets.filter(function (r) {
+      return String(sh.getRange(r, C.REMISE).getValue()) !== String(rem);
+    });
+    remRows.forEach(function (r) {
+      cmdRemiseFormulas(r).forEach(function (p) {
+        const cell = sh.getRange(r, p.col);
+        const fx = String(cell.getFormula() || "").replace(/\s/g, "").toUpperCase();
+        const ok = fx === p.plain || fx === p.remise ||
+                   (fx === "" && String(cell.getValue()) === "");
+        if (!ok) {
+          throw new Error("Ligne " + r + " : la cellule montant ne contient pas " +
+                          "la formule standard — remise refusée. Prévenir Kim.");
+        }
+      });
+    });
+    if (remRows.length) remiseJob = { rows: remRows, rem: rem };
   }
 
   targets.forEach(r => {
@@ -599,7 +662,10 @@ function cmdRecordFulfilment(rows, payload) {
     }
 
     put(C.PAIEMENT, cmdParseDate(f.paiement), "Paiement reçu");
-    put(C.DATE_LIVRAISON, cmdParseDate(f.dateLivraison), "Date livraison");
+    if (!locked) {
+      put(C.DATE_LIVRAISON, cmdParseDate(f.dateLivraison), "Date livraison");
+      put(C.RECU, cmdParseDate(f.reception), "Date réception");
+    }
     put(C.MOYEN_PAIEMENT, f.moyenPaiement, "Moyen paiement");
     put(C.CONTACT, f.contact, "Téléphone");
     // Invoice / delivery-note numbers usually arrive after the order is
@@ -609,6 +675,19 @@ function cmdRecordFulfilment(rows, payload) {
     put(C.REMARQUES, f.remarques, "Remarques");
   });
 
+  if (remiseJob) {
+    remiseJob.rows.forEach(function (r) {
+      const cell = sh.getRange(r, C.REMISE);
+      const before = cell.getDisplayValue();
+      cell.setValue(remiseJob.rem);
+      changed.push("L" + r + " Remise %: " + (before || "(vide)") + " -> " +
+                   (remiseJob.rem === "" ? "(vide)" : remiseJob.rem));
+      cmdRemiseFormulas(r).forEach(function (p) {
+        sh.getRange(r, p.col).setFormula(p.remise);
+      });
+    });
+  }
+
   SpreadsheetApp.flush();
 
   // Mint the invoice number. THIS IS THE ONLY PLACE IT HAPPENS
@@ -617,9 +696,10 @@ function cmdRecordFulfilment(rows, payload) {
   // already carried a number, and opening it on this screen looked like
   // the click had invoiced it.
   //
-  // THE RULE IS DELIVERY (Kim, 2026-09-09). A number is minted on the
-  // save that records a Date livraison. The invoice belongs to the fish
-  // leaving the farm, not to the money arriving.
+  // THE RULE IS RECEPTION (Kim, 2026-09-10; was delivery since
+  // 2026-09-09). A number is minted on the save that records a Date
+  // réception (AE). Quantity, price and remise can change until then,
+  // so an earlier number could sit on an amount that later moves.
   //
   // This restores the pre-2026-08-30 trigger WITHOUT the fault that
   // caused it to be dropped. Back then AutoCommandes minted from onEdit,
@@ -653,11 +733,15 @@ function cmdRecordFulfilment(rows, payload) {
   // this important must not depend on parsing a log line.
   const anyRow = Math.min.apply(null, targets);
 
-  if (!cmdParseDate(f.dateLivraison)) {
+  // Read from the SHEET after the flush, not from the payload: it covers
+  // the save that writes AE and an order received on an earlier save.
+  // The library still needs col V; a reception date cannot exist
+  // without one (GATE 2), so every received order qualifies.
+  if (!cmdOrderReceived(sh, targets)) {
     return {
       rows: targets, changed: changed, facture: null,
       factureNow: sh.getRange(anyRow, C.FACTURE).getDisplayValue() || null,
-      factureWhy: "la commande n'est pas encore livrée"
+      factureWhy: "la commande n'est pas encore reçue"
     };
   }
 
@@ -720,6 +804,10 @@ function cmdCancelOrder(rows) {
   });
   if (!targets.length) throw new Error("Aucune ligne de commande valide \u00e0 annuler.");
 
+  if (cmdOrderReceived(sh, targets)) {
+    throw new Error("Commande reçue par le client — annulation impossible.");
+  }
+
   const already = [];
   targets.forEach(function (r) {
     if (String(sh.getRange(r, C.ANNULE).getDisplayValue() || "").trim() !== "") {
@@ -745,13 +833,16 @@ function cmdCancelOrder(rows) {
  * Q3 =(O3*L3)+P3, W3 =IF(V3<>"";"x";"")), so the totals recompute
  * on their own. Writing K or Q would kill the formula for good.
  *
- * GATE: every row must have V (Date livraison) empty and AA empty.
- * Delivered or cancelled orders are refused.
+ * GATE: no row may carry AE (Date réception) or AA. Received or
+ * cancelled orders are refused (the gate was V until 2026-09-10).
  *
  * H IS REWRITTEN. Alevins "à livrer" (H) is a typed value, not a
- * formula; the browser seeds it as round(F*1.05) at order time. On
- * modify it is ALWAYS reset to round(newF*1.05) — a manual H
- * override typed at order time does not survive a modify. One rule.
+ * formula; the browser seeds it as round(F*1.05) at order time.
+ *   Not delivered (V empty): H = round(newF*1.05) on every modify — a
+ *     manual H override typed at order time does not survive a modify.
+ *   Delivered (V set), Kim 2026-09-10: a CHANGED F is the number of
+ *     fry the client received, so H = newF, without the +5 %. An
+ *     unchanged F (PM-only edit) keeps H as it is.
  *
  * STOCK, at click time, not at night:
  *   Y empty        -> nothing to correct. The engine deducts the NEW
@@ -852,6 +943,10 @@ function cmdUpdateOrderPrices(payload) {
   const C = CMD_CFG.COL;
   const lastRow = findNextCommandeRow(sh) - 1;
 
+  if (cmdOrderReceived(sh, lines.map(function (ln) { return ln.row; }))) {
+    throw new Error("Commande reçue par le client — modification impossible.");
+  }
+
   // ---- read, gate, plan. Nothing is written until every line passes.
   const jobs = [];
   lines.forEach(function (ln) {
@@ -941,6 +1036,10 @@ function cmdUpdateDelivery(payload) {
     }
   });
 
+  if (cmdOrderReceived(sh, rows)) {
+    throw new Error("Commande reçue par le client — modification impossible.");
+  }
+
   const first = rows[0];
   const isAl = cmdToNum(sh.getRange(first, C.ALEVINS_NB).getValue()) != null;
   const costCol = isAl ? C.TRANSPORT : C.FRAIS;
@@ -983,6 +1082,63 @@ function cmdAddDeliveryHeaders() {
   Logger.log("En-têtes Livraison/Km/WhatsApp en place sur " + CMD_CFG.SHEET + ".");
 }
 
+/**
+ * The two money formulas of row r, plain and with a remise. ONE source
+ * for the guard and the write in cmdRecordFulfilment. The remise
+ * multiplies the fish / fry price only; transport (J / P) is added
+ * after it. FRENCH locale: no argument separator in any of them.
+ * Upper case, no spaces: compared against a normalised getFormula().
+ */
+function cmdRemiseFormulas(r) {
+  const C = CMD_CFG.COL;
+  return [
+    { col: C.ARGENT_ALEVINS,
+      plain:  "=(F" + r + "*I" + r + ")+J" + r,
+      remise: "=(F" + r + "*I" + r + "*(1-AF" + r + "/100))+J" + r },
+    { col: C.ARGENT_POISSON,
+      plain:  "=(O" + r + "*L" + r + ")+P" + r,
+      remise: "=(O" + r + "*L" + r + "*(1-AF" + r + "/100))+P" + r }
+  ];
+}
+
+/**
+ * RECU (Kim, 2026-09-10). True when any row of the order carries a
+ * Date réception (AE). From that moment the order is frozen: no
+ * quantity, lot, price, delivery, remise or cancellation change.
+ * Only the payment can still be recorded (cmdRecordFulfilment).
+ * A wrong reception date is undone by clearing AE in the sheet.
+ */
+function cmdOrderReceived(sh, rows) {
+  return (rows || []).map(Number).some(function (r) {
+    return isFinite(r) && r >= CMD_CFG.START_ROW &&
+      String(sh.getRange(r, CMD_CFG.COL.RECU).getDisplayValue() || "").trim() !== "";
+  });
+}
+
+/**
+ * RUN FROM EDITOR ONCE, BEFORE ANY SCREEN USES THIS CODE:
+ * tsaraentry -> CommandesServer.js -> cmdAddRecuHeaders
+ * Adds columns AE/AF to "2026" if the tab is narrower, writes the
+ * headers AE1 "Date réception" and AF1 "Remise %", and formats AE as a
+ * date (the screen parses dd/mm/yyyy). A re-run changes nothing.
+ */
+function cmdAddRecuHeaders() {
+  const sh = cmdSheet();
+  const C = CMD_CFG.COL;
+  const max = sh.getMaxColumns();
+  if (max < C.REMISE) sh.insertColumnsAfter(max, C.REMISE - max);
+  if (!sh.getRange(1, C.RECU).getValue()) {
+    sh.getRange(1, C.RECU).setValue("Date réception").setFontWeight("bold");
+  }
+  if (!sh.getRange(1, C.REMISE).getValue()) {
+    sh.getRange(1, C.REMISE).setValue("Remise %").setFontWeight("bold");
+  }
+  sh.getRange(2, C.RECU, sh.getMaxRows() - 1, 1).setNumberFormat("dd/mm/yyyy");
+  Logger.log("Colonnes: " + sh.getMaxColumns() + " | AE1=" +
+             sh.getRange(1, C.RECU).getValue() + " | AF1=" +
+             sh.getRange(1, C.REMISE).getValue());
+}
+
 /** payload.lines = [{row, nombre, pm}] (alevins) or [{row, kg, pm}]. */
 function cmdModifyOrder(payload) {
   const f = payload || {};
@@ -992,6 +1148,14 @@ function cmdModifyOrder(payload) {
   const sh = cmdSheet();
   const C = CMD_CFG.COL;
   const lastRow = findNextCommandeRow(sh) - 1;
+
+  // RECU (Kim, 2026-09-10): quantity, PM and lot stay editable after
+  // delivery, until the order is received. The gate used to be Date
+  // livraison. The stock reconcile below already handles a row the
+  // engine has deducted, so a post-delivery change is covered.
+  if (cmdOrderReceived(sh, lines.map(function (ln) { return ln.row; }))) {
+    throw new Error("Commande reçue par le client — modification impossible.");
+  }
 
   // ---- read current state, gate, plan the jobs ----
   const jobs = [];
@@ -1004,9 +1168,6 @@ function cmdModifyOrder(payload) {
     const v = sh.getRange(r, 1, 1, C.ANNULE).getValues()[0];
     if (String(v[C.ANNULE - 1] || "").trim() !== "") {
       throw new Error("Commande annul\u00e9e \u2014 modification impossible.");
-    }
-    if (String(v[C.DATE_LIVRAISON - 1] || "").trim() !== "") {
-      throw new Error("Commande d\u00e9j\u00e0 livr\u00e9e \u2014 modification impossible.");
     }
 
     const key = cmdCanonKey(v[C.LOT - 1]);
@@ -1054,8 +1215,14 @@ function cmdModifyOrder(payload) {
       const nombre = cmdToNum(ln.nombre);
       if (nombre == null || nombre <= 0) throw new Error("Ligne " + r + " : nombre invalide.");
       job.nombre = nombre;
-      job.newDed = Math.round(nombre * 1.05);
       job.oldDed = cmdDeduction(v[C.ALEVINS_LIVRER - 1], null);
+      const delivered = String(v[C.DATE_LIVRAISON - 1] || "").trim() !== "";
+      const nombreChanged = cmdToNum(v[C.ALEVINS_NB - 1]) !== nombre;
+      job.newDed = !delivered
+        ? Math.round(nombre * 1.05)                  // order stage: +5 %
+        : (nombreChanged || job.oldDed == null
+            ? nombre                                 // number received, no +5 %
+            : job.oldDed);                           // same number: keep H
     } else {
       const kg = cmdToNum(ln.kg);
       if (kg == null || kg <= 0) throw new Error("Ligne " + r + " : kg invalide.");
@@ -1103,7 +1270,7 @@ function cmdModifyOrder(payload) {
     if (j.isAl) {
       put(C.ALEVINS_NB, j.nombre, "Nombre alevins");
       put(C.ALEVINS_PM, j.pm, "PM");
-      put(C.ALEVINS_LIVRER, j.newDed, "\u00c0 livrer (+5%)");
+      put(C.ALEVINS_LIVRER, j.newDed, "\u00c0 livrer (H)");
     } else {
       put(C.POISSON_KG, j.kg, "Kg poisson");
       put(C.POISSON_PM, j.pm, "PM");
