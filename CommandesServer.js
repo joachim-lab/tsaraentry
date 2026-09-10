@@ -372,8 +372,16 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
   const lastRow = findNextCommandeRow(sh) - 1;
   const zero = function () { return { kg: 0, al: 0, ar: 0 }; };
   const totals = { deliveredUnpaid: zero(), undelivered: zero() };
+  // Counts the order-TYPE breakdown of the list this call returns, e.g.
+  // "12 commandes (2 alevins, 10 poisson)" (Kim 2026-09-09). Filled in
+  // below, after the same delivered/undelivered + Alevins/Poisson
+  // filters as `out`, but BEFORE the 25-order cap -- like the kg/al/ar
+  // totals above, it must count every matching order, not just the
+  // page shown. total can exceed alv+pois+mix by the rare order that
+  // carries neither quantity (see the "exempt" comment below).
+  const counts = { total: 0, alv: 0, pois: 0, mix: 0 };
   if (lastRow < CMD_CFG.START_ROW) {
-    return { orders: [], closedMatches: 0, totals: totals };
+    return { orders: [], closedMatches: 0, totals: totals, counts: counts };
   }
 
   const n = lastRow - CMD_CFG.START_ROW + 1;
@@ -510,6 +518,14 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
       if (!((wantAlevins && hasAlevins) || (wantPoisson && hasPoisson))) continue;
     }
 
+    // Reached only by an order that will actually be shown (every
+    // filter above already applied), so this is exactly the list's
+    // total -- uncapped, unlike `out` below.
+    counts.total++;
+    if (hasAlevins && hasPoisson) counts.mix++;
+    else if (hasAlevins) counts.alv++;
+    else if (hasPoisson) counts.pois++;
+
     // One order should hold one price per kg. The sheet does not
     // enforce it, so distinct values are kept and the card shows all
     // of them rather than hiding a disagreement behind the first one.
@@ -519,7 +535,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
     out.push(g);
     if (out.length >= 25) break;
   }
-  return { orders: out, closedMatches: closedMatches, totals: totals };
+  return { orders: out, closedMatches: closedMatches, totals: totals, counts: counts };
 }
 
 /**

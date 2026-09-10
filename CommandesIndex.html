@@ -3050,9 +3050,15 @@
               '<span>Commandes non-livrées ' +
                 '<span class="muted" id="fTotUndelivered"></span></span></label>' +
           '</div>' +
-          '<div style="display:flex;gap:16px;flex:0 0 auto">' +
-            '<label class="chk"><input type="checkbox" id="fAlevins" checked>Alevins</label>' +
-            '<label class="chk"><input type="checkbox" id="fPoisson" checked>Poisson</label>' +
+          '<div style="flex:0 0 auto">' +
+            '<div style="display:flex;gap:16px">' +
+              '<label class="chk"><input type="checkbox" id="fAlevins" checked>Alevins</label>' +
+              '<label class="chk"><input type="checkbox" id="fPoisson" checked>Poisson</label>' +
+            '</div>' +
+            // Total of the list below, broken down by type (Kim
+            // 2026-09-09). Right-aligned under the boxes above it --
+            // no new row, so no vertical space is lost.
+            '<div class="muted" id="fulTotalCount" style="text-align:right;margin-top:6px"></div>' +
           '</div>' +
         '</div>' +
       '</div>' +
@@ -3147,6 +3153,22 @@
     return bits.length ? bits.join(' · ') : '\u2014';
   }
 
+  /** "12 commandes (2 alevins, 10 poisson)" -- from the server's
+   *  counts (cmdFindOrders), computed over EVERY matching order, not
+   *  just the (up to 25) shown -- the list can be longer than the page,
+   *  and this must not silently under-report past the cap. */
+  function fulCountLine(counts) {
+    const c = counts || {};
+    const n = Number(c.total || 0);
+    const word = n === 1 ? ' commande' : ' commandes';
+    if (!n) return '0' + word;
+    const parts = [];
+    if (c.alv)  parts.push(c.alv + ' alevins');
+    if (c.pois) parts.push(c.pois + ' poisson');
+    if (c.mix)  parts.push(c.mix + ' mixtes');
+    return n + word + (parts.length ? ' (' + parts.join(', ') + ')' : '');
+  }
+
   function doSearch(keepMsg, done) {
     setStatus('banner', 'Recherche…');
     el('fulForm').innerHTML = '';
@@ -3154,6 +3176,7 @@
     google.script.run
       .withSuccessHandler(res => {
         hits = res.orders;
+        el('fulTotalCount').textContent = fulCountLine(res.counts);
         const tot = res.totals || {};
         el('fTotDeliveredUnpaid').textContent = fmtTot(tot.deliveredUnpaid);
         el('fTotUndelivered').textContent = fmtTot(tot.undelivered);
