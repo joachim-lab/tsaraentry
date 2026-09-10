@@ -2152,7 +2152,7 @@
         '<div class="row">' +
           '<div><label>Type</label><select id="fType" onchange="renderLines()">' +
             '<option value="">-- choisir --</option>' + typeOpts + '</select></div>' +
-          '<div><label>Date commande</label><input type="date" id="fDate" value="'+todayISO()+'"></div>' +
+          '<div><label>Date commande</label><input type="date" id="fDate" data-auto="1" onchange="this.dataset.auto=\'\'" value="'+todayISO()+'"></div>' +
         '</div>' +
         '<div class="row">' +
           '<div><label>Client</label><input type="text" id="fClient" list="dlClients" autocomplete="off" onchange="dlPickContact(\'fClient\',\'fContact\')"></div>' +
@@ -2777,6 +2777,11 @@
     setStatus('banner', 'Enregistrement…');
 
     const al = isAlevins();
+    // The default date is filled when the form is BUILT. A tab left open
+    // overnight kept yesterday's date and saved it (AL-26-180, Kim
+    // 2026-09-10). A field nobody touched means "today at save time".
+    // A date the user picked (onchange clears data-auto) is kept as is.
+    if (el('fDate').dataset.auto === '1') el('fDate').value = todayISO();
     const payload = {
       type: el('fType').value,
       dateCommande: el('fDate').value,
