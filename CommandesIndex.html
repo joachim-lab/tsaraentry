@@ -156,10 +156,10 @@
   <h1>Commandes</h1>
 
   <div class="tabsWrap"><div class="tabs">
-    <div class="tab active" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
+    <div class="tab" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
     <div class="tab" id="tabNew" onclick="switchMode('new')">Nouvelle cmd</div>
     <div class="tab" id="tabRec" onclick="switchMode('rec')">R&eacute;currentes</div>
-    <div class="tab" id="tabFul" onclick="switchMode('ful')">Paiement &amp; livraison</div>
+    <div class="tab active" id="tabFul" onclick="switchMode('ful')">Paiement &amp; livraison</div>
     <div class="tab" id="tabHist" onclick="switchMode('hist')">Historique</div>
     <div class="tab" id="tabPrix" onclick="switchMode('prix')">Prix</div>
     <div class="tab" id="tabCli" onclick="switchMode('cli')">Clients</div>
@@ -168,9 +168,9 @@
 
   <div id="status"></div>
   <div id="paneNew" style="display:none"></div>
-  <div id="paneFul" style="display:none"></div>
+  <div id="paneFul"></div>
   <div id="paneRes" style="display:none"></div>
-  <div id="paneDem"></div>
+  <div id="paneDem" style="display:none"></div>
   <div id="paneRec" style="display:none"></div>
   <div id="paneHist" style="display:none"></div>
   <div id="panePrix" style="display:none"></div>
@@ -195,7 +195,7 @@
   const NOT_SELLABLE = {};
   let GATE_FAILED = false;     // true once cmdGetLotGateData has thrown
   let lines = [{}];            // create mode: one line per lot
-  let mode = 'dem';
+  let mode = 'ful';
   let hits = [];               // fulfilment search results
   let selectedKey = null;
 
@@ -232,12 +232,14 @@
     // renderNew() still runs: switchMode has no 'new' branch, so the
     // order form is built ONCE here. Commander (demCommander) calls
     // switchMode('new') and expects to find the fields already there.
-    // Then land on Pré-commandes, which is the tab the day starts on.
-    // Always land on Pré-commandes (Kim, 2026-09-05). This replaced
-    // the 2026-09-04 tab memory: the day starts on the queue, every
-    // time, on every machine. renderNew() still runs first - switchMode
-    // has no 'new' branch, and Commander needs the order form built.
-    .withSuccessHandler(o => { OPTS = o; renderNew(); switchMode('dem'); dlRefresh(); })
+    // Then land on Paiement & livraison (Kim, 2026-09-11). This replaced
+    // the 2026-09-05 rule "always land on Pré-commandes", which itself
+    // replaced the 2026-09-04 tab memory: one landing tab, every time, on
+    // every machine. renderNew() still runs first - switchMode has no
+    // 'new' branch, and Commander needs the order form built.
+    // The stock check (demVerifStock) runs only when Pré-commandes loads
+    // or on "Actualiser le stock", so the stock bars start blank.
+    .withSuccessHandler(o => { OPTS = o; renderNew(); switchMode('ful'); dlRefresh(); })
     .withFailureHandler(e => setStatus('err', 'Erreur chargement : ' + esc(e.message)))
     .cmdGetOptions();
 
@@ -2364,9 +2366,9 @@
       '<div class="card"><h3>Prix total</h3><div id="totalAmount" class="totalAmount">—</div></div>' +
       '<button class="go" id="btnCreate" onclick="doCreate()">Enregistrer la commande</button>';
     renderLines();
-    // Boot order is renderNew() then switchMode('dem'), so the pools
+    // Boot order is renderNew() then switchMode('ful'), so the pools
     // are not known yet on the first call; the check that runs on the
-    // Pré-commandes load repaints this bar when it returns.
+    // Pré-commandes load (or "Actualiser le stock") repaints this bar.
     paintStockBars();
   }
 
