@@ -613,18 +613,9 @@ function cmdRecordFulfilment(rows, payload) {
     }
   }
 
-  // GATE 3 (Kim, 2026-09-11) — ADRESSE CLIENT BEFORE RECEPTION.
-  // The Date réception mints the invoice number, and the invoice PDF
-  // prints the client address (CRM column M, FactureServer.js). So a
-  // NEW reception date is refused while that address is blank. An
-  // order already received (locked) is not touched by this gate.
-  // The address is typed in the Clients tab, never on this screen.
-  if (!locked && cmdParseDate(f.reception)) {
-    const clientNow = sh.getRange(Math.min.apply(null, targets), C.CLIENT).getValue();
-    if (!crmClientAdresse(clientNow)) {
-      throw new Error("Pas d'adresse client, merci de remplir l'adresse dans l'onglet \"Clients\".");
-    }
-  }
+  // NO ADDRESS GATE HERE (Kim, 2026-09-11): a reception date is saved
+  // without the client address. The address is required to PRINT the
+  // invoice instead - see factData in FactureServer.js.
 
   // REMISE (Kim, 2026-09-10) — a percentage given when the delivery
   // went wrong. Stored in AF on every row of the order. K and Q become
@@ -4374,26 +4365,6 @@ function crmFillContact(client, tel) {
   } catch (err) {
     Logger.log("crmFillContact(" + client + "): " + err);
   }
-}
-
-/**
- * Invoice address (CRM column M) of one client. "" when the client is
- * not in the CRM tab or M is blank. Same canonical name match as
- * crmFillContact. Read by GATE 3 of cmdRecordFulfilment.
- */
-function crmClientAdresse(client) {
-  const canon = crmCanonName(client);
-  if (!canon) return "";
-  const sh = crmEntrySheet();
-  const last = sh.getLastRow();
-  if (last < CRM_START) return "";
-  const vals = sh.getRange(CRM_START, 1, last - CRM_START + 1, CRM_COL_ADR).getValues();
-  for (var i = 0; i < vals.length; i++) {
-    if (crmCanonName(vals[i][0]) !== canon) continue;
-    const a = vals[i][CRM_COL_ADR - 1];
-    return String(a == null ? "" : a).trim();
-  }
-  return "";
 }
 
 function crmClientAdd(p) {

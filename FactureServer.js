@@ -16,6 +16,10 @@
  *   - the order has no N° facture (it is minted at AE, "reçue")
  *   - the order is cancelled (AA)
  *   - the rows of the invoice name two different clients (R)
+ *   - the client has no Adresse in the CRM tab (column M). The
+ *     Historique screen shows the message; the address is typed in
+ *     the Clients tab. A reception date does NOT need it (Kim,
+ *     2026-09-11).
  *   - the line total differs from K + Q of the same rows by more
  *     than 1 Ar. The sheet then holds an amount this code cannot
  *     explain, and an invoice must not show a different total.
@@ -269,6 +273,9 @@ function factData(orderNumber) {
       info.stat = s(CRM_COL_STAT);
       break;
     }
+  }
+  if (!info.adresse) {
+    throw new Error("Pas d'adresse client, merci de remplir l'adresse dans l'onglet \"Clients\".");
   }
 
   const fmtD = function (d) { return d ? Utilities.formatDate(d, tz, "dd/MM/yyyy") : ""; };
