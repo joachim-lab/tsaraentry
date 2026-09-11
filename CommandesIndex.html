@@ -237,9 +237,10 @@
     // replaced the 2026-09-04 tab memory: one landing tab, every time, on
     // every machine. renderNew() still runs first - switchMode has no
     // 'new' branch, and Commander needs the order form built.
-    // The stock check (demVerifStock) runs only when Pré-commandes loads
-    // or on "Actualiser le stock", so the stock bars start blank.
-    .withSuccessHandler(o => { OPTS = o; renderNew(); switchMode('ful'); dlRefresh(); })
+    // The stock check (demVerifStock) runs here too (Kim, 2026-09-11):
+    // Pré-commandes is no longer the landing tab, and staff need the
+    // stock bars in Nouvelle cmd and Récurrentes filled on arrival.
+    .withSuccessHandler(o => { OPTS = o; renderNew(); switchMode('ful'); demVerifStock(); dlRefresh(); })
     .withFailureHandler(e => setStatus('err', 'Erreur chargement : ' + esc(e.message)))
     .cmdGetOptions();
 
@@ -1251,7 +1252,7 @@
         demPools = res.pool;
         demGrBlock = (res.grBlock != null) ? res.grBlock : null;
         paintStockBars();
-        drawDemList();
+        if (el('demList')) drawDemList();   // absent until Pré-commandes is opened
       })
       .withFailureHandler(function (e) {
         demPools = null;
@@ -2367,8 +2368,8 @@
       '<button class="go" id="btnCreate" onclick="doCreate()">Enregistrer la commande</button>';
     renderLines();
     // Boot order is renderNew() then switchMode('ful'), so the pools
-    // are not known yet on the first call; the check that runs on the
-    // Pré-commandes load (or "Actualiser le stock") repaints this bar.
+    // are not known yet on the first call; the boot stock check
+    // (demVerifStock) repaints this bar when it returns.
     paintStockBars();
   }
 
