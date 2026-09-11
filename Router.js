@@ -16,10 +16,19 @@
  *   ?screen=achats       -> AchatsIndex.html      (screen 8c)
  *   ?screen=databassins  -> DataBassinsIndex.html (screen 9)
  *   no parameter         -> Menu.html            (chooser)
+ *   Per-user access: AccessServer.js (refused screen -> "Accès refusé").
  ***************************************************************/
 
 function doGet(e) {
   const screen = (e && e.parameter && e.parameter.screen) || "";
+
+  // Per-user access (AccessServer.js). A screen this account may not
+  // open is replaced by the refusal page. An unknown value falls to the
+  // menu, which shows only the allowed tiles.
+  if (Object.prototype.hasOwnProperty.call(ACCESS_SCREEN_KEY, screen) &&
+      !accessAllows(screen)) {
+    return accessDeniedOutput();
+  }
 
   // Screen 5's FORM is not a file in this project: LigneeUI renders it,
   // so there is exactly one copy of the form and its rules. It arrives
