@@ -96,6 +96,11 @@
     .prixTbl td.pro { text-align: left; }
     .card { border: 1px solid #dadce0; border-radius: 6px; padding: 12px 14px; margin-top: 14px; }
     .card h3 { margin: 0 0 4px 0; font-size: 17px; }
+    /* Historique Rapport card (Kim, 2026-09-11): thicker border, title in a yellow band */
+    .rapportCard { border-width: 2px; }
+    .rapportCard > h3 { margin: -12px -14px 12px -14px; padding: 10px 14px;
+                        border-radius: 4px 4px 0 0; border-bottom: 1px solid #f0d79a;
+                        background: rgba(251, 188, 4, 0.12); }
     .totalAmount { font-size: 26px; font-weight: bold; color: #188038; }
     .muted { color: #5f6368; font-size: 14px; font-weight: normal; }
     /* Lot readout states. A blocking condition must not render in the same
@@ -2063,7 +2068,7 @@
 
   function renderHist() {
     el('paneHist').innerHTML =
-      '<div class="card" style="margin:0 0 16px 0">' +
+      '<div class="card rapportCard" style="margin:0 0 16px 0">' +
         '<h3>Rapport</h3>' +
         '<div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap">' +
           '<div style="width:130px"><label for="hrDebut">Du</label>' +
