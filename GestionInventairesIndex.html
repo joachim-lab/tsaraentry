@@ -6,13 +6,14 @@
     .tsaraLogo { position: fixed; top: 18px; right: 24px; height: 56px; width: auto; z-index: 500; }
     body { font-family: Arial, sans-serif; max-width: 560px; margin: 48px auto; padding: 0 16px; color: #202124; }
     h1 { font-size: 26px; }
-    a.tile { display: block; text-decoration: none; color: inherit; border: 1px solid #dadce0;
+    a.tile { display: flex; align-items: center; gap: 16px; text-decoration: none; color: inherit; border: 1px solid #dadce0;
              border-radius: 8px; padding: 18px 20px; margin-top: 14px; }
     a.tile:hover { background: #f8f9fa; }
     a.tile h2 { margin: 0 0 4px 0; font-size: 19px; color: #1a73e8; }
     a.tile p { margin: 0; font-size: 15px; color: #5f6368; }
-    a.tile.green { border-color: #188038; }
-    a.tile.green h2, a.tile.green p { color: #188038; }
+    a.tile.green { border-color: #146E3C; }
+    a.tile.green h2, a.tile.green p { color: #146E3C; }
+    .gico { width: 52px; height: 52px; flex: none; }
     .backlink { display:inline-block; margin-bottom:10px; font-size: 16px; color:#1a73e8; text-decoration:none; }
     .backlink:hover { text-decoration:underline; }
   </style>
@@ -32,11 +33,11 @@
       if (b) b.href = url;
       document.getElementById('tiles').innerHTML =
         '<a class="tile green" href="' + url + '?screen=inventaire">' +
-          '<h2>Inventaire</h2><p>Commande et r\u00e9ception \u2014 entr\u00e9es en stock</p></a>' +
+          '<svg class="gico" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21.8" fill="#146E3C" stroke="#F0A818" stroke-width="2.4"/><g transform="translate(9,9) scale(1.25)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5,12 L6.5,8.5 H17.5 L19.5,12"/><rect x="4.5" y="12" width="15" height="8.5" rx="1.5"/><path d="M12,1.8 V6.8 M12,6.8 L9.9,4.7 M12,6.8 L14.1,4.7"/></g></svg><div><h2>Inventaire</h2><p>Commande et r\u00e9ception \u2014 entr\u00e9es en stock</p></div></a>' +
         '<a class="tile green" href="' + url + '?screen=checkstock">' +
-          '<h2>Check stock physique</h2><p>Comptage des sacs, sur demande par email</p></a>' +
+          '<svg class="gico" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21.8" fill="#146E3C" stroke="#F0A818" stroke-width="2.4"/><g transform="translate(9,9) scale(1.25)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4.5" width="12.5" height="4.4" rx="1.2"/><rect x="4" y="11" width="12.5" height="4.4" rx="1.2"/><rect x="4" y="17.5" width="9" height="4.4" rx="1.2"/><circle cx="17.3" cy="17" r="3.4"/><path d="M19.8,19.5 L22.2,21.9"/></g></svg><div><h2>Check stock physique</h2><p>Comptage des sacs, sur demande par email</p></div></a>' +
         '<a class="tile green" href="' + url + '?screen=achats">' +
-          '<h2>Factures provende</h2><p>Achats du mois sur base des factures</p></a>';
+          '<svg class="gico" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="21.8" fill="#146E3C" stroke="#F0A818" stroke-width="2.4"/><g transform="translate(9,9) scale(1.25)" fill="none" stroke="#FFFFFF" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6,3.5 H14.5 L19,8 V20.5 H6 Z"/><path d="M14.5,3.5 V8 H19"/><path d="M9,13 H16 M9,16.5 H13.5"/></g></svg><div><h2>Factures provende</h2><p>Achats du mois sur base des factures</p></div></a>';
     })();
   </script>
 </body>
