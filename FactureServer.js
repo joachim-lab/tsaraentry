@@ -33,8 +33,10 @@
  * minted before AE existed was minted at delivery and has no AE:
  * the latest V (date livraison) is its minting date.
  *
- * CLIENT BLOCK: the name from R. Localisation (C), téléphone (B),
- * NIF (K) and STAT (L) from the CRM row with the same canonical name.
+ * CLIENT BLOCK: the name from R. Adresse (M), téléphone (B), NIF (K)
+ * and STAT (L) from the CRM row with the same canonical name.
+ * Lieu de livraison (C) is NOT printed: it is where the fish go,
+ * the Adresse is the invoice address (Kim, 2026-09-11).
  * A blank field is left off the invoice.
  *
  * THE FILE: "<N° facture> - <client>.pdf" in the Drive folder whose id
@@ -252,7 +254,7 @@ function factData(orderNumber) {
   }
 
   // 3. The client, from the CRM tab.
-  const info = { tel: "", loc: "", nif: "", stat: "" };
+  const info = { tel: "", adresse: "", nif: "", stat: "" };
   const crm = crmEntrySheet();
   const crmLast = crm.getLastRow();
   if (client && crmLast >= CRM_START) {
@@ -262,7 +264,7 @@ function factData(orderNumber) {
       if (crmCanonName(cv[k][0]) !== canon) continue;
       const s = function (col) { return String(cv[k][col - 1] == null ? "" : cv[k][col - 1]).trim(); };
       info.tel = s(CRM_COL_TEL);
-      info.loc = s(CRM_COL_LOC);
+      info.adresse = s(CRM_COL_ADR);
       info.nif = s(CRM_COL_NIF);
       info.stat = s(CRM_COL_STAT);
       break;
@@ -280,7 +282,7 @@ function factData(orderNumber) {
     dateFacture: fmtD(dateFacture),
     commandes: orders.map(function (o) { return o.no + (o.date ? " du " + fmtD(o.date) : ""); }),
     client: client,
-    tel: info.tel, loc: info.loc, nif: info.nif, stat: info.stat,
+    tel: info.tel, adresse: info.adresse, nif: info.nif, stat: info.stat,
     lines: lines,
     total: total,
     enLettres: factWords(total)
@@ -317,7 +319,7 @@ function factHtml(d) {
 
   // Seller + client.
   const cli = [ '<b>' + e(d.client) + '</b>' ];
-  if (d.loc) cli.push(e(d.loc));
+  if (d.adresse) cli.push(e(d.adresse));
   if (d.tel) cli.push('Tél : ' + e(d.tel));
   if (d.nif) cli.push('NIF : ' + e(d.nif));
   if (d.stat) cli.push('STAT : ' + e(d.stat));
@@ -419,7 +421,7 @@ function testFacture() {
   if (!o) { Logger.log("Aucune commande avec un numéro de facture."); return; }
   const d = factData(o.orderNumber);
   Logger.log("Commande " + o.orderNumber + " -> facture " + d.numero + " du " + d.dateFacture);
-  Logger.log("Client : " + d.client + " | loc=" + (d.loc || "-") + " | tel=" + (d.tel || "-") +
+  Logger.log("Client : " + d.client + " | adresse=" + (d.adresse || "-") + " | tel=" + (d.tel || "-") +
              " | NIF=" + (d.nif || "-") + " | STAT=" + (d.stat || "-"));
   d.lines.forEach(function (l) {
     Logger.log("  " + l.label + " | PU " + (l.pu == null ? "-" : l.pu) + " | Qté " +

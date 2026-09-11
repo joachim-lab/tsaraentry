@@ -336,8 +336,8 @@
    * prints the rebuild stamp for exactly that reason - a total from
    * last week looks identical to one from this morning.
    *
-   * Five fields save: Téléphone, Localisation, Notes, NIF and STAT
-   * (NIF / STAT print on the invoice PDF). Everything else is
+   * Six fields save: Téléphone, Lieu de livraison, Adresse, NIF, STAT and
+   * Notes (Adresse / NIF / STAT print on the invoice PDF). Everything else is
    * read-only because the next rebuild overwrites it.
    *
    * Re-fetched on every visit, like Reservations and Pre-commandes:
@@ -506,7 +506,7 @@
              '</p>' +
              '<input id="cliFiltre" type="text" autocomplete="off" ' +
                     'placeholder="Chercher un nom, un t&eacute;l&eacute;phone, ' +
-                    'une localisation&hellip;" style="width:100%;padding:8px">' +
+                    'un lieu de livraison&hellip;" style="width:100%;padding:8px">' +
              '<button id="cliNewBtn" style="margin-top:10px" ' +
                      'onclick="cliNewToggle()">Nouveau client</button>' +
            '</div>' +
@@ -566,9 +566,12 @@
              '<label>T&eacute;l&eacute;phone<br>' +
                '<input id="cliTel" type="text" style="width:100%;padding:8px" ' +
                       'value="' + esc(r.tel) + '"></label>' +
-             '<label style="display:block;margin-top:8px">Localisation<br>' +
+             '<label style="display:block;margin-top:8px">Lieu de livraison<br>' +
                '<input id="cliLoc" type="text" style="width:100%;padding:8px" ' +
                       'value="' + esc(r.loc) + '"></label>' +
+             '<label style="display:block;margin-top:8px">Adresse (facture)<br>' +
+               '<input id="cliAdr" type="text" style="width:100%;padding:8px" ' +
+                      'value="' + esc(r.adresse) + '"></label>' +
              '<label style="display:block;margin-top:8px">NIF<br>' +
                '<input id="cliNif" type="text" style="width:100%;padding:8px" ' +
                       'value="' + esc(r.nif) + '"></label>' +
@@ -619,7 +622,7 @@
           '<input id="cnNom" type="text" style="width:100%;padding:8px"></label>' +
         '<label style="display:block;margin-top:8px">T&eacute;l&eacute;phone<br>' +
           '<input id="cnTel" type="text" style="width:100%;padding:8px"></label>' +
-        '<label style="display:block;margin-top:8px">Localisation<br>' +
+        '<label style="display:block;margin-top:8px">Lieu de livraison<br>' +
           '<input id="cnLoc" type="text" style="width:100%;padding:8px"></label>' +
         '<label style="display:block;margin-top:8px">Notes<br>' +
           '<textarea id="cnNotes" rows="3" style="width:100%;padding:8px">' +
@@ -628,7 +631,7 @@
         // says so BEFORE the refusal, not after.
         '<p class="muted">Nom obligatoire, plus au moins un des trois ' +
           'autres champs &mdash; une ligne sans t&eacute;l&eacute;phone, ' +
-          'localisation ni notes est supprim&eacute;e &agrave; la ' +
+          'lieu de livraison ni notes est supprim&eacute;e &agrave; la ' +
           'prochaine actualisation de la table.</p>' +
         '<button id="cnSave" onclick="cliNewSave()">Enregistrer</button>' +
         ' <button onclick="cliNewToggle()">Fermer</button>' +
@@ -648,7 +651,7 @@
     if (!p.client) { setStatusAndScroll('err', 'Nom requis.'); return; }
     if (!p.tel && !p.loc && !p.notes) {
       setStatusAndScroll('err', 'Remplir au moins un champ : téléphone, ' +
-        'localisation ou notes.');
+        'lieu de livraison ou notes.');
       return;
     }
     const b = el('cnSave');
@@ -679,6 +682,7 @@
     const notes = el('cliNotes').value;
     const nif = el('cliNif').value;
     const stat = el('cliStat').value;
+    const adresse = el('cliAdr').value;
     const btn = el('cliSave');
     if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…'; }
     google.script.run
@@ -688,6 +692,7 @@
         r.notes = notes.trim();
         r.nif = nif.trim();
         r.stat = stat.trim();
+        r.adresse = adresse.trim();
         cliOpen = null;
         cliPaint();
         setStatusAndScroll('ok', 'Client ' + esc(r.client) + ' enregistré.');
@@ -696,7 +701,7 @@
         if (btn) { btn.disabled = false; btn.textContent = 'Enregistrer'; }
         setStatusAndScroll('err', esc(e.message));
       })
-      .crmSaveInfo(row, r.client, tel, loc, notes, nif, stat);
+      .crmSaveInfo(row, r.client, tel, loc, notes, nif, stat, adresse);
   }
 
   /* ---------- MODE F: Prix poisson (lecture seule) ----------

@@ -613,6 +613,19 @@ function cmdRecordFulfilment(rows, payload) {
     }
   }
 
+  // GATE 3 (Kim, 2026-09-11) — ADRESSE CLIENT BEFORE RECEPTION.
+  // The Date réception mints the invoice number, and the invoice PDF
+  // prints the client address (CRM column M, FactureServer.js). So a
+  // NEW reception date is refused while that address is blank. An
+  // order already received (locked) is not touched by this gate.
+  // The address is typed in the Clients tab, never on this screen.
+  if (!locked && cmdParseDate(f.reception)) {
+    const clientNow = sh.getRange(Math.min.apply(null, targets), C.CLIENT).getValue();
+    if (!crmClientAdresse(clientNow)) {
+      throw new Error("Pas d'adresse client, merci de remplir l'adresse dans l'onglet \"Clients\".");
+    }
+  }
+
   // REMISE (Kim, 2026-09-10) — a percentage given when the delivery
   // went wrong. Stored in AF on every row of the order. K and Q become
   //   K = (F*I*(1-AF/100))+J        Q = (O*L*(1-AF/100))+P
@@ -4166,14 +4179,15 @@ function testRecurrences() {
  * is one owner of the arithmetic, and it is not this file.
  *
  * Row 1 = headers, data from row 2. Columns:
- *   A Client  B Telephone  C Localisation  D Type client
+ *   A Client  B Telephone  C Lieu de livraison  D Type client
+ *   (C was labelled "Localisation" until 2026-09-11; code names keep "loc")
  *   E Dernier prix/alevin  F Dernier prix/kg
  *   G Total alevins  H Total kg  I Nb achats  J Notes
- *   K NIF  L STAT (appended 2026-09-11 for the invoice PDF, FactureServer.js)
+ *   K NIF  L STAT  M Adresse (appended 2026-09-11 for the invoice PDF, FactureServer.js)
  *   N1 = the rebuild stamp (L1 until 2026-09-11), printed at the top of the tab so a worker
  *        can see the age of the numbers.
  *
- * WRITEABLE FROM HERE: B, C, J, K and L. Everything else is overwritten by
+ * WRITEABLE FROM HERE: B, C, J, K, L and M. Everything else is overwritten by
  * the next rebuild, so an edit to it would vanish without a message -
  * the worst kind of failure. The client name is NOT writeable either:
  * renaming here would not rename the order rows the totals come from,
@@ -4193,13 +4207,14 @@ function testRecurrences() {
 
 const CRM_SHEET = "CRM";
 const CRM_START = 2;                       // row 1 = headers
-const CRM_COLS = 12;                       // A..L
+const CRM_COLS = 13;                       // A..M
 const CRM_COL_TEL = 2;                      // B
 const CRM_COL_LOC = 3;                     // C
 const CRM_COL_NOTES = 10;                  // J
 const CRM_COL_NIF = 11;                    // K
 const CRM_COL_STAT = 12;                   // L
-const CRM_COL_STAMP = 14;                  // N1, two columns clear of L
+const CRM_COL_ADR = 13;                    // M
+const CRM_COL_STAMP = 14;                  // N1, next to M
 
 function crmEntrySheet() {
   const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
@@ -4244,21 +4259,22 @@ function crmClientList() {
       nb: cmdToNum(vals[i][8]),
       notes: String(vals[i][9] == null ? "" : vals[i][9]).trim(),
       nif: String(vals[i][10] == null ? "" : vals[i][10]).trim(),
-      stat: String(vals[i][11] == null ? "" : vals[i][11]).trim()
+      stat: String(vals[i][11] == null ? "" : vals[i][11]).trim(),
+      adresse: String(vals[i][12] == null ? "" : vals[i][12]).trim()
     });
   }
   return { stamp: stamp, rows: out };
 }
 
 /**
- * Write Telephone (B), Localisation (C), Notes (J), NIF (K) and STAT (L)
- * for one client row. nif / stat null or absent = K / L untouched: a
- * page loaded before 2026-09-11 sends five arguments and must not
- * blank a NIF it never showed.
+ * Write Telephone (B), Localisation (C), Notes (J), NIF (K), STAT (L)
+ * and Adresse (M) for one client row. An argument null or absent =
+ * its cell untouched: a page loaded before a deploy sends fewer
+ * arguments and must not blank a value it never showed.
  * clientSeen is the name the browser displayed; it is the staleness
  * proof, not a value to write.
  */
-function crmSaveInfo(row, clientSeen, tel, loc, notes, nif, stat) {
+function crmSaveInfo(row, clientSeen, tel, loc, notes, nif, stat, adresse) {
   const r = Math.floor(Number(row));
   if (!(r >= CRM_START)) throw new Error("Ligne invalide.");
 
@@ -4278,6 +4294,9 @@ function crmSaveInfo(row, clientSeen, tel, loc, notes, nif, stat) {
   sh.getRange(r, CRM_COL_NOTES).setValue(String(notes == null ? "" : notes).trim());
   if (nif != null && stat != null) {
     sh.getRange(r, CRM_COL_NIF, 1, 2).setValues([[String(nif).trim(), String(stat).trim()]]);
+  }
+  if (adresse != null) {
+    sh.getRange(r, CRM_COL_ADR).setValue(String(adresse).trim());
   }
   SpreadsheetApp.flush();
   return true;
@@ -4351,10 +4370,30 @@ function crmFillContact(client, tel) {
     // Not in the table: append. Column B carries the "@" text format
     // set when the tab was created, so a leading 0 survives.
     sh.getRange(Math.max(last + 1, CRM_START), 1, 1, CRM_COLS)
-      .setValues([[name, phone, "", "", "", "", "", "", "", "", "", ""]]);
+      .setValues([[name, phone, "", "", "", "", "", "", "", "", "", "", ""]]);
   } catch (err) {
     Logger.log("crmFillContact(" + client + "): " + err);
   }
+}
+
+/**
+ * Invoice address (CRM column M) of one client. "" when the client is
+ * not in the CRM tab or M is blank. Same canonical name match as
+ * crmFillContact. Read by GATE 3 of cmdRecordFulfilment.
+ */
+function crmClientAdresse(client) {
+  const canon = crmCanonName(client);
+  if (!canon) return "";
+  const sh = crmEntrySheet();
+  const last = sh.getLastRow();
+  if (last < CRM_START) return "";
+  const vals = sh.getRange(CRM_START, 1, last - CRM_START + 1, CRM_COL_ADR).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    if (crmCanonName(vals[i][0]) !== canon) continue;
+    const a = vals[i][CRM_COL_ADR - 1];
+    return String(a == null ? "" : a).trim();
+  }
+  return "";
 }
 
 function crmClientAdd(p) {
@@ -4364,7 +4403,7 @@ function crmClientAdd(p) {
   const loc = String(p && p.loc != null ? p.loc : "").trim();
   const notes = String(p && p.notes != null ? p.notes : "").trim();
   if (!tel && !loc && !notes) {
-    throw new Error("Remplir au moins un champ : téléphone, localisation " +
+    throw new Error("Remplir au moins un champ : téléphone, lieu de livraison " +
                     "ou notes. Sans cela, la ligne serait supprimée à la " +
                     "prochaine actualisation de la table.");
   }
@@ -4384,7 +4423,7 @@ function crmClientAdd(p) {
 
   const row = Math.max(last + 1, CRM_START);
   sh.getRange(row, 1, 1, CRM_COLS).setValues(
-    [[name, tel, loc, "", "", "", "", "", "", notes, "", ""]]);
+    [[name, tel, loc, "", "", "", "", "", "", notes, "", "", ""]]);
   SpreadsheetApp.flush();
   return { row: row };
 }
