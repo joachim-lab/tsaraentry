@@ -2076,7 +2076,7 @@
         '<div id="hrMsg"></div>' +
       '</div>' +
       '<div style="margin-bottom:10px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">' +
-        '<input type="text" id="hSearch" placeholder="Filtrer : n° commande, client ou statut" ' +
+        '<input type="text" id="hSearch" placeholder="Filtrer : n° commande, n° facture, client ou statut" ' +
           'style="max-width:420px;flex:1 1 260px;margin-top:0" oninput="drawHist()">' +
         '<label class="chk"><input type="checkbox" id="hAlevins" checked onchange="drawHist()">Alevins</label>' +
         '<label class="chk"><input type="checkbox" id="hPoisson" checked onchange="drawHist()">Poisson</label>' +
@@ -2119,7 +2119,7 @@
     });
     const rows = q
       ? typed.filter(function (o) {
-          return (o.orderNumber + ' ' + o.client + ' ' + o.statut)
+          return (o.orderNumber + ' ' + (o.facture || '') + ' ' + o.client + ' ' + o.statut)
                  .toLowerCase().indexOf(q) !== -1;
         })
       : typed;
