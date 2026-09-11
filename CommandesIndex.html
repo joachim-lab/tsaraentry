@@ -3239,6 +3239,43 @@
       .cmdWhatsappMarkSent(o.rows);
   }
 
+  /** Collapsed/expanded state of the summary card. Survives pane
+   *  re-renders; deliberately page-lifetime only, not stored. */
+  var fulSumOpen = true;
+
+  function fulSumToggle() {
+    fulSumOpen = !fulSumOpen;
+    el('fulSumBody').style.display = fulSumOpen ? '' : 'none';
+    el('fulSumArrow').textContent = fulSumOpen ? '\u25be' : '\u25b8';
+  }
+
+  /**
+   * "Reste à vendre" line: farm-wide sellable pool from
+   * cmdSellablePool — kg of fish at/above the sale floor, and fry —
+   * net of reservations and of orders entered but not yet deducted.
+   * Fired with every search, in parallel: the answer is cached 5 min
+   * server-side, so only the first call of a quiet period pays the
+   * Stock Poisson read. A failure only marks the line, never the
+   * search.
+   */
+  function fulLoadPool() {
+    google.script.run
+      .withSuccessHandler(p => {
+        const box = el('fulPool');
+        if (!box) return;
+        box.innerHTML = 'Reste à vendre : <b>' +
+          esc(fmtNum(Number(p.kg || 0))) + ' kg</b> de poisson (\u2265 ' +
+          esc(String(p.grBlock)) + ' g) · <b>' +
+          esc(fmtNum(Number(p.alevins || 0))) + '</b> alevins';
+      })
+      .withFailureHandler(e => {
+        const box = el('fulPool');
+        if (box) box.textContent =
+          'Reste à vendre : indisponible (' + e.message + ')';
+      })
+      .cmdSellablePool();
+  }
+
   function renderFul() {
     el('paneFul').innerHTML =
       '<div class="card">' +
@@ -3248,37 +3285,49 @@
           '<div style="flex:0 0 220px"><label>&nbsp;</label>' +
             '<button class="primary" style="width:100%" onclick="doSearch()">Rechercher</button></div>' +
         '</div>' +
-        // Two columns, one block (Kim 2026-09-09). Left: the two
-        // status boxes, stacked, each with its total. Right, top: the
-        // content filter, the same pair as Historique. It narrows the
-        // status boxes by what the order holds, so it is a second axis;
-        // at the top right it costs no height. No total beside it: the
-        // two totals describe the whole category on purpose and do not
-        // move with these boxes. .chk is inline-flex, so the two status
-        // labels are set to display:flex to take a full line each. The
-        // row wraps only if the totals outgrow the left column.
+        // Two columns, one block (Kim 2026-09-09; totals moved into
+        // the collapsible summary card below, 2026-09-11). Left: the
+        // two status boxes, stacked. Right: the content filter, the
+        // same pair as Historique. It narrows the status boxes by what
+        // the order holds, so it is a second axis; at the top right it
+        // costs no height. .chk is inline-flex, so the two status
+        // labels are set to display:flex to take a full line each.
         '<div style="display:flex;gap:20px;flex-wrap:wrap;' +
              'align-items:flex-start;margin-top:10px">' +
           '<div style="flex:1 1 auto">' +
             '<label class="chk" style="display:flex">' +
               '<input type="checkbox" id="fDeliveredUnpaid" checked>' +
-              '<span>Commandes livrées et non-payées ' +
-                '<span class="muted" id="fTotDeliveredUnpaid"></span></span></label>' +
+              '<span>Commandes livrées et non-payées</span></label>' +
             '<label class="chk" style="display:flex;margin-top:8px">' +
               '<input type="checkbox" id="fUndelivered" checked>' +
-              '<span>Commandes non-livrées ' +
-                '<span class="muted" id="fTotUndelivered"></span></span></label>' +
+              '<span>Commandes non-livrées</span></label>' +
           '</div>' +
           '<div style="flex:0 0 auto">' +
             '<div style="display:flex;gap:16px">' +
               '<label class="chk"><input type="checkbox" id="fAlevins" checked>Alevins</label>' +
               '<label class="chk"><input type="checkbox" id="fPoisson" checked>Poisson</label>' +
             '</div>' +
-            // Total of the list below, broken down by type (Kim
-            // 2026-09-09). Right-aligned under the boxes above it --
-            // no new row, so no vertical space is lost.
-            '<div class="muted" id="fulTotalCount" style="text-align:right;margin-top:6px"></div>' +
           '</div>' +
+        '</div>' +
+      '</div>' +
+      // Collapsible summary (Kim 2026-09-11): the two category
+      // totals, the order count over every match, and the farm-wide
+      // "Reste à vendre" pool, in one card between the search card
+      // and the list. The header toggles the body; fulSumOpen keeps
+      // the choice for the life of the page.
+      '<div class="card">' +
+        '<div style="cursor:pointer;user-select:none;font-weight:600" ' +
+             'onclick="fulSumToggle()">' +
+          '<span id="fulSumArrow">' + (fulSumOpen ? '\u25be' : '\u25b8') +
+          '</span> Résumé</div>' +
+        '<div id="fulSumBody"' + (fulSumOpen ? '' : ' style="display:none"') + '>' +
+          '<div style="margin-top:8px">Livrées et non-payées : ' +
+            '<span class="muted" id="fTotDeliveredUnpaid"></span></div>' +
+          '<div style="margin-top:4px">Non-livrées : ' +
+            '<span class="muted" id="fTotUndelivered"></span></div>' +
+          '<div class="muted" id="fulTotalCount" style="margin-top:4px"></div>' +
+          '<div id="fulPool" style="margin-top:8px;border-top:1px solid #dadce0;' +
+               'padding-top:8px">Reste à vendre : …</div>' +
         '</div>' +
       '</div>' +
       '<div id="fulForm"></div>' +
@@ -3390,6 +3439,7 @@
 
   function doSearch(keepMsg, done) {
     setStatus('banner', 'Recherche…');
+    fulLoadPool();
     el('fulForm').innerHTML = '';
     selectedKey = null;
     google.script.run

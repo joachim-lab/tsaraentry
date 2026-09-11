@@ -2976,6 +2976,41 @@ function demSellableLots() {
   return { lots: lots, pool: pool, skipped: skipped };
 }
 
+var SELLABLE_POOL_CACHE_KEY = "cmd_sellable_pool_v1";
+var SELLABLE_POOL_CACHE_SECONDS = 300;
+
+/**
+ * Farm-wide "reste à vendre" for the Paiement & livraison summary
+ * card: { kg, alevins, grBlock }. Same pool as the Pré-commandes
+ * screen and the nightly mail (demSellableLots) — fry as a count,
+ * fish in KG at/above the sale floor (grBlock, so the screen can name
+ * the floor), net of reservations and of orders entered but not yet
+ * deducted. ADVISORY like its source: Stock Poisson can lag the lot
+ * files by up to 24 h.
+ *
+ * Cached 5 min: the scan opens Stock Poisson and rescans the orders
+ * sheet, too slow to pay on every search click.
+ */
+function cmdSellablePool() {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get(SELLABLE_POOL_CACHE_KEY);
+  if (hit) return JSON.parse(hit);
+  const scan = demSellableLots();
+  const out = { kg: scan.pool.Poisson, alevins: scan.pool.Alevins,
+                grBlock: cmdGrBounds().block };
+  cache.put(SELLABLE_POOL_CACHE_KEY, JSON.stringify(out),
+            SELLABLE_POOL_CACHE_SECONDS);
+  return out;
+}
+
+/** RUN FROM EDITOR: tsaraentry -> CommandesServer.js ->
+ *  clearSellablePoolCache — drop the cached pool after a tri or a
+ *  reservation change, so the card updates at once. */
+function clearSellablePoolCache() {
+  CacheService.getScriptCache().remove(SELLABLE_POOL_CACHE_KEY);
+  Logger.log("sellable pool cache cleared");
+}
+
 /** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> grPoolDetail
  *  Read-only. Which lots make up the poisson pool, and which do not. */
 function grPoolDetail() {
