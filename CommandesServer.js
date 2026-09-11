@@ -3279,7 +3279,9 @@ function histList() {
   const sh = cmdSheet();
   const C = CMD_CFG.COL;
   const lastRow = findNextCommandeRow(sh) - 1;
-  if (lastRow < CMD_CFG.START_ROW) return { orders: [], annee: CMD_CFG.SHEET };
+  if (lastRow < CMD_CFG.START_ROW) {
+    return { orders: [], annee: CMD_CFG.SHEET, tz: sh.getParent().getSpreadsheetTimeZone() };
+  }
 
   const n = lastRow - CMD_CFG.START_ROW + 1;
   const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.ANNULE).getDisplayValues();
@@ -3311,8 +3313,10 @@ function histList() {
         dateLivraison: r[C.DATE_LIVRAISON - 1],
         facture: r[C.FACTURE - 1],
         annule: String(r[C.ANNULE - 1] || "").trim(),
+        contact: r[C.CONTACT - 1],     // report only (histReport)
         alevinsTotal: 0,
         poissonNbTotal: 0,
+        poissonKgTotal: 0,             // report only (histReport)
         montantAr: 0
       };
       order.push(key);
@@ -3321,11 +3325,13 @@ function histList() {
     const g = groups[key];
     g.alevinsTotal   += cmdNumFromDisplay_(r[C.ALEVINS_NB - 1]);
     g.poissonNbTotal += cmdNumFromDisplay_(r[C.POISSON_NB - 1]);
+    g.poissonKgTotal += cmdNumFromDisplay_(r[C.POISSON_KG - 1]);
     g.montantAr      += cmdNumFromDisplay_(r[C.ARGENT_ALEVINS - 1]) +
                         cmdNumFromDisplay_(r[C.ARGENT_POISSON - 1]);
     // Any row of the order can carry the state or the identity.
     if (!g.facture && r[C.FACTURE - 1]) g.facture = r[C.FACTURE - 1];
     if (!g.client && r[C.CLIENT - 1]) g.client = r[C.CLIENT - 1];
+    if (!g.contact && r[C.CONTACT - 1]) g.contact = r[C.CONTACT - 1];
     if (!g.dateCommande && r[C.DATE_CMD - 1]) g.dateCommande = r[C.DATE_CMD - 1];
     if (!g.dateSortMs && rowDateMs) g.dateSortMs = rowDateMs;
     if (!g.paiement && r[C.PAIEMENT - 1]) g.paiement = r[C.PAIEMENT - 1];
@@ -3349,7 +3355,7 @@ function histList() {
   }
   // Most recent date on top, oldest at the bottom.
   out.sort(function (a, b) { return b.dateSortMs - a.dateSortMs; });
-  return { orders: out, annee: CMD_CFG.SHEET };
+  return { orders: out, annee: CMD_CFG.SHEET, tz: sh.getParent().getSpreadsheetTimeZone() };
 }
 
 /** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> testHistorique
@@ -3367,6 +3373,200 @@ function testHistorique() {
     Logger.log("  " + k + " : " + byStat[k]);
   });
   Logger.log("Montant total : " + Math.round(total) + " Ar");
+}
+
+
+/***************************************************************
+ * RAPPORT HISTORIQUE (Kim, 2026-09-11) - the "Imprimer" block at the
+ * top of the Historique tab. READS the Commandes sheet. WRITES ONLY
+ * the report file.
+ *
+ * WHAT IT LISTS: the orders of histList() whose Date commande (E)
+ * falls between two dates, both included, filtered by status.
+ * Cancelled orders (AA) are never listed. An order with no real date
+ * in E cannot sit in a period: it is left out and COUNTED (sansDate),
+ * and the screen says how many.
+ *
+ * THREE STATUSES from two dates. Payment wins:
+ *   Payé           payment date (U) filled
+ *   Livré impayé   delivery date (V) filled, U empty
+ *   Non livré      V and U empty
+ * A received (AE) but unpaid order is "Livré impayé": AE needs V.
+ * A legacy prepayment (U without V) is "Payé".
+ *
+ * SAME NUMBERS AS THE SCREEN: kg (L), alevins (F) and montant (K + Q)
+ * come from histList, so the report total equals the Historique total
+ * for the same orders.
+ *
+ * THE FILE: ONE Google Sheet, "Rapport commandes", rewritten at each
+ * click. Its id is in the script property HIST_REPORT_SS_ID. The first
+ * run creates it (testHistReport, from the editor). The web app runs
+ * as Kim, so Kim owns the file: staff need it SHARED (lecteur is
+ * enough), or they get "Accès refusé".
+ * If the file is ever deleted: delete the property, run
+ * testHistReport, share the new file again.
+ *
+ * The file takes the Commandes file's time zone at each run, so a date
+ * shows the same day in both files.
+ ***************************************************************/
+
+const HIST_REPORT_CFG = {
+  PROP: "HIST_REPORT_SS_ID",
+  NAME: "Rapport commandes",
+  SHEET: "Rapport",
+  HEADER_ROW: 4,
+  HEADERS: ["Date", "N° commande", "N° facture", "Client", "Téléphone",
+            "Kg", "Alevins", "Montant (Ar)", "Statut"]
+};
+
+/** "5/8/26" or "05/08/26" -> { key: "20260805", label: "05/08/26" }.
+ *  null when it is not a real calendar date. */
+function histParseDdMmYy(s) {
+  const m = String(s || "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+  if (!m) return null;
+  const y = 2000 + Number(m[3]), mo = Number(m[2]), d = Number(m[1]);
+  const dt = new Date(y, mo - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+  const p2 = function (n) { return (n < 10 ? "0" : "") + n; };
+  return { key: y + p2(mo) + p2(d), label: p2(d) + "/" + p2(mo) + "/" + m[3] };
+}
+
+/** Status of one histList order for the report. "" when cancelled. */
+function histReportStatut(o) {
+  if (o.annule) return "";
+  if (String(o.paiement || "").trim()) return "Payé";
+  if (String(o.dateLivraison || "").trim()) return "Livré impayé";
+  return "Non livré";
+}
+
+/** The report spreadsheet: created once, then always the same file. */
+function histReportFile() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty(HIST_REPORT_CFG.PROP);
+  if (!id) {
+    const created = SpreadsheetApp.create(HIST_REPORT_CFG.NAME);
+    created.getSheets()[0].setName(HIST_REPORT_CFG.SHEET);
+    props.setProperty(HIST_REPORT_CFG.PROP, created.getId());
+    return created;
+  }
+  try {
+    return SpreadsheetApp.openById(id);
+  } catch (e) {
+    throw new Error("Fichier « " + HIST_REPORT_CFG.NAME + " » introuvable (" + id +
+      "). Kim : tsaraentry -> Paramètres du projet -> supprimer la propriété " +
+      HIST_REPORT_CFG.PROP + ", puis lancer testHistReport. (" + e.message + ")");
+  }
+}
+
+/**
+ * Build the report. Called by the "Imprimer" button.
+ * p = { debut: "JJ/MM/AA", fin: "JJ/MM/AA", nonLivre, livreImpaye, paye }
+ * Returns { url, count, sansDate }.
+ */
+function histReport(p) {
+  p = p || {};
+  const debut = histParseDdMmYy(p.debut);
+  const fin = histParseDdMmYy(p.fin);
+  if (!debut) throw new Error("Date de début invalide. Format : JJ/MM/AA.");
+  if (!fin) throw new Error("Date de fin invalide. Format : JJ/MM/AA.");
+  if (fin.key < debut.key) throw new Error("La date de fin est avant la date de début.");
+
+  const want = { "Non livré": !!p.nonLivre, "Livré impayé": !!p.livreImpaye, "Payé": !!p.paye };
+  const picked = ["Non livré", "Livré impayé", "Payé"].filter(function (k) { return want[k]; });
+  if (!picked.length) throw new Error("Cochez au moins un statut.");
+
+  const h = histList();
+  const tz = h.tz;
+  const rows = [];
+  var sansDate = 0;
+  h.orders.forEach(function (o) {
+    const statut = histReportStatut(o);
+    if (!statut || !want[statut]) return;
+    if (!o.dateSortMs) { sansDate++; return; }
+    const day = Utilities.formatDate(new Date(o.dateSortMs), tz, "yyyyMMdd");
+    if (day < debut.key || day > fin.key) return;
+    rows.push({ o: o, statut: statut });
+  });
+  // A period report reads oldest first.
+  rows.sort(function (a, b) { return a.o.dateSortMs - b.o.dateSortMs; });
+
+  var kg = 0, alv = 0, ar = 0;
+  const data = rows.map(function (x) {
+    const o = x.o;
+    kg += o.poissonKgTotal; alv += o.alevinsTotal; ar += o.montantAr;
+    return [
+      new Date(o.dateSortMs),
+      o.orderNumber || "(sans numéro)",
+      String(o.facture || "").trim(),
+      o.client,
+      String(o.contact || "").trim(),
+      o.poissonKgTotal || "",
+      o.alevinsTotal || "",
+      o.montantAr || "",
+      x.statut
+    ];
+  });
+
+  // Two clicks at the same moment would write one file twice at once.
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const ss = histReportFile();
+    ss.setSpreadsheetTimeZone(tz);
+    const sh = ss.getSheetByName(HIST_REPORT_CFG.SHEET) || ss.insertSheet(HIST_REPORT_CFG.SHEET);
+    const HR = HIST_REPORT_CFG.HEADER_ROW;
+    const NCOL = HIST_REPORT_CFG.HEADERS.length;
+    const lastRow = HR + data.length + 1;           // header + orders + total
+
+    sh.clear();
+    sh.setFrozenRows(0);
+    // Exact size: nothing is loaded or printed below the total.
+    if (sh.getMaxRows() < lastRow) sh.insertRowsAfter(sh.getMaxRows(), lastRow - sh.getMaxRows());
+    if (sh.getMaxRows() > lastRow) sh.deleteRows(lastRow + 1, sh.getMaxRows() - lastRow);
+    if (sh.getMaxColumns() < NCOL) sh.insertColumnsAfter(sh.getMaxColumns(), NCOL - sh.getMaxColumns());
+    if (sh.getMaxColumns() > NCOL) sh.deleteColumns(NCOL + 1, sh.getMaxColumns() - NCOL);
+
+    sh.getRange(HR, 1, 1, NCOL).setValues([HIST_REPORT_CFG.HEADERS])
+      .setFontWeight("bold").setBackground("#e8eaed");
+    if (data.length) {
+      // Phone as text, or "034..." loses its leading zero.
+      sh.getRange(HR + 1, 5, data.length, 1).setNumberFormat("@");
+      sh.getRange(HR + 1, 1, data.length, NCOL).setValues(data);
+      sh.getRange(HR + 1, 1, data.length, 1).setNumberFormat("dd/mm/yy");
+    }
+    sh.getRange(lastRow, 1, 1, NCOL).setValues([[
+      "Total", data.length + " commande(s)", "", "", "", kg || "", alv || "", ar || "", ""
+    ]]).setFontWeight("bold").setBorder(true, null, null, null, null, null);
+    sh.getRange(HR + 1, 6, data.length + 1, 1).setNumberFormat("#,##0.0");
+    sh.getRange(HR + 1, 7, data.length + 1, 2).setNumberFormat("#,##0");
+    sh.setFrozenRows(HR);                            // header repeats on every printed page
+    sh.autoResizeColumns(1, NCOL);
+
+    // Title AFTER the resize: a long title in A1 would widen column A.
+    const now = Utilities.formatDate(new Date(), tz, "dd/MM/yy HH:mm");
+    sh.getRange(1, 1).setValue("Rapport commandes — du " + debut.label + " au " + fin.label)
+      .setFontWeight("bold").setFontSize(14);
+    sh.getRange(2, 1).setValue("Onglet " + h.annee + " · statuts : " + picked.join(", ") +
+      " · généré le " + now);
+    SpreadsheetApp.flush();
+
+    return { url: ss.getUrl() + "#gid=" + sh.getSheetId(), count: data.length, sansDate: sansDate };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> testHistReport
+ *  Writes ONLY the report file, and creates it on the first run.
+ *  Last month, all three statuses. Logs the counts and the link. */
+function testHistReport() {
+  const tz = Session.getScriptTimeZone();
+  const now = new Date();
+  const debut = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth() - 1, 1), tz, "dd/MM/yy");
+  const fin = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth(), 0), tz, "dd/MM/yy");
+  const r = histReport({ debut: debut, fin: fin, nonLivre: true, livreImpaye: true, paye: true });
+  Logger.log("Période " + debut + " -> " + fin + " : " + r.count + " commandes · sans date : " + r.sansDate);
+  Logger.log("Fichier : " + r.url);
 }
 
 

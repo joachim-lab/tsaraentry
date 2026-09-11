@@ -2046,6 +2046,23 @@
 
   function renderHist() {
     el('paneHist').innerHTML =
+      '<div class="card" style="margin:0 0 16px 0">' +
+        '<h3>Rapport</h3>' +
+        '<div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap">' +
+          '<div style="width:130px"><label for="hrDebut">Du</label>' +
+            '<input type="text" id="hrDebut" placeholder="JJ/MM/AA" maxlength="8" autocomplete="off"></div>' +
+          '<div style="width:130px"><label for="hrFin">Au</label>' +
+            '<input type="text" id="hrFin" placeholder="JJ/MM/AA" maxlength="8" autocomplete="off"></div>' +
+          '<label class="chk" style="margin-bottom:10px"><input type="checkbox" id="hrMois" onchange="histMoisPasse()">Le mois passé</label>' +
+        '</div>' +
+        '<div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:12px">' +
+          '<label class="chk"><input type="checkbox" id="hrNonLivre" checked>Commandes non livrées</label>' +
+          '<label class="chk"><input type="checkbox" id="hrLivreImpaye" checked>Commandes livrées impayées</label>' +
+          '<label class="chk"><input type="checkbox" id="hrPaye" checked>Commandes payées</label>' +
+        '</div>' +
+        '<button id="hrPrint" class="primary" style="margin-top:12px" onclick="histPrint()">Imprimer</button>' +
+        '<div id="hrMsg"></div>' +
+      '</div>' +
       '<div style="margin-bottom:10px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">' +
         '<input type="text" id="hSearch" placeholder="Filtrer : n° commande, client ou statut" ' +
           'style="max-width:420px;flex:1 1 260px;margin-top:0" oninput="drawHist()">' +
@@ -2134,6 +2151,84 @@
       '<td style="' + cell + '"></td></tr>';
 
     el('histTable').innerHTML = h + '</table>';
+  }
+
+  // ---------- Historique: rapport (Kim, 2026-09-11) ----------
+  //
+  // "Imprimer" writes the chosen orders into the one "Rapport commandes"
+  // Google Sheet (histReport) and opens it in a new tab. The tab opens
+  // ON THE CLICK, before the server call: the build takes several
+  // seconds, and a browser blocks a tab that opens that late. If the
+  // browser blocks it anyway, the message carries the link.
+
+  /** Date -> "JJ/MM/AA". */
+  function histDdMmYy(d) {
+    return String(d.getDate()).padStart(2, '0') + '/' +
+           String(d.getMonth() + 1).padStart(2, '0') + '/' +
+           String(d.getFullYear() % 100).padStart(2, '0');
+  }
+
+  /** "Le mois passé": both dates = the previous month, locked while ticked. */
+  function histMoisPasse() {
+    const on = el('hrMois').checked;
+    if (on) {
+      const now = new Date();
+      el('hrDebut').value = histDdMmYy(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+      el('hrFin').value   = histDdMmYy(new Date(now.getFullYear(), now.getMonth(), 0));
+    }
+    el('hrDebut').readOnly = on;
+    el('hrFin').readOnly = on;
+  }
+
+  function histPrint() {
+    const btn = el('hrPrint');
+    const msg = el('hrMsg');
+    msg.innerHTML = '';
+    btn.disabled = true;
+    btn.textContent = 'Préparation…';
+    const win = window.open('', '_blank');
+    if (win) {
+      // Cosmetic only: a waiting text in the new tab. If a browser
+      // refuses the write, the tab stays blank and the report still opens.
+      try {
+        win.document.write('<title>Rapport commandes</title>' +
+          '<p style="font-family:Arial,sans-serif;font-size:18px">Préparation du rapport…</p>');
+      } catch (err) { /* blank tab is acceptable */ }
+    }
+
+    function done() {
+      btn.disabled = false;
+      btn.textContent = 'Imprimer';
+    }
+
+    google.script.run
+      .withSuccessHandler(function (r) {
+        done();
+        const link = '<a href="' + esc(r.url) + '" target="_blank">Ouvrir le rapport</a>';
+        const note = r.sansDate
+          ? '<br>' + fmtNum(r.sansDate) + ' commande(s) sans date de commande : pas dans le rapport.'
+          : '';
+        if (win && !win.closed) {
+          win.location.href = r.url;
+          msg.innerHTML = '<div class="ok">Rapport prêt : ' + fmtNum(r.count) +
+            ' commande(s). ' + link + note + '</div>';
+        } else {
+          msg.innerHTML = '<div class="warn">Rapport prêt : ' + fmtNum(r.count) +
+            ' commande(s). Le navigateur a bloqué le nouvel onglet : ' + link + note + '</div>';
+        }
+      })
+      .withFailureHandler(function (e) {
+        done();
+        if (win && !win.closed) win.close();
+        msg.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+      })
+      .histReport({
+        debut: el('hrDebut').value,
+        fin: el('hrFin').value,
+        nonLivre: el('hrNonLivre').checked,
+        livreImpaye: el('hrLivreImpaye').checked,
+        paye: el('hrPaye').checked
+      });
   }
 
   // ---------- MODE A: new order ----------
