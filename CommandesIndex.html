@@ -3239,9 +3239,10 @@
       .cmdWhatsappMarkSent(o.rows);
   }
 
-  /** Collapsed/expanded state of the summary card. Survives pane
-   *  re-renders; deliberately page-lifetime only, not stored. */
-  var fulSumOpen = true;
+  /** Collapsed/expanded state of the summary card. Starts CLOSED
+   *  (Kim, 2026-09-11): the user opens it. Survives pane re-renders;
+   *  deliberately page-lifetime only, not stored. */
+  var fulSumOpen = false;
 
   function fulSumToggle() {
     fulSumOpen = !fulSumOpen;
