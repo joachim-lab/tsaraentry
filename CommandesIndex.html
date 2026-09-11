@@ -2556,6 +2556,26 @@
   }
 
   /**
+   * Shape a cmdGetLotStock answer like cmdGetLotAvailability's, using
+   * the page-load gate data for reservation and pending. Only called
+   * when GATE is loaded. These two numbers age with the page: an
+   * order typed by a colleague AFTER this page loaded is not counted
+   * here - the save check reads everything fresh and still blocks it.
+   */
+  function slimAvail(s) {
+    const k = s.key;
+    const res = (GATE.resNum && GATE.resNum[k]) || 0;
+    const pnd = (GATE.pend && GATE.pend[k]) || 0;
+    const rAll = !!(GATE.reservedAll && GATE.reservedAll[k]);
+    return {
+      key: k, found: s.found, source: s.source, count: s.count, pm: s.pm,
+      reserved: rAll ? 'TOUT' : res, pending: pnd, reservedAll: rAll,
+      available: (rAll || !s.found || !s.count) ? null
+                                                : s.count - res - pnd
+    };
+  }
+
+  /**
    * Selection-time lookup. Information only - no verdict, no blocking,
    * so staff can quote a customer before writing the order. The save
    * path re-checks against fresh numbers and is the only thing that
@@ -2567,11 +2587,29 @@
     if (!box) return;
     const key = sel.value;
     if (!key) { box.className = 'muted'; box.innerHTML = ''; return; }
+    // Provisional readout from the page-load gate data (Stock Poisson,
+    // up to 24 h stale). Grey, marked verification, replaced by the
+    // lot-file truth when the server answers. Information only - the
+    // save path is still the only thing that blocks (2026-09-11).
     box.className = 'muted';
-    box.innerHTML = 'recherche du stock\u2026';
+    const gk = canonKey(key);
+    const gpm = (GATE && GATE.pm) ? GATE.pm[gk] : undefined;
+    const gav = (GATE && GATE.avail) ? GATE.avail[gk] : undefined;
+    if (gpm === undefined && gav === undefined) {
+      box.innerHTML = 'recherche du stock\u2026';
+    } else {
+      var gKg = (!isAlevins() && gav != null && gpm != null)
+        ? Math.floor(gav * gpm / 1000) : null;
+      var gParts = [];
+      if (gav !== undefined) gParts.push('disponible : ' + fmtNum(gav));
+      if (gpm !== undefined) gParts.push('PM : ' + fmtNum(gpm) + ' g');
+      if (gKg != null) gParts.push(fmtNum(gKg) + ' kg');
+      box.innerHTML = gParts.join(' \u00b7 ') + ' \u2014 v\u00e9rification\u2026';
+    }
     google.script.run
       .withSuccessHandler(a => {
         if (sel.value !== key) return;          // user changed lot meanwhile
+        if (a && a.slim) a = slimAvail(a);
         if (a.reservedAll) {
           box.className = 'availBlock';
           box.innerHTML = '\u26d4 LOT R\u00c9SERV\u00c9 (TOUT) \u2014 choisir un autre lot.' +
@@ -2643,7 +2681,11 @@
         box.className = 'availWarn';
         box.innerHTML = 'Stock indisponible : ' + esc(e.message);
       })
-      .cmdGetLotAvailability(key);
+      // Slim path when the gate data is loaded: the server opens
+      // ONLY the lot file; reservation and pending come from GATE
+      // (page load). Otherwise the full call - all on the server.
+      [(GATE && GATE.resNum && GATE.pend) ? 'cmdGetLotStock'
+                                          : 'cmdGetLotAvailability'](key);
   }
 
   /**

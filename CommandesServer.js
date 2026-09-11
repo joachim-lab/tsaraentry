@@ -1484,6 +1484,47 @@ function cmdGetLotAvailability(orderKey) {
 }
 
 /**
+ * SLIM selection-time lookup (2026-09-11): opens ONLY the lot file.
+ *
+ * cmdGetLotAvailability also opens the Commandes file (Reservations)
+ * and scans the orders sheet for pending rows - 3-5 s paid on EVERY
+ * lot selection for numbers the page already read at load
+ * (cmdGetLotGateData: resNum / pend). The browser combines this
+ * answer with those maps and shows the same readout.
+ *
+ * Information only, like the readout it feeds: the save path
+ * (cmdValidateOrderLines -> cmdGetLotAvailability) still reads
+ * everything fresh and is the only thing that blocks. The browser
+ * falls back to the full call when the gate data failed to load.
+ * Do NOT slim the save path.
+ */
+function cmdGetLotStock(orderKey) {
+  const key = cmdCanonKey(orderKey);
+  const out = { key: key, found: false, source: null,
+                count: null, pm: null, slim: true };
+  if (!key) return out;
+
+  const lotNum = key.split("-")[0];
+  const list = getLotFileList();
+  var fileId = null;
+  for (var i = 0; i < list.length; i++) {
+    if (cmdCanonKey(list[i].lotNumber) === lotNum) { fileId = list[i].fileId; break; }
+  }
+  if (!fileId) return out;   // found stays false -> caller warns
+
+  const m = findSubLotColumnByOrderKey(SpreadsheetApp.openById(fileId), key);
+  if (!m.found) return out;
+
+  out.found = true;
+  out.source = m.source;
+  if (m.col) out.col = m.col;
+  if (m.row) out.row = m.row;
+  out.count = m.count;
+  out.pm = m.pm;
+  return out;
+}
+
+/**
  * Reservation for one canon key. Mirrors tt_loadReservations.
  * Returns the string "TOUT", or a positive number, or 0.
  */
@@ -1945,7 +1986,7 @@ function installNotSellableTrigger() {
  * notSellable and non-positive stock, the dropdown must not). Merge
  * the two only if the filters are made explicit parameters.
  */
-function buildAvailMap() {
+function buildAvailMap(optResv, optPend) {
   const ss = SpreadsheetApp.openById(STOCK_PM_CFG.SS_ID);
   const sh = ss.getSheetByName(STOCK_PM_CFG.SHEET);
   const out = {};
@@ -1954,8 +1995,8 @@ function buildAvailMap() {
   if (lastRow < STOCK_PM_CFG.START_ROW) return out;
   const vals = sh.getRange(STOCK_PM_CFG.START_ROW, 14,
                            lastRow - STOCK_PM_CFG.START_ROW + 1, 3).getValues();
-  const resv = demResMap();
-  const pend = demPendingMap();
+  const resv = optResv || demResMap();
+  const pend = optPend || demPendingMap();
   for (var i = 0; i < vals.length; i++) {
     const key = cmdCanonKey(vals[i][0]);
     if (!key) continue;
@@ -1973,9 +2014,21 @@ function buildAvailMap() {
  * the boundaries - so the client never hardcodes any of them.
  */
 function cmdGetLotGateData() {
+  // resv and pend are computed ONCE and shared: buildAvailMap uses
+  // them for the dropdown counts, and the browser keeps them
+  // (resNum / pend) so the slim per-selection call cmdGetLotStock
+  // can run the same arithmetic without re-reading (2026-09-11).
+  const resv = demResMap();
+  const pend = demPendingMap();
+  const resNum = {};
+  Object.keys(resv).forEach(function (k) {
+    if (resv[k] !== "TOUT") resNum[k] = resv[k];
+  });
   return {
     pm: cmdGetLotPmMap(),
-    avail: buildAvailMap(),
+    avail: buildAvailMap(resv, pend),
+    resNum: resNum,
+    pend: pend,
     reservedAll: buildReservedAllMap(),
     notSellable: getNotSellableMap(),
     fryMax: cmdFryMaxPm(),
