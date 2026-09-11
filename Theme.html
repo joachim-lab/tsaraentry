@@ -24,7 +24,7 @@
   body { position: relative; overflow-x: auto; }
   body .tsaraLogo { position: absolute; top: 14px; right: 16px;
                     background: none; border: none; padding: 0;
-                    box-shadow: none; border-radius: 8px; }
+                    box-shadow: none; border-radius: 8px; cursor: pointer; }
   body hr { border: none; border-top: 1px solid #E3E8E4; }
 
   /* 2 - Type */
@@ -124,3 +124,13 @@
     body .subtab, body a.tile, body .hit, body tbody tr { transition: none; }
   }
 </style>
+<script>
+  // Logo click = back to the menu. Follows the screen's own "Menu" link so
+  // the real /exec URL is used; the menu has no such link and ignores it.
+  document.addEventListener('click', function (e) {
+    var logo = e.target && e.target.closest ? e.target.closest('.tsaraLogo') : null;
+    if (!logo) return;
+    var back = document.getElementById('backLink') || document.querySelector('a.back');
+    if (back && back.getAttribute('href') && back.getAttribute('href') !== '#') back.click();
+  });
+</script>
