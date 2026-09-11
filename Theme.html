@@ -1,34 +1,123 @@
-<!-- Theme.html - shared hover highlight for every TSARA Entry screen.
+<!-- Theme.html - "Vert Atelier" design system for every TSARA Entry screen.
      Each screen includes it once, immediately before the Spinner include:
          <?!= include('Theme'); ?>
-     It comes after the screen's own <style>, so these rules win on equal
-     specificity. Green #146E3C is the green of the menu icons.
+     It loads after the screen's own <style>, so later rules win on equal
+     specificity; overrides use a leading `body` to outrank the screens'
+     single selectors. Pure CSS, system fonts: zero effect on page load.
 
-     Buttons keep their own fill colour and take an outline only. Text and
-     rows take a soft green wash. Elements that carry an inline onclick are
-     treated as clickable text, except buttons, which are handled above. -->
+     Palette (from the Tsara Tilapia logo):
+       green dark #0D5A2F · green #146E3C · wash #EAF3EE
+       amber #C77700 (category) · ground #F2F5F3 · lines #DCE4DF/#CDD6CF
+     Semantic colors (ok green / warn amber / error red) are kept. -->
 <style>
-  a, button, select, input, textarea, label, .tab, .del, .hit, .card, tbody tr {
-    transition: background-color .12s ease, outline-color .12s ease;
+  /* 1 - Ground and sheet */
+  html { background: #F2F5F3; }
+  body { background: #FFFFFF; border: 1px solid #E3E8E4; border-radius: 14px;
+         box-shadow: 0 1px 3px rgba(20,40,28,.07); padding: 20px 24px 28px;
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                      "Helvetica Neue", Arial, sans-serif;
+         color: #222824; }
+  @media (max-width: 520px) {
+    body { margin: 0; border: none; border-radius: 0; box-shadow: none;
+           padding: 16px 16px 24px; }
   }
-  a:hover,
-  label:hover,
-  .del:hover,
-  tbody tr:hover,
-  [onclick]:not(button):hover {
-    background: #EAF3EE;
-  }
-  button:hover,
-  .tab:hover,
-  .hit:hover,
-  .card:hover,
-  select:hover,
-  input:hover,
-  textarea:hover {
-    outline: 2px solid #146E3C;
-    outline-offset: -2px;
-  }
-  button:disabled:hover { outline: none; }
-  input[readonly]:hover, textarea[readonly]:hover, select[disabled]:hover { outline: none; }
+  body .tsaraLogo { background: #fff; border: 1px solid #E3E8E4;
+                    border-radius: 10px; padding: 6px;
+                    box-shadow: 0 1px 2px rgba(20,40,28,.06); }
+  body hr { border: none; border-top: 1px solid #E3E8E4; }
+
+  /* 2 - Type */
+  body h1 { color: #0D5A2F; letter-spacing: -0.01em; }
+  body h2 { color: #0D5A2F; }
+  body label { color: #3E463F; }
+  body .hint, body .muted { color: #5C665E; }
+
+  /* 3 - Fields */
+  body select, body input, body textarea {
+    border: 1px solid #CDD6CF; border-radius: 8px; background: #fff;
+    color: #222824; }
+  body select:hover, body input:hover, body textarea:hover { border-color: #9DB3A4; }
+  body select:focus, body input:focus, body textarea:focus {
+    outline: 2px solid #146E3C; outline-offset: -1px; border-color: #146E3C; }
+  body input[type="checkbox"] { accent-color: #146E3C; width: auto; }
+  body input[readonly], body textarea[readonly], body select[disabled] {
+    background: #F0F3F1; color: #5C665E; border-color: #E3E8E4; }
+
+  /* 4 - Buttons */
+  body button { border: none; border-radius: 8px; font-weight: 600;
+                background: #146E3C; color: #fff; }
+  body button:hover { filter: brightness(1.08); }
+  body #submitBtn, body #recSubmitBtn, body #corrSaveBtn, body .go,
+  body button.green { background: #146E3C; color: #fff; }
+  body .primary { background: #0D5A2F; color: #fff; }
+  body #addBtn { background: #EAF3EE; color: #0D5A2F; }
+  body .ghost, body .demBtn, body #corrOpenBtn, body #corrCancelBtn {
+    background: #fff; color: #3E463F; border: 1px solid #CDD6CF; }
+  body .ghost:hover, body .demBtn:hover, body #corrOpenBtn:hover,
+  body #corrCancelBtn:hover { filter: none; background: #F4F7F5; }
+  body button:disabled, body #submitBtn:disabled, body #recSubmitBtn:disabled,
+  body .go:disabled, body button.green:disabled {
+    background: #AEB8B0; color: #fff; filter: none; cursor: not-allowed; }
+  body button.tab { background: #fff; color: #146E3C; border: 1px solid #146E3C; }
+  body button.tab.on { background: #146E3C; color: #fff; }
+  body #reloadBtn { background: none; color: #146E3C; font-weight: 600; }
+
+  /* 5 - Links and tabs */
+  body .backlink, body a.back, body #corrList a, body a.pdf { color: #146E3C; }
+  body a.pdf { border-color: #146E3C; border-radius: 8px; }
+  body .tabs { border-bottom-color: #E3E8E4; }
+  body .tab.active { border-bottom-color: #146E3C; color: #0D5A2F; }
+  body .subtab { border-color: #CDD6CF; color: #5C665E; }
+  body .subtab:hover { border-color: #9DB3A4; }
+  body .subtab.alv.active { background: #146E3C; border-color: #146E3C; }
+  body .subtab.pois.active { background: #C77700; border-color: #C77700; }
+  body .mode.active { background: #146E3C; border-color: #146E3C; color: #fff; }
+
+  /* 6 - Tables */
+  body th { text-transform: uppercase; letter-spacing: .04em; font-size: 12.5px;
+            color: #5C665E; border-bottom: 2px solid #DCE4DF; }
+  body td { border-bottom: 1px solid #EEF1EF; }
+  body tbody tr:hover td { background: #F6FAF7; }
+  body .prixTbl th { background: #F0F5F1; text-transform: none; letter-spacing: 0; }
+  body .prixTbl th, body .prixTbl td { border-color: #E3E8E4; }
+
+  /* 7 - Tiles, cards, panels */
+  body a.tile { border: 1px solid #DCE4DF; border-radius: 12px;
+                box-shadow: 0 1px 2px rgba(20,40,28,.06); }
+  body a.tile:hover, body a.tile:focus { background: #F6FAF7; border-color: #146E3C; }
+  body a.tile h2 { color: #0D5A2F; }
+  body a.tile p { color: #5C665E; }
+  body .card { border-color: #DCE4DF; border-radius: 10px;
+               box-shadow: 0 1px 2px rgba(20,40,28,.05); }
+  body .hit { border-color: #DCE4DF; border-radius: 10px; }
+  body .hit:hover { background: #F6FAF7; }
+  body .modal { border-radius: 12px; }
+  body .chip { background: #F0F3F1; }
+
+  /* 8 - Status colors (semantics kept: ok green, warn amber, error red) */
+  body #msg, body .ok, body .err, body .warn, body .banner,
+  body .availBlock, body .availWarn, body .availOk { border-radius: 8px; }
+  body .ok, body #msg.ok, body #ctx.pending, body .avail.ok {
+    background: #E6F2EB; color: #146E3C; }
+  body .err, body #msg.err { background: #FBEAE8; color: #B3261E; }
+  body .warn, body #msg.warn { background: #FDF0DC; color: #8F5700; }
+  body .banner, body #msg.banner { background: #EAF3EE; color: #0D5A2F; }
+  body .availOk { background: #E6F2EB; color: #146E3C; border-left-color: #146E3C; }
+  body .availWarn { background: #FDF0DC; color: #8F5700; }
+  body .totalAmount { color: #146E3C; }
+
+  /* 9 - Feedback: hover, focus, motion */
+  body a, body button, body select, body input, body textarea, body .tab,
+  body .subtab, body a.tile, body .hit, body tbody tr {
+    transition: background-color .12s ease, border-color .12s ease,
+                box-shadow .12s ease, filter .12s ease; }
+  body [onclick]:not(button):not(input):not(select):hover { background: #F0F5F1; }
   #busyOverlay:hover, #busyOverlay *:hover { background: none; outline: none; }
+  #busyOverlay .ring { border-color: #EAF3EE; border-top-color: #146E3C; }
+  body a:focus-visible, body button:focus-visible {
+    outline: 2px solid #146E3C; outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    body a, body button, body select, body input, body textarea, body .tab,
+    body .subtab, body a.tile, body .hit, body tbody tr { transition: none; }
+  }
 </style>
