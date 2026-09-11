@@ -336,7 +336,8 @@
    * prints the rebuild stamp for exactly that reason - a total from
    * last week looks identical to one from this morning.
    *
-   * Two fields save: Localisation and Notes. Everything else is
+   * Five fields save: Téléphone, Localisation, Notes, NIF and STAT
+   * (NIF / STAT print on the invoice PDF). Everything else is
    * read-only because the next rebuild overwrites it.
    *
    * Re-fetched on every visit, like Reservations and Pre-commandes:
@@ -568,6 +569,12 @@
              '<label style="display:block;margin-top:8px">Localisation<br>' +
                '<input id="cliLoc" type="text" style="width:100%;padding:8px" ' +
                       'value="' + esc(r.loc) + '"></label>' +
+             '<label style="display:block;margin-top:8px">NIF<br>' +
+               '<input id="cliNif" type="text" style="width:100%;padding:8px" ' +
+                      'value="' + esc(r.nif) + '"></label>' +
+             '<label style="display:block;margin-top:8px">STAT<br>' +
+               '<input id="cliStat" type="text" style="width:100%;padding:8px" ' +
+                      'value="' + esc(r.stat) + '"></label>' +
              '<label style="display:block;margin-top:8px">Notes<br>' +
                '<textarea id="cliNotes" rows="3" style="width:100%;padding:8px">' +
                  esc(r.notes) +
@@ -670,6 +677,8 @@
     const tel = el('cliTel').value;
     const loc = el('cliLoc').value;
     const notes = el('cliNotes').value;
+    const nif = el('cliNif').value;
+    const stat = el('cliStat').value;
     const btn = el('cliSave');
     if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…'; }
     google.script.run
@@ -677,6 +686,8 @@
         r.tel = tel.trim();
         r.loc = loc.trim();
         r.notes = notes.trim();
+        r.nif = nif.trim();
+        r.stat = stat.trim();
         cliOpen = null;
         cliPaint();
         setStatusAndScroll('ok', 'Client ' + esc(r.client) + ' enregistré.');
@@ -685,7 +696,7 @@
         if (btn) { btn.disabled = false; btn.textContent = 'Enregistrer'; }
         setStatusAndScroll('err', esc(e.message));
       })
-      .crmSaveInfo(row, r.client, tel, loc, notes);
+      .crmSaveInfo(row, r.client, tel, loc, notes, nif, stat);
   }
 
   /* ---------- MODE F: Prix poisson (lecture seule) ----------
@@ -2035,6 +2046,7 @@
   // buy nothing.
 
   let histRows = [];
+  let histShown = [];   // the rows drawHist drew; the Facture buttons index it
 
   const HIST_COLOR = {
     'Ouvert':        '#1a73e8',
@@ -2117,6 +2129,7 @@
       return;
     }
 
+    histShown = rows;
     const cell = 'padding:6px 8px;border:1px solid #dadce0';
     var total = 0;
     var h = '<table style="width:100%;border-collapse:collapse;margin-bottom:20px">' +
@@ -2127,9 +2140,10 @@
       '<th style="' + cell + '">Client</th>' +
       '<th style="' + cell + '">Quantité</th>' +
       '<th style="' + cell + '">Montant</th>' +
-      '<th style="' + cell + '">Statut</th></tr>';
+      '<th style="' + cell + '">Statut</th>' +
+      '<th style="' + cell + '">Facture</th></tr>';
 
-    rows.forEach(function (o) {
+    rows.forEach(function (o, i) {
       total += Number(o.montantAr || 0);
       const col = HIST_COLOR[o.statut] || '#3c4043';
       h += '<tr>' +
@@ -2141,6 +2155,11 @@
         '<td style="' + cell + '">' + esc(histQty(o)) + '</td>' +
         '<td style="' + cell + ';white-space:nowrap">' + fmtAr(o.montantAr) + '</td>' +
         '<td style="' + cell + ';color:' + col + ';font-weight:bold">' + esc(o.statut) + '</td>' +
+        // Same test as the server (factData): a number, an invoice, not cancelled.
+        '<td style="' + cell + ';white-space:nowrap">' +
+          ((o.orderNumber && String(o.facture || '').trim() && o.statut !== 'Annulé')
+            ? '<button style="padding:4px 10px;font-size:15px" onclick="histFacture(this,' + i + ')">Imprimer</button>'
+            : '') + '</td>' +
         '</tr>';
     });
 
@@ -2148,9 +2167,50 @@
     h += '<tr style="border-top:2px solid #dadce0">' +
       '<td style="' + cell + '" colspan="5"><b>Total (' + fmtNum(rows.length) + ')</b></td>' +
       '<td style="' + cell + ';white-space:nowrap"><b>' + fmtAr(total) + '</b></td>' +
-      '<td style="' + cell + '"></td></tr>';
+      '<td style="' + cell + '"></td><td style="' + cell + '"></td></tr>';
 
     el('histTable').innerHTML = h + '</table>';
+  }
+
+  // ---------- Historique: facture PDF (Kim, 2026-09-11) ----------
+  //
+  // "Imprimer" in the Facture column: factPdf (FactureServer.js) builds
+  // the PDF of the order's invoice, saves it in the Drive folder
+  // "Factures" and returns its link. Same tab rule as histPrint: the tab
+  // opens ON THE CLICK, before the server call, or the browser blocks it.
+  function histFacture(btn, i) {
+    const o = histShown[i];
+    if (!o) return;
+    btn.disabled = true;
+    btn.textContent = 'Préparation…';
+    const win = window.open('', '_blank');
+    if (win) {
+      try {
+        win.document.write('<title>Facture</title>' +
+          '<p style="font-family:Arial,sans-serif;font-size:18px">Préparation de la facture…</p>');
+      } catch (err) { /* blank tab is acceptable */ }
+    }
+    function done() {
+      btn.disabled = false;
+      btn.textContent = 'Imprimer';
+    }
+    google.script.run
+      .withSuccessHandler(function (r) {
+        done();
+        const link = '<a href="' + esc(r.url) + '" target="_blank">' + esc(r.name) + '</a>';
+        if (win && !win.closed) {
+          win.location.href = r.url;
+          setStatus('ok', 'Facture prête : ' + link);
+        } else {
+          setStatusAndScroll('warn', 'Facture prête. Le navigateur a bloqué le nouvel onglet : ' + link);
+        }
+      })
+      .withFailureHandler(function (e) {
+        done();
+        if (win && !win.closed) win.close();
+        setStatusAndScroll('err', esc(e.message));
+      })
+      .factPdf(o.orderNumber);
   }
 
   // ---------- Historique: rapport (Kim, 2026-09-11) ----------

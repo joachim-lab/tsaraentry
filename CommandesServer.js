@@ -4169,10 +4169,11 @@ function testRecurrences() {
  *   A Client  B Telephone  C Localisation  D Type client
  *   E Dernier prix/alevin  F Dernier prix/kg
  *   G Total alevins  H Total kg  I Nb achats  J Notes
- *   L1 = the rebuild stamp, printed at the top of the tab so a worker
+ *   K NIF  L STAT (appended 2026-09-11 for the invoice PDF, FactureServer.js)
+ *   N1 = the rebuild stamp (L1 until 2026-09-11), printed at the top of the tab so a worker
  *        can see the age of the numbers.
  *
- * WRITEABLE FROM HERE: B, C and J. Everything else is overwritten by
+ * WRITEABLE FROM HERE: B, C, J, K and L. Everything else is overwritten by
  * the next rebuild, so an edit to it would vanish without a message -
  * the worst kind of failure. The client name is NOT writeable either:
  * renaming here would not rename the order rows the totals come from,
@@ -4192,11 +4193,13 @@ function testRecurrences() {
 
 const CRM_SHEET = "CRM";
 const CRM_START = 2;                       // row 1 = headers
-const CRM_COLS = 10;                       // A..J
+const CRM_COLS = 12;                       // A..L
 const CRM_COL_TEL = 2;                      // B
 const CRM_COL_LOC = 3;                     // C
 const CRM_COL_NOTES = 10;                  // J
-const CRM_COL_STAMP = 12;                  // L1
+const CRM_COL_NIF = 11;                    // K
+const CRM_COL_STAT = 12;                   // L
+const CRM_COL_STAMP = 14;                  // N1, two columns clear of L
 
 function crmEntrySheet() {
   const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
@@ -4239,18 +4242,23 @@ function crmClientList() {
       totAl: cmdToNum(vals[i][6]),
       totKg: cmdToNum(vals[i][7]),
       nb: cmdToNum(vals[i][8]),
-      notes: String(vals[i][9] == null ? "" : vals[i][9]).trim()
+      notes: String(vals[i][9] == null ? "" : vals[i][9]).trim(),
+      nif: String(vals[i][10] == null ? "" : vals[i][10]).trim(),
+      stat: String(vals[i][11] == null ? "" : vals[i][11]).trim()
     });
   }
   return { stamp: stamp, rows: out };
 }
 
 /**
- * Write Telephone (B), Localisation (C) and Notes (J) for one client row.
+ * Write Telephone (B), Localisation (C), Notes (J), NIF (K) and STAT (L)
+ * for one client row. nif / stat null or absent = K / L untouched: a
+ * page loaded before 2026-09-11 sends five arguments and must not
+ * blank a NIF it never showed.
  * clientSeen is the name the browser displayed; it is the staleness
  * proof, not a value to write.
  */
-function crmSaveInfo(row, clientSeen, tel, loc, notes) {
+function crmSaveInfo(row, clientSeen, tel, loc, notes, nif, stat) {
   const r = Math.floor(Number(row));
   if (!(r >= CRM_START)) throw new Error("Ligne invalide.");
 
@@ -4268,6 +4276,9 @@ function crmSaveInfo(row, clientSeen, tel, loc, notes) {
   sh.getRange(r, CRM_COL_TEL).setValue(String(tel == null ? "" : tel).trim());
   sh.getRange(r, CRM_COL_LOC).setValue(String(loc == null ? "" : loc).trim());
   sh.getRange(r, CRM_COL_NOTES).setValue(String(notes == null ? "" : notes).trim());
+  if (nif != null && stat != null) {
+    sh.getRange(r, CRM_COL_NIF, 1, 2).setValues([[String(nif).trim(), String(stat).trim()]]);
+  }
   SpreadsheetApp.flush();
   return true;
 }
@@ -4340,7 +4351,7 @@ function crmFillContact(client, tel) {
     // Not in the table: append. Column B carries the "@" text format
     // set when the tab was created, so a leading 0 survives.
     sh.getRange(Math.max(last + 1, CRM_START), 1, 1, CRM_COLS)
-      .setValues([[name, phone, "", "", "", "", "", "", "", ""]]);
+      .setValues([[name, phone, "", "", "", "", "", "", "", "", "", ""]]);
   } catch (err) {
     Logger.log("crmFillContact(" + client + "): " + err);
   }
@@ -4373,7 +4384,7 @@ function crmClientAdd(p) {
 
   const row = Math.max(last + 1, CRM_START);
   sh.getRange(row, 1, 1, CRM_COLS).setValues(
-    [[name, tel, loc, "", "", "", "", "", "", notes]]);
+    [[name, tel, loc, "", "", "", "", "", "", notes, "", ""]]);
   SpreadsheetApp.flush();
   return { row: row };
 }
