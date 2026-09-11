@@ -3382,8 +3382,8 @@ function testHistorique() {
 
 /***************************************************************
  * RAPPORT HISTORIQUE (Kim, 2026-09-11) - the "Imprimer" block at the
- * top of the Historique tab. READS the Commandes sheet. WRITES ONLY
- * the report file.
+ * top of the Historique tab. READS the Commandes sheet. WRITES ONLY a
+ * new report file.
  *
  * WHAT IT LISTS: the orders of histList() whose Date commande (E)
  * falls between two dates, both included, filtered by status.
@@ -3402,20 +3402,20 @@ function testHistorique() {
  * come from histList, so the report total equals the Historique total
  * for the same orders.
  *
- * THE FILE: ONE Google Sheet, "Rapport commandes", rewritten at each
- * click. Its id is in the script property HIST_REPORT_SS_ID. The first
- * run creates it (testHistReport, from the editor). The web app runs
- * as Kim, so Kim owns the file: staff need it SHARED (lecteur is
- * enough), or they get "Accès refusé".
- * If the file is ever deleted: delete the property, run
- * testHistReport, share the new file again.
+ * THE FILES (Kim, 2026-09-11, second version): every click makes a
+ * NEW Google Sheet in the Drive folder "Rapports Commande"
+ * (HIST_REPORT_CFG.FOLDER_ID). Old reports stay there. The web app
+ * runs as Kim, so Kim owns every file, and every file takes the
+ * FOLDER's sharing: the folder decides who can open a report.
+ * The first version used one fixed file "Rapport commandes" and the
+ * script property HIST_REPORT_SS_ID. Both are dead.
  *
- * The file takes the Commandes file's time zone at each run, so a date
- * shows the same day in both files.
+ * Each file takes the Commandes file's time zone, so a date shows the
+ * same day in both files.
  ***************************************************************/
 
 const HIST_REPORT_CFG = {
-  PROP: "HIST_REPORT_SS_ID",
+  FOLDER_ID: "12N0S8Z_Z_y580R28g0RwS824Q6SFP3Cs",   // Drive: "Rapports Commande"
   NAME: "Rapport commandes",
   SHEET: "Rapport",
   HEADER_ROW: 4,
@@ -3443,29 +3443,10 @@ function histReportStatut(o) {
   return "Non livré";
 }
 
-/** The report spreadsheet: created once, then always the same file. */
-function histReportFile() {
-  const props = PropertiesService.getScriptProperties();
-  const id = props.getProperty(HIST_REPORT_CFG.PROP);
-  if (!id) {
-    const created = SpreadsheetApp.create(HIST_REPORT_CFG.NAME);
-    created.getSheets()[0].setName(HIST_REPORT_CFG.SHEET);
-    props.setProperty(HIST_REPORT_CFG.PROP, created.getId());
-    return created;
-  }
-  try {
-    return SpreadsheetApp.openById(id);
-  } catch (e) {
-    throw new Error("Fichier « " + HIST_REPORT_CFG.NAME + " » introuvable (" + id +
-      "). Kim : tsaraentry -> Paramètres du projet -> supprimer la propriété " +
-      HIST_REPORT_CFG.PROP + ", puis lancer testHistReport. (" + e.message + ")");
-  }
-}
-
 /**
- * Build the report. Called by the "Imprimer" button.
+ * Build one report file. Called by the "Imprimer" button.
  * p = { debut: "JJ/MM/AA", fin: "JJ/MM/AA", nonLivre, livreImpaye, paye }
- * Returns { url, count, sansDate }.
+ * Returns { url, name, count, sansDate }.
  */
 function histReport(p) {
   p = p || {};
@@ -3511,58 +3492,58 @@ function histReport(p) {
     ];
   });
 
-  // Two clicks at the same moment would write one file twice at once.
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  try {
-    const ss = histReportFile();
-    ss.setSpreadsheetTimeZone(tz);
-    const sh = ss.getSheetByName(HIST_REPORT_CFG.SHEET) || ss.insertSheet(HIST_REPORT_CFG.SHEET);
-    const HR = HIST_REPORT_CFG.HEADER_ROW;
-    const NCOL = HIST_REPORT_CFG.HEADERS.length;
-    const lastRow = HR + data.length + 1;           // header + orders + total
+  // Folder FIRST: a wrong or unreachable folder fails before any file
+  // is made, so no stray report lands in the My Drive root.
+  const folder = DriveApp.getFolderById(HIST_REPORT_CFG.FOLDER_ID);
+  const now = new Date();
+  // File name without "/": a downloaded .xlsx would mangle it.
+  const name = HIST_REPORT_CFG.NAME + " " + debut.label.replace(/\//g, "-") +
+    " au " + fin.label.replace(/\//g, "-") +
+    " (généré " + Utilities.formatDate(now, tz, "dd-MM-yy HH:mm").replace(":", "h") + ")";
+  const ss = SpreadsheetApp.create(name);
+  DriveApp.getFileById(ss.getId()).moveTo(folder);
+  ss.setSpreadsheetTimeZone(tz);
+  const sh = ss.getSheets()[0].setName(HIST_REPORT_CFG.SHEET);
 
-    sh.clear();
-    sh.setFrozenRows(0);
-    // Exact size: nothing is loaded or printed below the total.
-    if (sh.getMaxRows() < lastRow) sh.insertRowsAfter(sh.getMaxRows(), lastRow - sh.getMaxRows());
-    if (sh.getMaxRows() > lastRow) sh.deleteRows(lastRow + 1, sh.getMaxRows() - lastRow);
-    if (sh.getMaxColumns() < NCOL) sh.insertColumnsAfter(sh.getMaxColumns(), NCOL - sh.getMaxColumns());
-    if (sh.getMaxColumns() > NCOL) sh.deleteColumns(NCOL + 1, sh.getMaxColumns() - NCOL);
+  const HR = HIST_REPORT_CFG.HEADER_ROW;
+  const NCOL = HIST_REPORT_CFG.HEADERS.length;
+  const lastRow = HR + data.length + 1;           // header + orders + total
 
-    sh.getRange(HR, 1, 1, NCOL).setValues([HIST_REPORT_CFG.HEADERS])
-      .setFontWeight("bold").setBackground("#e8eaed");
-    if (data.length) {
-      // Phone as text, or "034..." loses its leading zero.
-      sh.getRange(HR + 1, 5, data.length, 1).setNumberFormat("@");
-      sh.getRange(HR + 1, 1, data.length, NCOL).setValues(data);
-      sh.getRange(HR + 1, 1, data.length, 1).setNumberFormat("dd/mm/yy");
-    }
-    sh.getRange(lastRow, 1, 1, NCOL).setValues([[
-      "Total", data.length + " commande(s)", "", "", "", kg || "", alv || "", ar || "", ""
-    ]]).setFontWeight("bold").setBorder(true, null, null, null, null, null);
-    sh.getRange(HR + 1, 6, data.length + 1, 1).setNumberFormat("#,##0.0");
-    sh.getRange(HR + 1, 7, data.length + 1, 2).setNumberFormat("#,##0");
-    sh.setFrozenRows(HR);                            // header repeats on every printed page
-    sh.autoResizeColumns(1, NCOL);
+  // Exact size: a new file is 1000 x 26; nothing below the total.
+  if (sh.getMaxRows() < lastRow) sh.insertRowsAfter(sh.getMaxRows(), lastRow - sh.getMaxRows());
+  if (sh.getMaxRows() > lastRow) sh.deleteRows(lastRow + 1, sh.getMaxRows() - lastRow);
+  if (sh.getMaxColumns() > NCOL) sh.deleteColumns(NCOL + 1, sh.getMaxColumns() - NCOL);
 
-    // Title AFTER the resize: a long title in A1 would widen column A.
-    const now = Utilities.formatDate(new Date(), tz, "dd/MM/yy HH:mm");
-    sh.getRange(1, 1).setValue("Rapport commandes — du " + debut.label + " au " + fin.label)
-      .setFontWeight("bold").setFontSize(14);
-    sh.getRange(2, 1).setValue("Onglet " + h.annee + " · statuts : " + picked.join(", ") +
-      " · généré le " + now);
-    SpreadsheetApp.flush();
-
-    return { url: ss.getUrl() + "#gid=" + sh.getSheetId(), count: data.length, sansDate: sansDate };
-  } finally {
-    lock.releaseLock();
+  sh.getRange(HR, 1, 1, NCOL).setValues([HIST_REPORT_CFG.HEADERS])
+    .setFontWeight("bold").setBackground("#e8eaed");
+  if (data.length) {
+    // Phone as text, or "034..." loses its leading zero.
+    sh.getRange(HR + 1, 5, data.length, 1).setNumberFormat("@");
+    sh.getRange(HR + 1, 1, data.length, NCOL).setValues(data);
+    sh.getRange(HR + 1, 1, data.length, 1).setNumberFormat("dd/mm/yy");
   }
+  sh.getRange(lastRow, 1, 1, NCOL).setValues([[
+    "Total", data.length + " commande(s)", "", "", "", kg || "", alv || "", ar || "", ""
+  ]]).setFontWeight("bold").setBorder(true, null, null, null, null, null);
+  sh.getRange(HR + 1, 6, data.length + 1, 1).setNumberFormat("#,##0.0");
+  sh.getRange(HR + 1, 7, data.length + 1, 2).setNumberFormat("#,##0");
+  sh.setFrozenRows(HR);                            // header repeats on every printed page
+  sh.autoResizeColumns(1, NCOL);
+
+  // Title AFTER the resize: a long title in A1 would widen column A.
+  sh.getRange(1, 1).setValue(HIST_REPORT_CFG.NAME + " — du " + debut.label + " au " + fin.label)
+    .setFontWeight("bold").setFontSize(14);
+  sh.getRange(2, 1).setValue("Onglet " + h.annee + " · statuts : " + picked.join(", ") +
+    " · généré le " + Utilities.formatDate(now, tz, "dd/MM/yy HH:mm"));
+  SpreadsheetApp.flush();
+
+  return { url: ss.getUrl() + "#gid=" + sh.getSheetId(), name: name,
+           count: data.length, sansDate: sansDate };
 }
 
 /** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> testHistReport
- *  Writes ONLY the report file, and creates it on the first run.
- *  Last month, all three statuses. Logs the counts and the link. */
+ *  Makes ONE new report file in "Rapports Commande": last month, all
+ *  three statuses. Logs the counts and the link. */
 function testHistReport() {
   const tz = Session.getScriptTimeZone();
   const now = new Date();
@@ -3570,7 +3551,7 @@ function testHistReport() {
   const fin = Utilities.formatDate(new Date(now.getFullYear(), now.getMonth(), 0), tz, "dd/MM/yy");
   const r = histReport({ debut: debut, fin: fin, nonLivre: true, livreImpaye: true, paye: true });
   Logger.log("Période " + debut + " -> " + fin + " : " + r.count + " commandes · sans date : " + r.sansDate);
-  Logger.log("Fichier : " + r.url);
+  Logger.log("Fichier : " + r.name + " · " + r.url);
 }
 
 
