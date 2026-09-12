@@ -150,6 +150,33 @@
     .err  { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #fce8e6; color: #c5221f; font-size: 16px; }
     .ok   { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #e6f4ea; color: #188038; font-size: 16px; }
     .warn { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #fef7e0; color: #b06000; font-size: 15px; }
+    /* THE STOCK BAR (Kim, 2026-09-12). The floor field used to be a
+       float:right span inside the .warn band: on the 788px form panes it
+       dropped out of the yellow band altogether, and the label, the input,
+       the "g" and the button sat on four different baselines. Flex row
+       instead - readout left, floor control right, one boxed group that
+       wraps whole on a narrow screen. */
+    .stockBar { margin-top: 0; margin-bottom: 10px; display: flex;
+                align-items: center; flex-wrap: wrap; gap: 10px 16px; }
+    /* Button + readout are ONE unit: min-width max-content keeps the
+       sentence on a single line, so the floor control drops to a second
+       row instead of squeezing the numbers into three. The min() caps it
+       on a phone, where the sentence itself must be allowed to wrap. */
+    .stockMain { flex: 1 1 auto; min-width: min(100%, max-content);
+                 display: flex; align-items: center; gap: 12px; }
+    .stockBtn { flex: 0 0 auto; background: #188038; color: #fff; }
+    .stockRead { font-size: 15px; line-height: 1.35; }
+    .floorWrap { flex: 0 0 auto; margin-left: auto; }
+    .floorBox { display: inline-flex; align-items: center; gap: 8px;
+                padding: 4px 5px 4px 10px; border: 1px solid #f0d79a;
+                border-radius: 6px; background: rgba(255, 255, 255, 0.72);
+                white-space: nowrap; }
+    .floorBox label { display: inline; margin: 0; font-weight: normal;
+                      font-size: 14px; color: #5f6368; }
+    .floorBox input { width: 64px; margin-top: 0; padding: 5px 6px;
+                      font-size: 15px; text-align: right;
+                      border: 1px solid #dadce0; border-radius: 4px; }
+    .floorBox .unit { margin-left: -4px; font-size: 14px; color: #5f6368; }
     .banner { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #e8f0fe; font-size: 16px; }
     .lineHead { display: flex; justify-content: space-between; align-items: center; }
     .del { color: #c5221f; cursor: pointer; font-size: 15px; }
@@ -1147,12 +1174,13 @@
    * duplicate id would silently bind the wrong field.
    */
   function stockBarHtml(sfx) {
-    return '<div class="warn" style="margin-top:0;margin-bottom:10px">' +
-      '<button class="demBtn" onclick="demVerifStock()" ' +
-        'style="background:#188038;color:#fff;border-color:#188038">' +
-        'Actualiser le stock</button> ' +
-      '<span id="pool' + sfx + '" class="muted"></span>' +
-      '<span id="floorWrap' + sfx + '" class="muted" style="float:right"></span></div>';
+    return '<div class="warn stockBar">' +
+      '<div class="stockMain">' +
+        '<button class="demBtn stockBtn" onclick="demVerifStock()">' +
+          'Actualiser le stock</button>' +
+        '<span id="pool' + sfx + '" class="stockRead"></span>' +
+      '</div>' +
+      '<span id="floorWrap' + sfx + '" class="floorWrap"></span></div>';
   }
 
   /** Both pools in one sentence. '' until a check has run. */
@@ -1170,10 +1198,13 @@
   /** The floor field for one bar. Blank until a check has run. */
   function floorFieldHtml(inputId) {
     if (demGrBlock == null) return '';
-    return 'Poids minimal de vente : ' +
+    return '<span class="floorBox">' +
+      '<label for="' + inputId + '">Poids minimal de vente</label>' +
       '<input id="' + inputId + '" type="number" min="50" max="2000" ' +
-        'style="width:70px;padding:4px" value="' + demGrBlock + '"> g ' +
-      '<button class="demBtn" onclick="demFloorSave(\'' + inputId + '\')">Changer</button>';
+        'value="' + demGrBlock + '">' +
+      '<span class="unit">g</span>' +
+      '<button class="demBtn" onclick="demFloorSave(\'' + inputId + '\')">' +
+        'Changer</button></span>';
   }
 
   /** Repaint every bar that is currently in the DOM. */
