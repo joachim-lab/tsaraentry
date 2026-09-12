@@ -87,23 +87,28 @@
     .demBtn { padding: 5px 8px; font-size: 14px; background: #f1f3f4;
               color: #202124; }
     .demBtn:disabled { color: #9aa0a6; cursor: not-allowed; }
-    /* WhatsApp report as a centred popup (Kim, 2026-09-12). #waZone gets
-       .waPop only for the editable box and the confirm step; the
-       "deja envoyee" line stays inline under the order. */
-    .waPop { position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    /* ONE centred popup shell for this screen (Kim, 2026-09-12).
+       Two users, both zones that live inside the open order card:
+         #waZone  - the editable WhatsApp report and its confirm step;
+                    the "deja envoyee" line stays inline under the order.
+         #modZone - Modifier la commande.
+       The class is put on the ZONE, never on the card, so clearing the
+       class returns the zone to the flow. position:fixed, so no parent
+       may carry transform or filter. */
+    .popup { position: fixed; top: 0; left: 0; right: 0; bottom: 0;
              z-index: 9000; background: rgba(13, 42, 26, 0.45);
              display: flex; align-items: center; justify-content: center;
              padding: 20px; }
-    .waPop > .card { width: min(680px, 94vw); max-height: 88vh;
+    .popup > .card { width: min(680px, 94vw); max-height: 88vh;
                      overflow-y: auto; position: relative; margin: 0;
                      background: #fff;
                      box-shadow: 0 14px 44px rgba(0, 0, 0, 0.28); }
-    .waX { position: absolute; top: 10px; right: 12px;
-           width: 34px; height: 34px; padding: 0;
-           background: #fff; color: #5C665E;
-           border: 1px solid #CDD6CF; border-radius: 8px;
-           font-size: 20px; line-height: 1; cursor: pointer; }
-    .waX:hover { background: #F4F7F5; }
+    .popX { position: absolute; top: 10px; right: 12px;
+            width: 34px; height: 34px; padding: 0;
+            background: #fff; color: #5C665E;
+            border: 1px solid #CDD6CF; border-radius: 8px;
+            font-size: 20px; line-height: 1; cursor: pointer; }
+    .popX:hover { background: #F4F7F5; }
     /* Prix poisson tab: a read-only price list. Horizontal scroll on the
        wrapper, never on the page body - the fry grid is 7 columns. */
     .prixWrap { overflow-x: auto; }
@@ -3195,10 +3200,10 @@
           zone.innerHTML = waSentHtml(res.sent);
           return;
         }
-        zone.className = 'waPop';
+        zone.className = 'popup';
         zone.innerHTML =
           '<div class="card">' +
-            '<button class="waX" onclick="waHide(\'' + esc(o.key) + '\')" aria-label="Fermer">×</button>' +
+            '<button class="popX" onclick="waHide(\'' + esc(o.key) + '\')" aria-label="Fermer">×</button>' +
             '<h3>Rapport de livraison — WhatsApp</h3>' +
             '<label for="waText">Remarques / Instructions</label>' +
             '<textarea id="waText" rows="14" ' +
@@ -3249,10 +3254,10 @@
   function waAskConfirm(key) {
     const zone = el('waZone');
     if (!zone) return;
-    zone.className = 'waPop';
+    zone.className = 'popup';
     zone.innerHTML =
       '<div class="card">' +
-        '<button class="waX" onclick="waBack(\'' + esc(key) + '\')" aria-label="Fermer">×</button>' +
+        '<button class="popX" onclick="waBack(\'' + esc(key) + '\')" aria-label="Fermer">×</button>' +
         '<h3>Message envoyé ?</h3>' +
         '<div class="muted" style="font-size:15px;padding-bottom:8px">' +
           'WhatsApp a été ouvert. Répondez Oui seulement si le message est parti. ' +
@@ -3837,7 +3842,14 @@
         modLines = lines;
         const qtyOn = !modDelivered;
         const lv = String(o.livraison || '').trim() || 'enlevement';
+        el('modZone').className = 'popup';
         el('modZone').innerHTML =
+          '<div class="card">' +
+            '<button class="popX" onclick="closeModify()" ' +
+              'aria-label="Fermer">\u00d7</button>' +
+            '<h3>Modifier la commande \u2014 ' +
+              esc(o.orderNumber || '(sans num\u00e9ro)') + ' \u00b7 ' +
+              esc(o.client) + '</h3>' +
           '<div class="row" style="margin-top:8px">' +
             '<div><label>Livraison</label>' +
               '<select id="uModLiv" onchange="modLivChanged(true)">' +
@@ -3890,8 +3902,15 @@
           (qtyOn ? '' :
             '<div class="warn">Commande livr\u00e9e \u2014 seuls les prix ' +
             'sont modifiables.</div>') +
-          '<button class="go" id="btnModSave" onclick="doModify()">' +
-            'Enregistrer les modifications</button>';
+          '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
+            '<button class="go" id="btnModSave" onclick="doModify()">' +
+              'Enregistrer les modifications</button>' +
+            '<button id="btnModClose" onclick="closeModify()" ' +
+              'style="margin-top:18px;background:#fff;color:#5f6368;' +
+              'border:1px solid #dadce0;border-radius:4px;padding:10px 14px;' +
+              'font-size:17px;cursor:pointer">Fermer</button>' +
+          '</div>' +
+          '</div>';
         modLivChanged();
       })
       .withFailureHandler(e => {
@@ -3899,6 +3918,21 @@
         setStatusAndScroll('err', esc(e.message));
       })
       .cmdGetOrderLines(o.rows);
+  }
+
+  /**
+   * Close the Modifier popup. The class goes back to '' so the zone
+   * returns to the flow as an empty block, and the Modifier button is
+   * armed again: loadModify disables it and nothing else re-enables it
+   * on a successful load. Nothing typed is kept - the form is rebuilt
+   * from the sheet on the next open, which is the only state that is
+   * true.
+   */
+  function closeModify() {
+    const z = el('modZone');
+    if (z) { z.className = ''; z.innerHTML = ''; }
+    const b = el('btnMod');
+    if (b) b.disabled = false;
   }
 
   /**
