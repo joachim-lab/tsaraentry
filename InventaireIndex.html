@@ -28,6 +28,12 @@
     .sep { margin-top: 22px; padding-top: 6px; border-top: 1px solid #dadce0; font-size: 15px; color: #5f6368; }
     #reloadBtn { background: none; border: none; color: #1a73e8; padding: 0; margin-top: 6px; font-size: 15px; text-decoration: underline; }
       input[readonly], textarea[readonly], select[disabled] { background: #f1f3f4; color: #5f6368; }
+    /* Historique only: nine columns do not fit the 640px form width. */
+    body.wide { max-width: 1020px; }
+    .muted { color: #5f6368; font-size: 15px; }
+    #hSearch { max-width: 420px; margin-top: 0; }
+    #histTable table { margin-top: 8px; }
+    #histTable th, #histTable td { border: 1px solid #dadce0; }
   </style>
   <?!= include('Theme'); ?>
   <?!= include('Spinner'); ?>
@@ -41,6 +47,7 @@
   <div class="modes">
     <button id="modeCmdBtn" class="mode active" onclick="setMode('cmd')">Nouvelle commande</button>
     <button id="modeRecBtn" class="mode" onclick="setMode('rec')">Réception d&#39;une commande</button>
+    <button id="modeHistBtn" class="mode" onclick="setMode('hist')">Historique</button>
   </div>
 
   <div id="secCmd">
@@ -83,6 +90,14 @@
     <button id="recSubmitBtn" onclick="submitReception()">Enregistrer la réception</button>
   </div>
 
+  <div id="secHist" style="display:none">
+    <div style="margin-top:14px">
+      <input type="text" id="hSearch" placeholder="Filtrer : type, unité, statut ou commentaire" oninput="drawInvHist()">
+    </div>
+    <div id="histInfo" class="muted" style="margin-top:10px">Chargement…</div>
+    <div id="histTable"></div>
+  </div>
+
   <div id="loading">Enregistrement en cours...</div>
 
   <script>
@@ -102,13 +117,17 @@
     document.getElementById('recDate').value = todayISO();
 
     function setMode(m) {
-      const isCmd = (m === 'cmd');
-      document.getElementById('secCmd').style.display = isCmd ? '' : 'none';
-      document.getElementById('secRec').style.display = isCmd ? 'none' : '';
-      document.getElementById('modeCmdBtn').className = isCmd ? 'mode active' : 'mode';
-      document.getElementById('modeRecBtn').className = isCmd ? 'mode' : 'mode active';
+      document.getElementById('secCmd').style.display  = (m === 'cmd')  ? '' : 'none';
+      document.getElementById('secRec').style.display  = (m === 'rec')  ? '' : 'none';
+      document.getElementById('secHist').style.display = (m === 'hist') ? '' : 'none';
+      document.getElementById('modeCmdBtn').className  = (m === 'cmd')  ? 'mode active' : 'mode';
+      document.getElementById('modeRecBtn').className  = (m === 'rec')  ? 'mode active' : 'mode';
+      document.getElementById('modeHistBtn').className = (m === 'hist') ? 'mode active' : 'mode';
+      // The form is 640px wide. The history table is nine columns.
+      document.body.className = (m === 'hist') ? 'wide' : '';
       hideMsg();
-      if (!isCmd) loadPendingRows();
+      if (m === 'rec') loadPendingRows();
+      if (m === 'hist') renderInvHist();
     }
 
     function fillSelect(id, values) {
@@ -251,6 +270,96 @@
           showMsg('err', e.message);
         })
         .completeInventaireReception({ row, dateReception, nbreRecu, commentaire });
+    }
+
+    // ---------- MODE: historique ----------
+    //
+    // Read-only table of the whole Inventaire tab, newest first.
+    // Rebuilt on every visit: a history that lags the two tabs next
+    // to it would be worse than none. The filter is local, over the
+    // rows already fetched - a round trip per keystroke buys nothing.
+
+    let histRows = [];
+
+    const HIST_COLOR = {
+      'En attente': '#1a73e8',
+      'Ecart':      '#e37400',
+      'Non livre':  '#80868b',
+      'Recu':       '#188038'
+    };
+
+    const HIST_LABEL = {
+      'En attente': 'En attente',
+      'Ecart':      '\u00c9cart',
+      'Non livre':  'Non livr\u00e9',
+      'Recu':       'Re\u00e7u'
+    };
+
+    function renderInvHist() {
+      document.getElementById('histInfo').textContent = 'Chargement\u2026';
+      document.getElementById('histTable').innerHTML = '';
+      google.script.run
+        .withSuccessHandler(function (h) {
+          histRows = h.rows || [];
+          drawInvHist();
+        })
+        .withFailureHandler(function (e) {
+          document.getElementById('histInfo').textContent = '';
+          document.getElementById('histTable').innerHTML =
+            '<div style="color:#c5221f">Erreur : ' + esc(e.message) + '</div>';
+        })
+        .invHistList();
+    }
+
+    function drawInvHist() {
+      const box = document.getElementById('histTable');
+      const info = document.getElementById('histInfo');
+      const q = (document.getElementById('hSearch').value || '').trim().toLowerCase();
+
+      const rows = q
+        ? histRows.filter(function (r) {
+            return (r.type + ' ' + r.unite + ' ' + HIST_LABEL[r.statut] + ' ' + r.commentaire)
+                     .toLowerCase().indexOf(q) !== -1;
+          })
+        : histRows;
+
+      info.textContent = rows.length + ' ligne(s)' +
+        (q ? ' sur ' + histRows.length : '');
+
+      if (!rows.length) {
+        box.innerHTML = '<div style="color:#5f6368;margin-top:10px">Aucune ligne.</div>';
+        return;
+      }
+
+      const cell = 'padding:6px 8px';
+      var h = '<table><tr style="text-align:left">' +
+        '<th style="' + cell + '">Type</th>' +
+        '<th style="' + cell + '">Date commande</th>' +
+        '<th style="' + cell + '">Unit\u00e9</th>' +
+        '<th style="' + cell + '">Command\u00e9</th>' +
+        '<th style="' + cell + '">Date r\u00e9ception</th>' +
+        '<th style="' + cell + '">Re\u00e7u</th>' +
+        '<th style="' + cell + '">\u00c9cart</th>' +
+        '<th style="' + cell + '">Statut</th>' +
+        '<th style="' + cell + '">Commentaire</th></tr>';
+
+      rows.forEach(function (r) {
+        const col = HIST_COLOR[r.statut] || '#3c4043';
+        h += '<tr>' +
+          '<td style="' + cell + '">' + esc(r.type) + '</td>' +
+          '<td style="' + cell + ';white-space:nowrap">' + esc(r.dateCommande) + '</td>' +
+          '<td style="' + cell + '">' + esc(r.unite) + '</td>' +
+          '<td style="' + cell + ';white-space:nowrap">' + esc(r.nbreCommande) + '</td>' +
+          '<td style="' + cell + ';white-space:nowrap">' + (esc(r.dateReception) || '\u2014') + '</td>' +
+          '<td style="' + cell + ';white-space:nowrap">' + (esc(r.nbreRecu) || '\u2014') + '</td>' +
+          '<td style="' + cell + ';white-space:nowrap">' + (esc(r.difference) || '\u2014') + '</td>' +
+          '<td style="' + cell + ';color:' + col + ';font-weight:bold;white-space:nowrap">' +
+            esc(HIST_LABEL[r.statut] || r.statut) + '</td>' +
+          '<td style="' + cell + '">' + esc(r.commentaire) + '</td>' +
+          '</tr>';
+      });
+
+      box.innerHTML = h + '</table>';
     }
 
     function showMsg(cls, text) {

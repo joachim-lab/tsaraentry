@@ -198,6 +198,91 @@ function getPendingInventaireRows() {
   return out;
 }
 
+/***************************************************************
+ * HISTORIQUE - third mode on the Inventaire screen. READ ONLY.
+ *
+ * Every entry of the sheet, newest order date on top. Nothing is
+ * written and nothing is hidden: a history that drops settled rows
+ * is not a history.
+ *
+ * DISPLAY VALUES, not raw values: dates and numbers arrive already
+ * formatted by the sheet, so the table shows what the sheet shows.
+ * The raw values are read too, but only to sort by the real date
+ * and to decide the statut.
+ *
+ * STATUT - two facts, date reception (col E) and nbre recu (col F):
+ *   En attente   neither filled
+ *   Non livre    recu = 0 (that is how a rupture de stock is recorded)
+ *   Ecart        recu filled and different from commande
+ *   Recu         recu filled and equal to commande
+ *
+ * ECART shows column G, the sheet's own =D-F, and only once a
+ * reception exists. On a pending row G equals the whole quantity
+ * ordered, which is noise, not an ecart.
+ ***************************************************************/
+function invHistList() {
+  const sh = openInventaireSheet();
+  const lastDataRow = findNextInventaireRow(sh) - 1;
+  if (lastDataRow < INV_CFG.START_ROW) return { rows: [] };
+
+  const n = lastDataRow - INV_CFG.START_ROW + 1;
+  const rng = sh.getRange(INV_CFG.START_ROW, 1, n, INV_CFG.COMMENT_COL);
+  const disp = rng.getDisplayValues();
+  const vals = rng.getValues();
+
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const d = disp[i];
+    const v = vals[i];
+    if (v[0] === "" || v[0] === null) continue;
+
+    const hasDateRec = v[4] !== "" && v[4] !== null;
+    const hasRecu = v[5] !== "" && v[5] !== null;
+    const cmde = Number(v[3]);
+    const recu = hasRecu ? Number(v[5]) : null;
+
+    let statut;
+    if (!hasDateRec && !hasRecu) statut = "En attente";
+    else if (recu === 0) statut = "Non livre";
+    else if (isFinite(cmde) && recu !== null && recu !== cmde) statut = "Ecart";
+    else statut = "Recu";
+
+    const dateCmd = v[1];
+    out.push({
+      row: INV_CFG.START_ROW + i,
+      type: d[0],
+      dateCommande: d[1],
+      unite: d[2],
+      nbreCommande: d[3],
+      dateReception: d[4],
+      nbreRecu: d[5],
+      difference: hasRecu ? d[6] : "",
+      commentaire: d[7],
+      statut: statut,
+      sortMs: (Object.prototype.toString.call(dateCmd) === "[object Date]")
+                ? dateCmd.getTime() : 0
+    });
+  }
+
+  out.sort(function (a, b) {
+    return (b.sortMs - a.sortMs) || (b.row - a.row);
+  });
+  return { rows: out };
+}
+
+/** RUN FROM EDITOR: tsaraentry -> InventaireServer.js -> testInventaireHistorique
+ *  Read-only. Prints the count per statut. */
+function testInventaireHistorique() {
+  const h = invHistList();
+  const byStat = {};
+  h.rows.forEach(function (r) { byStat[r.statut] = (byStat[r.statut] || 0) + 1; });
+  Logger.log(h.rows.length + " lignes");
+  Object.keys(byStat).sort().forEach(function (k) {
+    Logger.log("  " + k + " : " + byStat[k]);
+  });
+}
+
+
 /**
  * Fill the delivery of one pending row: column E (Date Reception),
  * column F (Nbre recu) and, only when the user typed one, column H
