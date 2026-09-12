@@ -3131,6 +3131,21 @@
     if (z) { z.innerHTML = ''; z.className = ''; }
   }
 
+  /** X on the editable popup: keep a visible way back under the order. */
+  function waHide(key) {
+    const z = el('waZone');
+    if (!z) return;
+    z.className = '';
+    z.innerHTML =
+      '<div class="card"><div style="display:flex;align-items:center;' +
+        'gap:14px;flex-wrap:wrap">' +
+        '<span class="muted" style="font-size:15px">' +
+          'Rapport de livraison WhatsApp non envoy\u00e9</span>' +
+        '<button class="go" style="margin-top:0;padding:7px 12px;font-size:15px" ' +
+          'onclick="waBack(\'' + esc(key) + '\')">Rouvrir le rapport</button>' +
+      '</div></div>';
+  }
+
   /** The one line an order that has already gone out is allowed to show. */
   function waSentHtml(stamp) {
     return '<div class="card"><div class="muted" style="font-size:15px">' +
@@ -3175,7 +3190,7 @@
         zone.className = 'waPop';
         zone.innerHTML =
           '<div class="card">' +
-            '<button class="waX" onclick="waClose()" aria-label="Fermer">×</button>' +
+            '<button class="waX" onclick="waHide(\'' + esc(o.key) + '\')" aria-label="Fermer">×</button>' +
             '<h3>Rapport de livraison — WhatsApp</h3>' +
             '<label for="waText">Remarques / Instructions</label>' +
             '<textarea id="waText" rows="14" ' +
