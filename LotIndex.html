@@ -191,9 +191,11 @@
           roField('Nombre', f.B11, 0) +
           roField('Poids moyen (g)', f.C11, 2) +
           (d.tabName === '1-5'
-            ? field('D11', 'Biomasse de ce lot (g)', f.D11, 'number',
-                'readonly style="background:#eee;color:#333" ' +
-                'title="Rempli par le bouton Appliquer à ce lot"')
+            ? field('D11', 'Biomasse de ce lot (g)', f.D11, 'number') +
+              '<div class="muted" style="margin-top:4px">' +
+              'Pesez ce lot et tapez le poids ici. Une seule récolte pour ' +
+              'plusieurs happas ? Utilisez le bloc ' +
+              '&laquo;&nbsp;Répartition de la récolte&nbsp;&raquo; plus bas.</div>'
             : roField('Biomasse (g)', f.D11, 1)) +
           field('G11', 'Commentaires', f.G11, 'text') +
           '</div>';
@@ -484,7 +486,13 @@
 
     function renderSplitPanel() {
       return '<div class="card"><h3>Répartition de la récolte</h3>' +
-        '<div class="muted">Aide au calcul. Ce bloc n\'enregistre rien.</div>' +
+        '<div class="muted">Facultatif. À utiliser seulement quand UNE ' +
+        'récolte est répartie sur plusieurs happas.<br>' +
+        '1. Saisissez d\'abord les mesures en mm ci-dessus.<br>' +
+        '2. Entrez la récolte totale et le maximum de poissons par happa.<br>' +
+        '3. &laquo;&nbsp;Appliquer à ce lot&nbsp;&raquo; recopie la part de ce ' +
+        'lot dans Biomasse. Vous pouvez encore la corriger à la main.<br>' +
+        'Ce bloc n\'enregistre rien par lui-même.</div>' +
         '<div class="row" style="align-items:flex-end;margin-top:8px">' +
           '<div style="flex:1 1 150px"><label>Biomasse totale récoltée (g)</label>' +
           '<input type="number" step="any" id="splitTotalBio" oninput="renderSplit()"></div>' +
