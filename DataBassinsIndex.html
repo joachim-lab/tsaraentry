@@ -129,6 +129,7 @@
         var n = Number(t.getAttribute('data-n'));
         sel[b] = (sel[b] === n) ? null : n;
         paintRow(b);
+        disarmSave();   // the armed warning no longer names the right bassins
       });
     })();
 
@@ -150,6 +151,19 @@
       }
     }
 
+    var saveArmed = false;
+
+    /** Drop the armed state and its warning. Called whenever the
+     *  selection changes, so the worker can never confirm a list of
+     *  missing bassins that is no longer the list on screen. */
+    function disarmSave() {
+      if (!saveArmed) return;
+      saveArmed = false;
+      el('save').textContent = 'Enregistrer';
+      el('save').style.background = '';
+      hide('saveMsg');
+    }
+
     el('save').onclick = function () {
       hide('saveMsg');
       var entries = [];
@@ -159,14 +173,24 @@
         else missing.push(b);
       }
       if (!entries.length) {
+        disarmSave();
         show('saveMsg', 'Aucune mesure sélectionnée.', 'err');
         return;
       }
-      if (missing.length &&
-          !confirm('Bassins sans mesure : ' + missing.join(', ') +
-                   '. Enregistrer quand même ?')) {
+      /* Two taps, not window.confirm(): a dialog can be blocked inside
+       * this frame, and a blocked dialog leaves Enregistrer silently
+       * doing nothing. The first tap names the bassins, the second
+       * saves without them. (2026-09-12) */
+      if (missing.length && !saveArmed) {
+        saveArmed = true;
+        el('save').textContent = 'Enregistrer quand même';
+        el('save').style.background = '#C77700';
+        show('saveMsg', 'Bassins sans mesure : ' + missing.join(', ') +
+             '. Toucher « Enregistrer quand même » pour ' +
+             'enregistrer sans eux.', 'warn');
         return;
       }
+      disarmSave();
 
       el('save').disabled = true;
       el('save').textContent = 'Enregistrement…';
@@ -174,6 +198,7 @@
         .withSuccessHandler(function (r) {
           el('save').disabled = false;
           el('save').textContent = 'Enregistrer';
+          el('save').style.background = '';
           var msg = r.saved + ' mesure' + (r.saved > 1 ? 's' : '') +
                     ' enregistrée' + (r.saved > 1 ? 's' : '') + ' pour le ' + r.dateIso + '.';
           for (var i = 0; i < r.alerts.length; i++) {
@@ -185,6 +210,7 @@
         .withFailureHandler(function (e) {
           el('save').disabled = false;
           el('save').textContent = 'Enregistrer';
+          el('save').style.background = '';
           show('saveMsg', e.message, 'err');
         })
         .dabSave(el('date').value, entries);

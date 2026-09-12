@@ -571,7 +571,8 @@
                      'onclick="cliNewToggle()">Nouveau client</button>' +
            '</div>' +
            '<div id="cliAjout"></div>' +
-           '<div id="cliListe"></div>';
+           '<div id="cliListe"></div>' +
+           '<div id="cliZone"></div>';
   }
 
   /** Redraw the list for the current filter. Substring, accent-blind is
@@ -582,40 +583,46 @@
     const hits = !q ? cliRows : cliRows.filter(function (r) {
       return (r.client + ' ' + r.tel + ' ' + r.loc).toLowerCase().indexOf(q) >= 0;
     });
-    if (!hits.length) {
-      el('cliListe').innerHTML =
-        '<div class="banner">Aucun client ne correspond.</div>';
-      return;
-    }
-    el('cliListe').innerHTML = hits.map(cliCard).join('');
+    el('cliListe').innerHTML = hits.length
+      ? hits.map(cliCard).join('')
+      : '<div class="banner">Aucun client ne correspond.</div>';
+    cliPopup();
   }
 
-  /** One client. Closed = a summary line. Open = the numbers plus the
-   *  three editable fields. */
+  /** One client, ALWAYS the summary line. The open one is drawn by
+   *  cliPopup into #cliZone, so the list never jumps under the tap. */
   function cliCard(r) {
-    if (cliOpen !== r.row) {
-      return '<div class="card" style="cursor:pointer" ' +
-                  'onclick="cliToggle(' + r.row + ')">' +
-               '<b>' + esc(r.client) + '</b>' +
-               (r.type ? ' <span class="muted">(' + esc(r.type) + ')</span>' : '') +
-               '<br><span class="muted">' +
-                 (r.tel ? esc(r.tel) : 'pas de num&eacute;ro') +
-                 (r.loc ? ' &mdash; ' + esc(r.loc) : '') +
-                 ' &mdash; ' + fmtNum(r.nb) + ' achat(s)' +
-               '</span>' +
-             '</div>';
-    }
-    // The title line closes the card, mirroring the closed card that
-    // was clicked to open it. Only the line is clickable: the inputs
-    // below must take clicks without folding the card.
-    return '<div class="card">' +
-             '<div onclick="cliToggle(' + r.row + ')" style="cursor:pointer" ' +
-                  'title="Cliquer pour fermer">' +
-               '<b>' + esc(r.client) + '</b>' +
-               (r.type ? ' <span class="muted">(' + esc(r.type) + ')</span>' : '') +
-               '<span class="muted" style="float:right;font-size:14px">' +
-                 '&#9650; fermer</span>' +
-             '</div>' +
+    return '<div class="card" style="cursor:pointer" ' +
+                'onclick="cliToggle(' + r.row + ')">' +
+             '<b>' + esc(r.client) + '</b>' +
+             (r.type ? ' <span class="muted">(' + esc(r.type) + ')</span>' : '') +
+             '<br><span class="muted">' +
+               (r.tel ? esc(r.tel) : 'pas de num&eacute;ro') +
+               (r.loc ? ' &mdash; ' + esc(r.loc) : '') +
+               ' &mdash; ' + fmtNum(r.nb) + ' achat(s)' +
+             '</span>' +
+           '</div>';
+  }
+
+  /** The open client: the numbers plus the editable fields, over the
+   *  list. Same shell as resForm - the class sits on the ZONE, so
+   *  cliToggle clearing cliOpen is the whole close. Edit = popup. */
+  function cliPopup() {
+    var zone = el('cliZone');
+    if (!zone) return;
+    var r = null;
+    cliRows.forEach(function (x) { if (x.row === cliOpen) r = x; });
+    if (!r) { zone.className = ''; zone.innerHTML = ''; return; }
+    zone.className = 'popup';
+    zone.innerHTML =
+      '<div class="card">' +
+             '<button class="popX" onclick="cliToggle(' + r.row + ')" ' +
+                     'aria-label="Fermer">\u00d7</button>' +
+             // Refusals land here: the page status bar is behind the
+             // overlay and would never be read.
+             '<div id="cliErr"></div>' +
+             '<b>' + esc(r.client) + '</b>' +
+             (r.type ? ' <span class="muted">(' + esc(r.type) + ')</span>' : '') +
              '<table style="margin:8px 0">' +
                cliLigne('Dernier prix/alevin', cliAr(r.prixAl)) +
                cliLigne('Dernier prix/kg', cliAr(r.prixKg)) +
@@ -734,6 +741,21 @@
     cliPaint();
   }
 
+  /** Refusal message: inside the card while the popup is up, else the
+   *  bar. Same rule as resFail; html is already escaped. */
+  function cliFail(html) {
+    var slot = el('cliErr');
+    var zone = el('cliZone');
+    if (slot && zone && zone.className === 'popup') {
+      slot.innerHTML = '<div class="err" style="margin:0 0 10px">' +
+                       html + '</div>';
+      slot.scrollIntoView({ block: 'nearest' });
+      setStatus('', '');
+      return;
+    }
+    setStatusAndScroll('err', html);
+  }
+
   function cliSave(row) {
     const r = cliRows.filter(function (x) { return x.row === row; })[0];
     if (!r) return;
@@ -759,7 +781,7 @@
       })
       .withFailureHandler(function (e) {
         if (btn) { btn.disabled = false; btn.textContent = 'Enregistrer'; }
-        setStatusAndScroll('err', esc(e.message));
+        cliFail(esc(e.message));
       })
       .crmSaveInfo(row, r.client, tel, loc, notes, nif, stat, adresse);
   }
@@ -1493,7 +1515,10 @@
     if (demEdit && !cur) demEdit = 0;          // row vanished under us
 
     var type = demType;
-    el('demForm').innerHTML =
+    // Refusals land here when the form is a popup: the page status bar
+    // is behind the overlay and would never be read.
+    var body =
+      '<div id="demErr"></div>' +
       '<h3 style="margin:0 0 10px">' +
         (demEdit ? 'Modifier la pré-commande' : 'Nouvelle pré-commande') +
       '</h3>' +
@@ -1524,6 +1549,21 @@
         '<input id="dComm" type="text" size="50" value="' + esc(cur ? cur.commentaires : '') + '"></label></div>' +
       '<button onclick="demSave()">' + (demEdit ? 'Enregistrer' : 'Ajouter') + '</button>' +
       (demEdit ? ' <button onclick="demCancelEdit()">Annuler</button>' : '');
+
+    // Edit = popup, add = inline. Same shell as resForm: the class sits
+    // on the ZONE, so demCancelEdit clearing it is the whole close.
+    var zone = el('demForm');
+    if (demEdit) {
+      zone.className = 'popup';
+      zone.innerHTML =
+        '<div class="card">' +
+          '<button class="popX" onclick="demCancelEdit()" aria-label="Fermer">\u00d7</button>' +
+          body +
+        '</div>';
+    } else {
+      zone.className = '';
+      zone.innerHTML = body;
+    }
     // A stored price is a decision and is kept; a blank one (new form,
     // legacy row) is computed. Emptying the field returns it to the tarif.
     demPrixUser = !!(cur && cur.prix != null);
@@ -1707,22 +1747,35 @@
 
   function demStartEdit(row) {
     demEdit = row; demArmed = 0;
+    setStatus('', '');
+    // The form comes to the worker now. The banner that said "le
+    // formulaire est en bas de l'écran" and the scroll that chased it
+    // are both gone with the popup (2026-09-12).
     drawDemList(); drawDemForm();
-    var cur = null;
-    demRows.forEach(function (r) { if (r.row === row) cur = r; });
-    setStatus('banner', 'Modification de la pré-commande de <b>' +
-      esc(cur ? cur.client : '') + '</b> — le formulaire est en bas de l’écran.');
-    // Without this the form is rebuilt off-screen and the click looks
-    // like it did nothing at all.
-    var f = el('demForm');
-    if (f && f.scrollIntoView) f.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   function demCancelEdit() {
-    demEdit = 0; drawDemList(); drawDemForm();
+    demEdit = 0;
+    var z = el('demForm');
+    if (z) z.className = '';     // drop the overlay before redrawing inline
+    drawDemList(); drawDemForm();
     setStatus('', '');
-    var t = el('demList');
-    if (t && t.scrollIntoView) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  /** Refusal message: inside the card while the popup is up, else the
+   *  bar. Same rule as resFail, but html is ALREADY escaped by the
+   *  caller - the field-list refusal carries no user text at all. */
+  function demFail(html) {
+    var slot = el('demErr');
+    var zone = el('demForm');
+    if (slot && zone && zone.className === 'popup') {
+      slot.innerHTML = '<div class="err" style="margin:0 0 10px">' +
+                       html + '</div>';
+      slot.scrollIntoView({ block: 'nearest' });
+      setStatus('', '');
+      return;
+    }
+    setStatusAndScroll('err', html);
   }
 
   function demSave() {
@@ -1755,8 +1808,8 @@
     if (p.livraison === 'ambohim' && !(num(p.km) > 0)) missing.push('Km');
     if (num(p.prix) === null || !(num(p.prix) > 0)) missing.push('Prix');
     if (missing.length) {
-      setStatusAndScroll('err',
-        'Pré-commande NON enregistrée — remplir : ' + missing.join(', ') + '.');
+      demFail('Pré-commande NON enregistrée — remplir : ' +
+              missing.join(', ') + '.');
       return;
     }
     setStatus('banner', 'Enregistrement…');
@@ -1772,7 +1825,7 @@
           setStatusAndScroll('ok', 'Pré-commande modifiée.');
           loadDem(demVerifStock);
         })
-        .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+        .withFailureHandler(function (e) { demFail(esc(e.message)); })
         .demUpdate(p);
     } else {
       google.script.run
@@ -2007,7 +2060,10 @@
 
     var qual = cur ? cur.qualite : 'gros';
     var livr = (cur && cur.livraison) ? cur.livraison : 'enlevement';
-    el('recForm').innerHTML =
+    // Refusals land here when the form is a popup: the page status bar
+    // is behind the overlay and would never be read.
+    var body =
+      '<div id="recErr"></div>' +
       '<h3 style="margin:0 0 10px">' +
         (recEdit ? 'Modifier la commande récurrente' : 'Nouvelle commande récurrente') +
       '</h3>' +
@@ -2054,6 +2110,21 @@
         esc(cur ? cur.remarques : '') + '"></label></div>' +
       '<button onclick="recSave()">' + (recEdit ? 'Enregistrer' : 'Ajouter') + '</button>' +
       (recEdit ? ' <button onclick="recCancelEdit()">Annuler</button>' : '');
+
+    // Edit = popup, add = inline. Same shell as resForm: the class sits
+    // on the ZONE, so recCancelEdit clearing it is the whole close.
+    var zone = el('recForm');
+    if (recEdit) {
+      zone.className = 'popup';
+      zone.innerHTML =
+        '<div class="card">' +
+          '<button class="popX" onclick="recCancelEdit()" aria-label="Fermer">\u00d7</button>' +
+          body +
+        '</div>';
+    } else {
+      zone.className = '';
+      zone.innerHTML = body;
+    }
     recLivChanged();
   }
 
@@ -2066,11 +2137,31 @@
 
   function recStartEdit(row) {
     recEdit = row; recArmed = 0;
+    setStatus('', '');
     drawRecList(); drawRecForm();
   }
 
   function recCancelEdit() {
-    recEdit = 0; drawRecForm();
+    recEdit = 0;
+    var z = el('recForm');
+    if (z) z.className = '';     // drop the overlay before redrawing inline
+    drawRecList(); drawRecForm();
+    setStatus('', '');
+  }
+
+  /** Refusal message: inside the card while the popup is up, else the
+   *  bar. Same rule as resFail; html is already escaped. */
+  function recFail(html) {
+    var slot = el('recErr');
+    var zone = el('recForm');
+    if (slot && zone && zone.className === 'popup') {
+      slot.innerHTML = '<div class="err" style="margin:0 0 10px">' +
+                       html + '</div>';
+      slot.scrollIntoView({ block: 'nearest' });
+      setStatus('', '');
+      return;
+    }
+    setStatusAndScroll('err', html);
   }
 
   function recSave() {
@@ -2102,7 +2193,7 @@
               : ''));
           loadRec();
         })
-        .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+        .withFailureHandler(function (e) { recFail(esc(e.message)); })
         .recUpdate(p);
     } else {
       google.script.run
