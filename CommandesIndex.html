@@ -1420,7 +1420,7 @@
       // question this cell has to answer is "which lot instead?".
       var near = (v.proche && v.proche.length)
         ? 'le plus proche : ' + esc(v.proche.map(function (l) {
-            return l.lot + ' (' + fmtNum(l.nb) + ' à ' + l.pm + ' g)';
+            return l.lot + ' (' + fmtNum(l.nb) + ' à ' + fmtPm(l.pm) + ' g)';
           }).join(', '))
         : fmtNum(v.bande) + ' à ' + esc(r.poids) + ' g ±' + demTol + ' %';
       return '<td style="' + base + ';color:#e37400;font-weight:bold">PM pas disponible' +
@@ -2743,6 +2743,17 @@
   }
 
   /**
+   * A PM in grams. Fry weigh far less than 1 g, so fmtNum would print a
+   * 0.0229 g fry as "0,02". Below 1 g: 4 decimals, trailing zeros dropped.
+   * At or above 1 g: fmtNum, so a 430 g fish reads like every other number.
+   */
+  function fmtPm(n) {
+    if (n === null || n === undefined || !isFinite(n)) return '\u2014';
+    if (Math.abs(n) < 1) return String(Number(n.toFixed(4))).replace('.', ',');
+    return fmtNum(n);
+  }
+
+  /**
    * Shape a cmdGetLotStock answer like cmdGetLotAvailability's, using
    * the page-load gate data for reservation and pending. Only called
    * when GATE is loaded. These two numbers age with the page: an
@@ -2789,7 +2800,7 @@
         ? Math.floor(gav * gpm / 1000) : null;
       var gParts = [];
       if (gav !== undefined) gParts.push('disponible : ' + fmtNum(gav));
-      if (gpm !== undefined) gParts.push('PM : ' + fmtNum(gpm) + ' g');
+      if (gpm !== undefined) gParts.push('PM : ' + fmtPm(gpm) + ' g');
       if (gKg != null) gParts.push(fmtNum(gKg) + ' kg');
       box.innerHTML = gParts.join(' \u00b7 ') + ' \u2014 v\u00e9rification\u2026';
     }
@@ -2859,7 +2870,7 @@
           ? Math.floor(a.available * a.pm / 1000) : null;
         box.innerHTML = (verdict.level === 'warn' ? '\u26a0 ' + verdict.msg + '<br>' : '') +
                         'disponible : <b>' + fmtNum(a.available) +
-                        '</b> \u00b7 PM : <b>' + fmtNum(a.pm) + ' g</b>' +
+                        '</b> \u00b7 PM : <b>' + fmtPm(a.pm) + ' g</b>' +
                         (avKg != null ? ' \u00b7 <b>' + fmtNum(avKg) + ' kg</b>' : '');
         prefillPm(i, a.pm);
         recomputeLinePrice(i);
@@ -3016,15 +3027,15 @@
     if (!GATE || pm === null || pm === undefined || !isFinite(pm)) return { level: 'ok', msg: '' };
     if (isAl) {
       if (pm > GATE.fryMax) return { level: 'block',
-        msg: 'PM du lot ' + fmtNum(pm) + ' g > ' + fmtNum(GATE.fryMax) +
+        msg: 'PM du lot ' + fmtPm(pm) + ' g > ' + fmtNum(GATE.fryMax) +
              ' g \u2014 ce n\u2019est pas un lot alevins.' };
       return { level: 'ok', msg: '' };
     }
     if (pm < GATE.grBlock) return { level: 'block',
-      msg: 'PM du lot ' + fmtNum(pm) + ' g < ' + fmtNum(GATE.grBlock) +
+      msg: 'PM du lot ' + fmtPm(pm) + ' g < ' + fmtNum(GATE.grBlock) +
            ' g \u2014 trop petit pour \u00eatre vendu en grossis.' };
     if (pm < GATE.grWarn) return { level: 'warn',
-      msg: 'PM du lot ' + fmtNum(pm) + ' g \u2014 en dessous de ' + fmtNum(GATE.grWarn) +
+      msg: 'PM du lot ' + fmtPm(pm) + ' g \u2014 en dessous de ' + fmtNum(GATE.grWarn) +
            ' g ; vente possible mais \u00e0 confirmer.' };
     return { level: 'ok', msg: '' };
   }
