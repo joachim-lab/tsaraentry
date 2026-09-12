@@ -128,7 +128,6 @@ function accessDeniedOutput() {
     '</body></html>';
   return HtmlService.createHtmlOutput(html)
     .setTitle("Interface Tsara Tilapia")
-    .setFaviconUrl(TSARA_FAVICON)
     .addMetaTag("viewport", "width=device-width, initial-scale=1")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }

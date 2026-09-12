@@ -44,7 +44,6 @@ function doGet(e) {
       String(p.src || ""));   // "26,30": lots absorbés (regroupement)
     return HtmlService.createHtmlOutput(withSpinner(html))
       .setTitle("Interface Tsara Tilapia")
-    .setFaviconUrl(TSARA_FAVICON)
       .addMetaTag("viewport", "width=device-width, initial-scale=1")
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
@@ -66,7 +65,6 @@ function doGet(e) {
 
   return HtmlService.createTemplateFromFile(file).evaluate()
     .setTitle("Interface Tsara Tilapia")
-    .setFaviconUrl(TSARA_FAVICON)
     .addMetaTag("viewport", "width=device-width, initial-scale=1")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
