@@ -3677,7 +3677,21 @@
         // One row, Annuler to the right of Modifier. modZone stays
         // OUTSIDE the flex row: the edit form is a block, not a
         // third button sharing the line.
-        (recu ? '' :
+        // Kim, 2026-09-12: a received order prints its invoice here.
+        // factPdf is the same server function the Historique tab calls,
+        // so there is ONE invoice builder. The button is shown on every
+        // received order: factPdf's own refusal (cancelled order, or a
+        // client with no Adresse in CRM column M) is printed under it,
+        // rather than the button being hidden with no reason given.
+        (recu
+        ? '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">' +
+            '<button id="btnFacture" onclick="fulFacture(this)" ' +
+              'style="background:#fff;color:#1a73e8;border:1px solid #1a73e8;' +
+              'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
+              'Imprimer la facture</button>' +
+          '</div>' +
+          '<div id="facMsg"></div>'
+        :
         '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">' +
           '<button id="btnMod" onclick="loadModify()" ' +
             'style="background:#fff;color:#1a73e8;border:1px solid #1a73e8;' +
@@ -3735,6 +3749,55 @@
     return m ? m[3]+'-'+m[2]+'-'+m[1] : '';
   }
 
+  /**
+   * IMPRIMER LA FACTURE (Kim, 2026-09-12) -- received orders only.
+   *
+   * Calls factPdf (FactureServer.js), the function the Historique tab
+   * already uses. The tab is opened ON THE CLICK, before the server
+   * call: the PDF takes several seconds and the browser blocks a tab
+   * that opens that late. When it blocks it anyway, the link is in the
+   * message under the button.
+   */
+  function fulFacture(btn) {
+    const o = hits.filter(h => h.key === selectedKey)[0];
+    if (!o) return;
+    const msg = el('facMsg');
+    if (msg) msg.innerHTML = '';
+    btn.disabled = true;
+    btn.textContent = 'Pr\u00e9paration\u2026';
+    const win = window.open('', '_blank');
+    if (win) {
+      try {
+        win.document.write('<title>Facture</title>' +
+          '<p style="font-family:Arial,sans-serif;font-size:18px">' +
+          'Pr\u00e9paration de la facture\u2026</p>');
+      } catch (err) { /* a blank tab is acceptable */ }
+    }
+    function done() {
+      btn.disabled = false;
+      btn.textContent = 'Imprimer la facture';
+    }
+    google.script.run
+      .withSuccessHandler(function (r) {
+        done();
+        const link = '<a href="' + esc(r.url) + '" target="_blank">' + esc(r.name) + '</a>';
+        if (!msg) return;
+        if (win && !win.closed) {
+          win.location.href = r.url;
+          msg.innerHTML = '<div class="ok">Facture pr\u00eate : ' + link + '</div>';
+        } else {
+          msg.innerHTML = '<div class="warn">Facture pr\u00eate. Le navigateur a bloqu\u00e9 ' +
+            'le nouvel onglet : ' + link + '</div>';
+        }
+      })
+      .withFailureHandler(function (e) {
+        done();
+        if (win && !win.closed) win.close();
+        if (msg) msg.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+      })
+      .factPdf(o.orderNumber);
+  }
+
   function doFulfil() {
     const o = hits.filter(h => h.key === selectedKey)[0];
     if (!o) return;
@@ -3752,6 +3815,10 @@
 
     const btn = el('btnFul');
     btn.disabled = true;
+    // Read BEFORE the save: was this order already received, and is it
+    // received now? The transition is what mints the invoice number.
+    const recuBefore = String(o.reception || '').trim() !== '';
+    const recuNow = String(el('uReception').value || '').trim() !== '';
     const waDate = el('uLivraison').value;   // read now: the save clears the form
     const waRows = o.rows;
     const waKeyNow = o.key;
@@ -3785,9 +3852,35 @@
         // Reopen the order that was just saved. The message is drawn by
         // selectHit like any other opening, so there is ONE path that
         // puts it on screen instead of two that can disagree.
-        doSearch({ cls: 'ok', html: line }, () => {
-          if (waDate && el('hit_' + waKeyNow)) selectHit(waKeyNow);
-        });
+        // Kim, 2026-09-12: the save that marks the order RECEIVED mints
+        // the invoice number, so that save also builds the PDF and
+        // carries its link in this one confirmation. ONLY that save: a
+        // later save on an already-received order would rebuild the
+        // same PDF for nothing. The PDF is built BEFORE the
+        // confirmation is drawn, so there is one message and not a
+        // second one appended into a status box selectHit has already
+        // redrawn. A failed PDF never hides the save: the save is
+        // already written, so the confirmation lands with the reason
+        // beside it.
+        const finish = function (box) {
+          doSearch(box, () => {
+            if (waDate && el('hit_' + waKeyNow)) selectHit(waKeyNow);
+          });
+        };
+        if (!(recuNow && !recuBefore && String(o.orderNumber || '').trim())) {
+          finish({ cls: 'ok', html: line });
+          return;
+        }
+        setStatus('banner', 'Enregistr\u00e9. Pr\u00e9paration de la facture\u2026');
+        google.script.run
+          .withSuccessHandler(function (r) {
+            finish({ cls: 'ok', html: line + '<br>Facture : ' +
+              '<a href="' + esc(r.url) + '" target="_blank">' + esc(r.name) + '</a>' });
+          })
+          .withFailureHandler(function (e) {
+            finish({ cls: 'warn', html: line + '<br>Facture non produite : ' + esc(e.message) });
+          })
+          .factPdf(o.orderNumber);
       })
       .withFailureHandler(e => { btn.disabled = false; setStatusAndScroll('err', esc(e.message)); })
       .cmdRecordFulfilment(o.rows, {
