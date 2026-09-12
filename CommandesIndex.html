@@ -4188,6 +4188,10 @@
    * Nothing is swallowed into a generic "OK".
    */
   function modDone(pres, res, dres) {
+    // A quantity edit moved stock NOW (see cmdModifyOrder). Without this
+    // the freed fish stay invisible until a reload, and the next order
+    // on the same lot is refused against numbers the worker cannot see.
+    loadGateData();
     const parts = []
       .concat((dres && dres.montant) ? [dres.montant] : [])
       .concat((pres && pres.changed) || [])
@@ -4223,6 +4227,10 @@
     setStatus('banner', 'Annulation\u2026');
     google.script.run
       .withSuccessHandler(res => {
+        // AA is set, so the row leaves the pending term immediately —
+        // available rises now, even though a DEDUCTED order is only
+        // re-credited to the lot file tonight.
+        loadGateData();
         doSearch({ cls: 'ok',
           html: 'Commande annul\u00e9e \u2014 ' + res.rows.length + ' ligne(s). ' +
                 'Si elle avait d\u00e9j\u00e0 \u00e9t\u00e9 d\u00e9duite, le stock ' +
