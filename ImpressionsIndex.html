@@ -137,6 +137,9 @@
             el(btnId).disabled = false;
             el(btnId).textContent = label;
             printPdf(r, frameKey, linkId, msgId);
+            if (r.archiveError) {
+              show(msgId, "Imprimé, mais copie non enregistrée : " + r.archiveError, 'err');
+            }
           },
           function (e) {
             el(btnId).disabled = false;
@@ -202,18 +205,18 @@
 
     wirePrint('printStock', 'pdfLinkStock', 'printStockMsg', 'stock',
       'Imprimer stock poisson', function (ok, fail) {
-        google.script.run.withSuccessHandler(ok).withFailureHandler(fail).tempPrintStockPdf();
+        google.script.run.withSuccessHandler(ok).withFailureHandler(fail).imprPrintStock();
       });
 
     wirePrint('printProgramme', 'pdfLinkProgramme', 'printProgrammeMsg', 'programme',
       'Imprimer Programme', function (ok, fail) {
-        google.script.run.withSuccessHandler(ok).withFailureHandler(fail).tempBuildProgrammePdf();
+        google.script.run.withSuccessHandler(ok).withFailureHandler(fail).imprPrintProgramme();
       });
 
     wirePrint('printRecette', 'pdfLinkRecette', 'printRecetteMsg', 'recette',
       'Imprimer la recette', function (ok, fail) {
         google.script.run.withSuccessHandler(ok).withFailureHandler(fail)
-          .recetteBuildPdf(el('lot').value);
+          .imprPrintRecette(el('lot').value);
       });
 
     google.script.run
