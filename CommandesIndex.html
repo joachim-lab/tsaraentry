@@ -2419,7 +2419,7 @@
       '<div id="linesWrap"></div>' +
       '<button class="primary" style="margin-top:12px" onclick="addLine()">+ Ajouter un lot</button>' +
       '<button class="ghost" style="margin-top:12px;margin-left:8px" id="btnRefreshLots" ' +
-        'onclick="doRefreshLots()">Actualiser les lots vendables</button>' +
+        'onclick="doRefreshLots()">Apr\u00e8s un tri : d\u00e9bloquer les lots</button>' +
       '<div id="refreshLotsMsg" class="muted" style="margin-top:6px"></div>' +
       '<div class="card"><h3>Prix total</h3><div id="totalAmount" class="totalAmount">—</div></div>' +
       '<button class="go" id="btnCreate" onclick="doCreate()">Enregistrer la commande</button>';
@@ -2782,7 +2782,7 @@
         renderLines();
         const b = el('btnRefreshLots');
         const m = el('refreshLotsMsg');
-        if (b) { b.disabled = false; b.textContent = 'Actualiser les lots vendables'; }
+        if (b) { b.disabled = false; b.textContent = 'Apr\u00e8s un tri : d\u00e9bloquer les lots'; }
         if (m) {
           m.className = 'ok';
           m.textContent = 'Liste à jour — ' + Object.keys(fresh).length +
@@ -2792,7 +2792,7 @@
       .withFailureHandler(e => {
         const b = el('btnRefreshLots');
         const m = el('refreshLotsMsg');
-        if (b) { b.disabled = false; b.textContent = 'Actualiser les lots vendables'; }
+        if (b) { b.disabled = false; b.textContent = 'Apr\u00e8s un tri : d\u00e9bloquer les lots'; }
         if (m) { m.className = 'err'; m.textContent = 'Échec : ' + esc(e.message); }
       })
       .refreshNotSellableMap();
