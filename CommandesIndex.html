@@ -88,10 +88,11 @@
               color: #202124; }
     .demBtn:disabled { color: #9aa0a6; cursor: not-allowed; }
     /* ONE centred popup shell for this screen (Kim, 2026-09-12).
-       Two users, both zones that live inside the open order card:
+       Three users, all zones that live inside the open order card:
          #waZone  - the editable WhatsApp report and its confirm step;
                     the "deja envoyee" line stays inline under the order.
          #modZone - Modifier la commande.
+         #recuZone - the "commande recue, plus modifiable" notice.
        The class is put on the ZONE, never on the card, so clearing the
        class returns the zone to the flow. position:fixed, so no parent
        may carry transform or filter. */
@@ -3634,10 +3635,10 @@
         '</div>' +
         '<div class="muted" style="font-size:15px;padding-bottom:6px">' +
           'Livraison : ' + esc(livTxt) + '</div>' +
-        (recu
-          ? '<div class="warn">Commande reçue par le client — elle ne peut plus ' +
-            'être modifiée. Seul le paiement peut être enregistré.</div>'
-          : '') +
+        // The freeze notice is a POPUP, not a line in the card
+        // (Kim, 2026-09-12). recuPopup fills this zone after the form
+        // is built; the zone dies with the card when it closes.
+        '<div id="recuZone"></div>' +
         // Read in the order of the steps: livraison, remise, réception, paiement.
         '<div class="row">' +
           '<div><label>Date livraison</label><input type="date" id="uLivraison" value="'+esc(toISO(o.dateLivraison))+'"></div>' +
@@ -3733,6 +3734,9 @@
     });
     fulSyncPaiement();
 
+    // A received order says so on opening, over the card.
+    if (recu) recuPopup();
+
     // The message belongs to the order that is open, and to no other.
     fulAnchor(key);
     waShow(o);
@@ -3747,6 +3751,35 @@
     if (!d) return '';
     const m = String(d).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
     return m ? m[3]+'-'+m[2]+'-'+m[1] : '';
+  }
+
+  /**
+   * RECEIVED ORDER — the freeze notice (Kim, 2026-09-12).
+   * Same popup shell as Modifier la commande and the WhatsApp report:
+   * the class goes on #recuZone, never on the card. Closing it changes
+   * nothing — fulSyncPaiement locks the fields whether it is open or
+   * not, so this only tells the user why they are locked.
+   */
+  function recuPopup() {
+    const z = el('recuZone');
+    if (!z) return;
+    z.className = 'popup';
+    z.innerHTML =
+      '<div class="card">' +
+        '<button class="popX" onclick="recuClose()" aria-label="Fermer">\u00d7</button>' +
+        '<h3>Commande re\u00e7ue par le client</h3>' +
+        '<div style="font-size:16px;padding:6px 0 12px">' +
+          'Elle ne peut plus \u00eatre modifi\u00e9e. ' +
+          'Seul le paiement peut \u00eatre enregistr\u00e9.</div>' +
+        '<button class="go" style="margin-top:0" onclick="recuClose()">' +
+          'J\'ai compris</button>' +
+      '</div>';
+  }
+
+  /** Back to the order card. The zone returns to the flow, empty. */
+  function recuClose() {
+    const z = el('recuZone');
+    if (z) { z.className = ''; z.innerHTML = ''; }
   }
 
   /**
