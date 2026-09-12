@@ -87,6 +87,23 @@
     .demBtn { padding: 5px 8px; font-size: 14px; background: #f1f3f4;
               color: #202124; }
     .demBtn:disabled { color: #9aa0a6; cursor: not-allowed; }
+    /* WhatsApp report as a centred popup (Kim, 2026-09-12). #waZone gets
+       .waPop only for the editable box and the confirm step; the
+       "deja envoyee" line stays inline under the order. */
+    .waPop { position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+             z-index: 9000; background: rgba(13, 42, 26, 0.45);
+             display: flex; align-items: center; justify-content: center;
+             padding: 20px; }
+    .waPop > .card { width: min(680px, 94vw); max-height: 88vh;
+                     overflow-y: auto; position: relative; margin: 0;
+                     background: #fff;
+                     box-shadow: 0 14px 44px rgba(0, 0, 0, 0.28); }
+    .waX { position: absolute; top: 10px; right: 12px;
+           width: 34px; height: 34px; padding: 0;
+           background: #fff; color: #5C665E;
+           border: 1px solid #CDD6CF; border-radius: 8px;
+           font-size: 20px; line-height: 1; cursor: pointer; }
+    .waX:hover { background: #F4F7F5; }
     /* Prix poisson tab: a read-only price list. Horizontal scroll on the
        wrapper, never on the page body - the fry grid is 7 columns. */
     .prixWrap { overflow-x: auto; }
@@ -3111,7 +3128,7 @@
   /** Empty the box. The order's draft and its AD stamp are untouched. */
   function waClose() {
     const z = el('waZone');
-    if (z) z.innerHTML = '';
+    if (z) { z.innerHTML = ''; z.className = ''; }
   }
 
   /** The one line an order that has already gone out is allowed to show. */
@@ -3139,6 +3156,7 @@
     if (String(o.reception || '').trim()) return;
 
     if (String(o.waSent || '').trim()) {
+      zone.className = '';
       zone.innerHTML = waSentHtml(o.waSent);
       return;
     }
@@ -3150,11 +3168,15 @@
         // first between the list being drawn and this call returning.
         if (String(res.sent || '').trim()) {
           o.waSent = res.sent;
+          zone.className = '';
           zone.innerHTML = waSentHtml(res.sent);
           return;
         }
+        zone.className = 'waPop';
         zone.innerHTML =
-          '<div class="card"><h3>Rapport de livraison — WhatsApp</h3>' +
+          '<div class="card">' +
+            '<button class="waX" onclick="waClose()" aria-label="Fermer">×</button>' +
+            '<h3>Rapport de livraison — WhatsApp</h3>' +
             '<label for="waText">Remarques / Instructions</label>' +
             '<textarea id="waText" rows="14" ' +
               'style="width:100%;box-sizing:border-box;font-size:15px"></textarea>' +
@@ -3204,8 +3226,11 @@
   function waAskConfirm(key) {
     const zone = el('waZone');
     if (!zone) return;
+    zone.className = 'waPop';
     zone.innerHTML =
-      '<div class="card"><h3>Message envoyé ?</h3>' +
+      '<div class="card">' +
+        '<button class="waX" onclick="waBack(\'' + esc(key) + '\')" aria-label="Fermer">×</button>' +
+        '<h3>Message envoyé ?</h3>' +
         '<div class="muted" style="font-size:15px;padding-bottom:8px">' +
           'WhatsApp a été ouvert. Répondez Oui seulement si le message est parti. ' +
           'Le texte est conservé tant que vous ne confirmez pas.</div>' +
@@ -3234,7 +3259,7 @@
         o.waSent = (res && res.sent) || 'envoyée';
         delete waDraft[key];
         const z = el('waZone');
-        if (z) z.innerHTML = waSentHtml(o.waSent);
+        if (z) { z.className = ''; z.innerHTML = waSentHtml(o.waSent); }
       })
       .withFailureHandler(e => setStatus('err',
         'Marquage impossible : ' + esc(e.message)))

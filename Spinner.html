@@ -20,19 +20,36 @@
     flex-direction: column;
   }
   #busyOverlay.on { display: flex; }
-  #busyOverlay .ring {
-    width: 56px; height: 56px;
-    border: 6px solid #cfd8dc;
-    border-top-color: #1976d2;
+  #busyOverlay .bwrap {
+    position: relative;
+    width: 88px; height: 88px;
+    opacity: 0.92;
+  }
+  #busyOverlay .bring {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    border: 5px solid #EAF3EE;
+    border-top-color: #146E3C;
+    border-right-color: #F0A818;
     border-radius: 50%;
     animation: busySpin 0.9s linear infinite;
   }
+  #busyOverlay .blogo {
+    position: absolute;
+    top: 14px; left: 14px;
+    width: 60px; height: 60px;
+    object-fit: contain;
+    background: #fff;
+    border-radius: 50%;
+    animation: busyPulse 1.8s ease-in-out infinite;
+  }
   #busyOverlay .txt {
     margin-top: 14px;
-    font: 18px/1.3 Arial, Helvetica, sans-serif;
-    color: #37474f;
+    font: 18px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    color: #0D5A2F;
   }
   @keyframes busySpin { to { transform: rotate(360deg); } }
+  @keyframes busyPulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
 </style>
 
 <script>
@@ -45,9 +62,14 @@
   node.id = 'busyOverlay';
   node.setAttribute('role', 'status');
   node.setAttribute('aria-live', 'polite');
-  node.innerHTML = '<div class="ring"></div>' +
+  node.innerHTML = '<div class="bwrap"><div class="bring"></div>' +
+                   '<img class="blogo" alt="" src=""></div>' +
                    '<div class="txt">Traitement en cours...</div>';
   document.addEventListener('DOMContentLoaded', function () {
+    // The screen already carries the logo; the loader borrows it.
+    var lg = document.querySelector('.tsaraLogo');
+    var bl = node.querySelector('.blogo');
+    if (lg && lg.src) { bl.src = lg.src; } else { bl.style.display = 'none'; }
     document.body.appendChild(node);
   });
 
