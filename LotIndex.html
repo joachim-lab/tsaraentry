@@ -191,11 +191,7 @@
           roField('Nombre', f.B11, 0) +
           roField('Poids moyen (g)', f.C11, 2) +
           (d.tabName === '1-5'
-            ? field('D11', 'Biomasse de ce lot (g)', f.D11, 'number') +
-              '<div class="muted" style="margin-top:4px">' +
-              'Pesez ce lot et tapez le poids ici. Une seule récolte pour ' +
-              'plusieurs happas ? Utilisez le bloc ' +
-              '&laquo;&nbsp;Répartition de la récolte&nbsp;&raquo; plus bas.</div>'
+            ? field('D11', 'Biomasse de ce lot (g)', f.D11, 'number')
             : roField('Biomasse (g)', f.D11, 1)) +
           field('G11', 'Commentaires', f.G11, 'text') +
           '</div>';
