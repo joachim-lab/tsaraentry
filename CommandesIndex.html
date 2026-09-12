@@ -934,7 +934,10 @@
     });
 
     var type = cur ? cur.type : 'TOUT';
-    el('resForm').innerHTML =
+    var body =
+      // Refusals land here when the form is a popup: the page status bar
+      // is behind the overlay and would never be read.
+      '<div id="resErr"></div>' +
       '<h3 style="margin:0 0 10px">' +
         (resEdit ? 'Modifier la r\u00e9servation' : 'Nouvelle r\u00e9servation') +
       '</h3>' +
@@ -951,6 +954,21 @@
         '<input id="rNote" type="text" size="50" value="' + esc(cur ? cur.note : '') + '"></label></div>' +
       '<button onclick="resSave()">' + (resEdit ? 'Enregistrer' : 'Ajouter') + '</button>' +
       (resEdit ? ' <button onclick="resCancelEdit()">Annuler</button>' : '');
+
+    // Edit = popup, add = inline. Same shell as modZone: the class sits
+    // on the zone, so resCancelEdit clearing it is the whole close.
+    var zone = el('resForm');
+    if (resEdit) {
+      zone.className = 'popup';
+      zone.innerHTML =
+        '<div class="card">' +
+          '<button class="popX" onclick="resCancelEdit()" aria-label="Fermer">\u00d7</button>' +
+          body +
+        '</div>';
+    } else {
+      zone.className = '';
+      zone.innerHTML = body;
+    }
     resTypeChanged();
   }
 
@@ -961,23 +979,15 @@
 
   function resStartEdit(row) {
     resEdit = row; resArmed = 0;
+    setStatus('', '');
     drawResList(); drawResForm();
-    // An AUTO row is rewritten by Production Model V3 at every Generate.
-    // Without this the worker's edit vanishes overnight with no trace.
-    var cur = null;
-    resRows.forEach(function (r) { if (r.row === row) cur = r; });
-    if (cur && cur.auto) {
-      setStatusAndScroll('warn',
-        'Réservation écrite automatiquement par le modèle de production. ' +
-        'Elle sera <b>remplacée chaque matin</b>. Pour la garder à la main, ' +
-        'changez la Note pour qu’elle ne commence plus par « AUTO — ».');
-    } else {
-      setStatus('', '');
-    }
   }
 
   function resCancelEdit() {
-    resEdit = 0; drawResForm();
+    resEdit = 0;
+    var z = el('resForm');
+    if (z) z.className = '';     // drop the overlay before redrawing inline
+    drawResForm();
     setStatus('', '');
   }
 
@@ -1000,7 +1010,7 @@
           setStatusAndScroll('ok', 'R\u00e9servation modifi\u00e9e.');
           loadRes();
         })
-        .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+        .withFailureHandler(function (e) { resFail(e); })
         .resUpdate(p);
     } else {
       google.script.run
@@ -1011,6 +1021,20 @@
         .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
         .resAdd(p);
     }
+  }
+
+  /** Refusal message: inside the card while the popup is up, else the bar. */
+  function resFail(e) {
+    var slot = el('resErr');
+    var zone = el('resForm');
+    if (slot && zone && zone.className === 'popup') {
+      slot.innerHTML = '<div class="err" style="margin:0 0 10px">' +
+                       esc(e.message) + '</div>';
+      slot.scrollIntoView({ block: 'nearest' });
+      setStatus('', '');
+      return;
+    }
+    setStatusAndScroll('err', esc(e.message));
   }
 
   function resAskDelete(row) {
