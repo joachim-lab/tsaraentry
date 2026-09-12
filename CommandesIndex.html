@@ -128,6 +128,24 @@
                         background: rgba(251, 188, 4, 0.12); }
     .totalAmount { font-size: 26px; font-weight: bold; color: #188038; }
     .muted { color: #5f6368; font-size: 14px; font-weight: normal; }
+    /* Suivi > summary card. The header carries the order count in red;
+       the body is a 4-column grid so the kg, the alevins and the Ar of
+       the two rows line up on their right edge. tabular-nums keeps the
+       digits on a fixed pitch, so 982 sits exactly above 1 330. */
+    .fulSumHead { display: flex; align-items: center; gap: 8px;
+                  cursor: pointer; user-select: none;
+                  font-size: 16px; font-weight: 700; color: #c5221f;
+                  letter-spacing: .2px; }
+    .fulSumHead .arw { font-size: 12px; color: #c5221f; }
+    .fulTotGrid { display: grid; grid-template-columns: repeat(4, max-content);
+                  column-gap: 26px; row-gap: 7px; margin-top: 10px;
+                  font-size: 15px; font-variant-numeric: tabular-nums; }
+    .fulTotGrid .lbl { color: #202124; font-weight: 600; }
+    .fulTotGrid .val { text-align: right; color: #202124; white-space: nowrap; }
+    .fulTotGrid .u   { color: #5f6368; font-size: 13px; font-weight: normal; }
+    .fulPool { margin-top: 11px; border-top: 1px solid #dadce0;
+               padding-top: 10px; font-size: 15px;
+               font-variant-numeric: tabular-nums; }
     /* Lot readout states. A blocking condition must not render in the same
        12px grey as an informational one - a reserved lot silently stops PM
        and price pre-fill, and that cause has to be visible (Kim 2026-08-12). */
@@ -3464,7 +3482,7 @@
   }
 
   /**
-   * "Reste à vendre" line: farm-wide sellable pool from
+   * "Disponible à la vente" line: farm-wide sellable pool from
    * cmdSellablePool — kg of fish at/above the sale floor, and fry —
    * net of reservations and of orders entered but not yet deducted.
    * Fired with every search, in parallel: the answer is cached 5 min
@@ -3477,7 +3495,7 @@
       .withSuccessHandler(p => {
         const box = el('fulPool');
         if (!box) return;
-        box.innerHTML = 'Reste à vendre : <b>' +
+        box.innerHTML = 'Disponible à la vente : <b>' +
           esc(fmtNum(Number(p.kg || 0))) + ' kg</b> de poisson (\u2265 ' +
           esc(String(p.grBlock)) + ' g) · <b>' +
           esc(fmtNum(Number(p.alevins || 0))) + '</b> alevins';
@@ -3485,7 +3503,7 @@
       .withFailureHandler(e => {
         const box = el('fulPool');
         if (box) box.textContent =
-          'Reste à vendre : indisponible (' + e.message + ')';
+          'Disponible à la vente : indisponible (' + e.message + ')';
       })
       .cmdSellablePool();
   }
@@ -3526,22 +3544,26 @@
       '</div>' +
       // Collapsible summary (Kim 2026-09-11): the two category
       // totals, the order count over every match, and the farm-wide
-      // "Reste à vendre" pool, in one card between the search card
+      // "Disponible à la vente" pool, in one card between the search
       // and the list. The header toggles the body; fulSumOpen keeps
       // the choice for the life of the page.
       '<div class="card">' +
-        '<div style="cursor:pointer;user-select:none;font-weight:600" ' +
-             'onclick="fulSumToggle()">' +
-          '<span id="fulSumArrow">' + (fulSumOpen ? '\u25be' : '\u25b8') +
-          '</span> Résumé</div>' +
+        '<div class="fulSumHead" onclick="fulSumToggle()">' +
+          '<span class="arw" id="fulSumArrow">' +
+          (fulSumOpen ? '\u25be' : '\u25b8') + '</span>' +
+          '<span id="fulTotalCount">Commandes</span></div>' +
         '<div id="fulSumBody"' + (fulSumOpen ? '' : ' style="display:none"') + '>' +
-          '<div style="margin-top:8px">Livrées et non-payées : ' +
-            '<span class="muted" id="fTotDeliveredUnpaid"></span></div>' +
-          '<div style="margin-top:4px">Non-livrées : ' +
-            '<span class="muted" id="fTotUndelivered"></span></div>' +
-          '<div class="muted" id="fulTotalCount" style="margin-top:4px"></div>' +
-          '<div id="fulPool" style="margin-top:8px;border-top:1px solid #dadce0;' +
-               'padding-top:8px">Reste à vendre : …</div>' +
+          '<div class="fulTotGrid">' +
+            '<div class="lbl">Livrées</div>' +
+            '<div class="val" id="fTotDU_kg"></div>' +
+            '<div class="val" id="fTotDU_al"></div>' +
+            '<div class="val" id="fTotDU_ar"></div>' +
+            '<div class="lbl">Non-livrées</div>' +
+            '<div class="val" id="fTotUD_kg"></div>' +
+            '<div class="val" id="fTotUD_al"></div>' +
+            '<div class="val" id="fTotUD_ar"></div>' +
+          '</div>' +
+          '<div class="fulPool" id="fulPool">Disponible à la vente : …</div>' +
         '</div>' +
       '</div>' +
       '<div id="fulForm"></div>' +
@@ -3625,14 +3647,24 @@
     return parts.length ? ' · ' + esc(parts.join(' · ')) : '';
   }
 
-  /** "12 kg · 3 000 alevins · 1 500 000 Ar" for one category;
-   *  '—' when it is empty. */
-  function fmtTot(t) {
-    const bits = [];
-    if (t && t.kg > 0) bits.push(fmtNum(t.kg) + ' kg');
-    if (t && t.al > 0) bits.push(fmtNum(t.al) + ' alevins');
-    if (t && t.ar > 0) bits.push(fmtAr(t.ar));
-    return bits.length ? bits.join(' · ') : '\u2014';
+  /** One category of the summary grid, one number per column, so the
+   *  kg of the two rows share a right edge and so do the alevins and
+   *  the Ar. A column with nothing in it stays blank; a category with
+   *  nothing at all shows a single dash, in the kg column. */
+  function fulSetTot(prefix, t) {
+    t = t || {};
+    const kg = Number(t.kg || 0);
+    const al = Number(t.al || 0);
+    const ar = Number(t.ar || 0);
+    const empty = !(kg > 0 || al > 0 || ar > 0);
+    const cell = (id, html) => { const e = el(id); if (e) e.innerHTML = html; };
+    cell(prefix + '_kg', kg > 0
+      ? fmtNum(kg) + '<span class="u"> kg</span>'
+      : (empty ? '\u2014' : ''));
+    cell(prefix + '_al', al > 0
+      ? fmtNum(al) + '<span class="u"> alevins</span>' : '');
+    cell(prefix + '_ar', ar > 0
+      ? fmtNum(ar) + '<span class="u"> Ar</span>' : '');
   }
 
   /** "12 commandes (2 alevins, 10 poisson)" -- from the server's
@@ -3661,8 +3693,8 @@
         hits = res.orders;
         el('fulTotalCount').textContent = fulCountLine(res.counts);
         const tot = res.totals || {};
-        el('fTotDeliveredUnpaid').textContent = fmtTot(tot.deliveredUnpaid);
-        el('fTotUndelivered').textContent = fmtTot(tot.undelivered);
+        fulSetTot('fTotDU', tot.deliveredUnpaid);
+        fulSetTot('fTotUD', tot.undelivered);
         if (keepMsg) setStatusAndScroll(keepMsg.cls, keepMsg.html); else setStatus('', '');
         // Nothing ticked selects nothing. Said plainly, because an
         // empty list with no explanation reads as a broken search.
