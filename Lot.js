@@ -245,6 +245,34 @@ function getLotStage(fileId) {
       if (b5 === "" || b5 === null) {
         return { stage: "s-tab", tabName: LOT_CFG.FIRST_TAB, mixedWarning: null };
       }
+
+      // DAY-0 LOT (2026-09-12, Lot-34). On the day a lot is created,
+      // B5 holds the date de depart (today) but the feeding chain
+      // anchors at B5 + 1: row 8 of '1-5' starts TOMORROW. No tab
+      // covered today, so the first weighing was refused with the
+      // "aucun onglet" error. If today is on or after the date de
+      // depart and BEFORE the first feeding date of '1-5', the lot is
+      // at its very beginning: route it to '1-5', same as an
+      // unstarted lot. A stale lot (dates ended in the past) fails
+      // the firstFeed test and still falls through to the error below.
+      if (b5 instanceof Date && !isNaN(b5.getTime())) {
+        const today0 = new Date();
+        today0.setHours(0, 0, 0, 0);
+        const start0 = new Date(b5.getTime());
+        start0.setHours(0, 0, 0, 0);
+
+        const feedVals = firstSheet.getRange(8, 2, 1, 5).getValues()[0];
+        const feedDates = feedVals
+          .filter(v => (v instanceof Date) && !isNaN(v.getTime()))
+          .map(v => { const d = new Date(v.getTime()); d.setHours(0, 0, 0, 0); return d; });
+        const firstFeed = feedDates.length
+          ? new Date(Math.min.apply(null, feedDates))
+          : null;
+
+        if (today0 >= start0 && (!firstFeed || today0 < firstFeed)) {
+          return { stage: "s-tab", tabName: LOT_CFG.FIRST_TAB, mixedWarning: null };
+        }
+      }
     }
 
     // The old wording was "La date introduite n'existe pas pour ce lot", which
