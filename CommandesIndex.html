@@ -1128,7 +1128,11 @@
   /** Both pools in one sentence. '' until a check has run. */
   function stockPoolText() {
     if (!demPools) return '';
+    // Two numbers, because they answer two questions: how many fish are
+    // in the water, and how many a client may order — the second is the
+    // first divided by the +5 % counted out at delivery. (2026-09-12)
     return 'Disponible : ' + fmtNum(demPools.Alevins) + ' alevins' +
+           ' (commandables : ' + fmtNum(Math.floor(demPools.Alevins / 1.05)) + ')' +
            ' &nbsp;&middot;&nbsp; ' + fmtNum(demPools.Poisson) + ' kg' +
            (demGrBlock != null ? ' (&ge; ' + demGrBlock + ' g)' : '');
   }
@@ -1791,8 +1795,12 @@
     if (plan.length) {
       lines = plan.map(function (p) {
         var lot = labelOf[p.lot] || '';
+        // p.nb is already the COUNTED-OUT figure (demCheckStock allocates
+        // at +5 % for alevins), so it goes straight into "à livrer" and
+        // the billed number is back-computed. Inflating it again here
+        // would reserve 10 % and bill the client for fish he never got.
         return wantAL
-          ? { lot: lot, alevinsNb: p.nb, alevinsLivrer: Math.round(p.nb * 1.05),
+          ? { lot: lot, alevinsNb: Math.round(p.nb / 1.05), alevinsLivrer: p.nb,
               alevinsPrix: px }
           : { lot: lot, poissonKg: Math.round(p.nb * p.pm / 100) / 10, prixKg: px };
       });

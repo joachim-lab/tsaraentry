@@ -2833,6 +2833,12 @@ function testDemandes() {
 
 const DEM_PM_TOL = 0.25;   // ±25 % band around the requested weight
 
+/* Alevins are handed over at +5 % of the number ordered — the rule the
+ * order form applies to column H and the only number the engine ever
+ * deducts. Every comparison of an ALEVINS order against stock uses it.
+ * Grossis are unaffected: they are sold by weight. (2026-09-12) */
+const DEM_ALEVINS_MARGIN = 1.05;
+
 /** {canonKey: "TOUT"|number} - every reservation in one read. */
 function demResMap() {
   const ss = SpreadsheetApp.openById(CMD_CFG.SS_ID);
@@ -3057,13 +3063,21 @@ function demCheckStock() {
       return;
     }
 
+    // Fish this pré-commande will actually take out of stock.
+    // Alevins are counted out at +5 % (column H is what the engine
+    // deducts), so an order of 10 000 costs 10 500 fish. Grossis are
+    // sold by weight and take exactly what is ordered. (2026-09-12)
+    const besoin = isAL ? Math.round(d.nombre * DEM_ALEVINS_MARGIN) : d.nombre;
+
     // 1. the type test, all lots together
     const elig = lots.filter(function (l) { return l.avail > 0 && (isAL ? l.al : l.gr); });
     var total = 0;
     elig.forEach(function (l) { total += l.avail; });
-    if (total < d.nombre) {
+    if (total < besoin) {
       v.statut = "INDISPONIBLE";
-      v.manque = Math.ceil(d.nombre - total);
+      // Quoted back in the unit the client ordered in, not in counted-out
+      // fish: "manque" must be subtractable from the pré-commande.
+      v.manque = Math.ceil((besoin - total) / (isAL ? DEM_ALEVINS_MARGIN : 1));
       out.rows.push(v);
       return;
     }
@@ -3077,8 +3091,10 @@ function demCheckStock() {
     });
     var bandTotal = 0;
     band.forEach(function (l) { bandTotal += l.avail; });
-    v.bande = Math.round(bandTotal);
-    if (bandTotal < d.nombre) {
+    // Shown to the worker as an ORDERABLE figure: how many he could
+    // promise at this weight, once the +5 % is counted out.
+    v.bande = Math.round(bandTotal / (isAL ? DEM_ALEVINS_MARGIN : 1));
+    if (bandTotal < besoin) {
       v.statut = "PM";
       // What to use instead: the lots nearest in weight that together
       // cover the order. Band lots come first (distance ~0), then the
@@ -3091,7 +3107,7 @@ function demCheckStock() {
       }).sort(function (a, b) {
         return Math.abs(a.pm - d.poids) - Math.abs(b.pm - d.poids);
       });
-      var want = d.nombre;
+      var want = besoin;
       for (var m = 0; m < near.length && want > 0; m++) {
         const part = Math.min(near[m].avail, want);
         want -= part;
@@ -3101,8 +3117,10 @@ function demCheckStock() {
       return;
     }
 
-    // 3. DISPONIBLE: take the fish, remember where from
-    var need = d.nombre;
+    // 3. DISPONIBLE: take the fish, remember where from.
+    // v.lots nb is a COUNTED-OUT figure (+5 % included for alevins):
+    // demCommander fills column H with it and back-computes F.
+    var need = besoin;
     for (var k = 0; k < band.length && need > 0; k++) {
       const take = Math.min(band[k].avail, need);
       band[k].avail -= take;
