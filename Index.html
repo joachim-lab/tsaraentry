@@ -65,21 +65,6 @@
   <button id="submitBtn" onclick="submitAll()" disabled>Enregistrer (0)</button>
   <div id="loading">Enregistrement en cours...</div>
 
-  <div id="redBox">
-    <h2>Nourrissage réduit pour ralentir la croissance</h2>
-    <p class="hint">Lots de plus de 150 g. Un seul pourcentage s'applique à tous les lots cochés.</p>
-    <div id="redLoading">Chargement...</div>
-    <table id="redTable" style="display:none">
-      <thead><tr><th>Lot</th><th>Poids moyen (g)</th><th>Réduire</th></tr></thead>
-      <tbody id="redBody"></tbody>
-    </table>
-
-    <label for="redPct">Réduction appliquée aux lots cochés (%)</label>
-    <input type="number" id="redPct" min="0" max="100" step="1" placeholder="ex: 50">
-
-    <button id="redSaveBtn" onclick="redSave()">Enregistrer la réduction</button>
-  </div>
-
   <button id="corrOpenBtn" onclick="corrOpen()">Corriger une saisie</button>
 
   <div id="corrPanel">
@@ -104,6 +89,21 @@
       <button id="corrSaveBtn" onclick="corrSave()">Enregistrer la correction</button>
       <button id="corrCancelBtn" onclick="corrCancel()">Annuler</button>
     </div>
+  </div>
+
+  <div id="redBox">
+    <h2>Nourrissage réduit pour ralentir la croissance</h2>
+    <p class="hint">Lots de plus de 150 g. Un seul pourcentage s'applique à tous les lots cochés.</p>
+    <label for="redPct">Réduction appliquée aux lots cochés (%)</label>
+    <input type="number" id="redPct" min="0" max="100" step="1" placeholder="ex: 50">
+
+    <div id="redLoading">Chargement...</div>
+    <table id="redTable" style="display:none">
+      <thead><tr><th>Lot</th><th>Poids moyen (g)</th><th>Réduire</th></tr></thead>
+      <tbody id="redBody"></tbody>
+    </table>
+
+    <button id="redSaveBtn" onclick="redSave()">Enregistrer la réduction</button>
   </div>
 
   <script>
