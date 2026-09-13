@@ -33,6 +33,10 @@
     #redBox p.hint { color: #5f6368; font-size: 14px; margin: 0 0 8px; }
     #redBox input[type="checkbox"] { width: 22px; height: 22px; }
     #redSaveBtn { background: #188038; color: white; border: none; border-radius: 4px; }
+    #redSaveBtn:disabled { background: #999; cursor: not-allowed; }
+    #redMsg { margin-top: 12px; padding: 10px; border-radius: 4px; font-size: 15px; display: none; }
+    #redMsg.ok { background: #e6f4ea; color: #188038; display: block; }
+    #redMsg.err { background: #fce8e6; color: #c5221f; display: block; }
   </style>
   <?!= include('Theme'); ?>
   <?!= include('Spinner'); ?>
@@ -104,6 +108,7 @@
     </table>
 
     <button id="redSaveBtn" onclick="redSave()">Enregistrer la réduction</button>
+    <div id="redMsg"></div>
   </div>
 
   <script>
@@ -222,31 +227,46 @@
       }
     }
 
+    function redMsg(cls, text) {
+      var m = document.getElementById('redMsg');
+      m.className = cls;
+      m.textContent = text;
+      m.style.display = text ? 'block' : 'none';
+    }
+
     function redSave() {
       var pctEl = document.getElementById('redPct');
       var pct = Number(pctEl.value);
       if (pctEl.value === '' || !isFinite(pct) || pct < 0 || pct > 100) {
-        showMsg('err', 'Pourcentage de reduction entre 0 et 100.');
+        redMsg('err', 'Pourcentage de reduction entre 0 et 100.');
         return;
       }
       var boxes = document.querySelectorAll('.redChk');
-      if (!boxes.length) { showMsg('err', 'Aucun lot a enregistrer.'); return; }
+      if (!boxes.length) { redMsg('err', 'Aucun lot a enregistrer.'); return; }
       var lots = [];
       for (var i = 0; i < boxes.length; i++) {
         lots.push({ lot: boxes[i].getAttribute('data-lot'), reduce: boxes[i].checked });
       }
       var btn = document.getElementById('redSaveBtn');
+      var lbl = btn.textContent;
       btn.disabled = true;
+      btn.textContent = 'Enregistrement...';
+      redMsg('', 'Ecriture dans Stock poisson...');
       hideMsg();
       google.script.run
         .withSuccessHandler(function (res) {
           btn.disabled = false;
-          showMsg('ok', 'Reduction enregistree: ' + res.pct + ' % sur les lots coches.');
+          btn.textContent = lbl;
+          var t = (res.ticked && res.ticked.length)
+            ? res.ticked.length + ' lot(s) reduit(s) de ' + res.pct + ' % : ' + res.ticked.join(', ')
+            : 'Aucun lot reduit. Reduction ' + res.pct + ' % enregistree, mais aucune case cochee.';
+          redMsg('ok', 'Stock poisson mis a jour (' + res.changed + ' case(s) modifiee(s)). ' + t);
           redLoad();
         })
         .withFailureHandler(function (e) {
           btn.disabled = false;
-          showMsg('err', e.message);
+          btn.textContent = lbl;
+          redMsg('err', 'Rien enregistre: ' + e.message);
         })
         .saveReduction({ pct: pct, lots: lots });
     }

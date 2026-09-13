@@ -104,5 +104,24 @@ function saveReduction(req) {
   sh.getRange(RED_CFG.PCT_ROW, RED_CFG.PCT_COL).setValue(pct / 100);
   SpreadsheetApp.flush();
 
-  return { changed: changed, pct: pct };
+  // Read back from the sheet. The confirmation must describe Stock poisson,
+  // not what the screen sent - those are the same only if the write landed.
+  const backTicks = sh.getRange(RED_CFG.START_ROW, RED_CFG.TICK_COL, n, 1).getValues();
+  const backPctRaw = sh.getRange(RED_CFG.PCT_ROW, RED_CFG.PCT_COL).getValue();
+  const backPct = Math.round(Number(backPctRaw) * 1000) / 10;
+
+  const ticked = [];
+  for (let i = 0; i < n; i++) {
+    if (backTicks[i][0] === true) {
+      const lot = String(lotVals[i][0] || "").trim();
+      if (lot) ticked.push(lot);
+    }
+  }
+
+  if (backPct !== pct) {
+    throw new Error("Ecriture non confirmee: AH1 vaut " + backPct + " % apres ecriture, " +
+                    pct + " % demande. Verifiez Stock poisson.");
+  }
+
+  return { changed: changed, pct: backPct, ticked: ticked };
 }
