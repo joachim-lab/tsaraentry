@@ -28,6 +28,11 @@
     #corrSaveBtn { background: #188038; color: white; border: none; border-radius: 4px; }
     #corrCancelBtn { background: #f1f3f4; color: #202124; border: 1px solid #ccc; border-radius: 4px; }
     #corrList a { color: #1a73e8; }
+    #redBox { margin-top: 28px; border: 2px solid #ddd; border-radius: 4px; padding: 12px 14px; }
+    #redBox h2 { font-size: 20px; margin: 0 0 6px; }
+    #redBox p.hint { color: #5f6368; font-size: 14px; margin: 0 0 8px; }
+    #redBox input[type="checkbox"] { width: 22px; height: 22px; }
+    #redSaveBtn { background: #188038; color: white; border: none; border-radius: 4px; }
   </style>
   <?!= include('Theme'); ?>
   <?!= include('Spinner'); ?>
@@ -59,6 +64,21 @@
 
   <button id="submitBtn" onclick="submitAll()" disabled>Enregistrer (0)</button>
   <div id="loading">Enregistrement en cours...</div>
+
+  <div id="redBox">
+    <h2>Nourrissage réduit pour ralentir la croissance</h2>
+    <p class="hint">Lots de plus de 150 g. Un seul pourcentage s'applique à tous les lots cochés.</p>
+    <div id="redLoading">Chargement...</div>
+    <table id="redTable" style="display:none">
+      <thead><tr><th>Lot</th><th>Poids moyen (g)</th><th>Réduire</th></tr></thead>
+      <tbody id="redBody"></tbody>
+    </table>
+
+    <label for="redPct">Réduction appliquée aux lots cochés (%)</label>
+    <input type="number" id="redPct" min="0" max="100" step="1" placeholder="ex: 50">
+
+    <button id="redSaveBtn" onclick="redSave()">Enregistrer la réduction</button>
+  </div>
 
   <button id="corrOpenBtn" onclick="corrOpen()">Corriger une saisie</button>
 
@@ -174,6 +194,64 @@
         })
         .submitNourrissage(pending);
     }
+
+    /* ---------- Reduction de provende (Stock poisson AF + AH1) ---------- */
+
+    function redLoad() {
+      google.script.run
+        .withSuccessHandler(redRender)
+        .withFailureHandler(function (e) {
+          document.getElementById('redLoading').textContent = 'Erreur: ' + e.message;
+        })
+        .getReductionLots();
+    }
+
+    function redRender(res) {
+      var rows = (res && res.rows) || [];
+      document.getElementById('redLoading').style.display = 'none';
+      document.getElementById('redTable').style.display = '';
+      document.getElementById('redBody').innerHTML = rows.length
+        ? rows.map(function (r) {
+            return '<tr><td>' + r.lot + '</td><td>' + r.pm + '</td>' +
+              '<td><input type="checkbox" class="redChk" data-lot="' + r.lot + '"' +
+              (r.reduce ? ' checked' : '') + '></td></tr>';
+          }).join('')
+        : '<tr><td colspan="3">Aucun lot au-dessus de 150 g.</td></tr>';
+      if (res && res.pct !== '' && res.pct !== null) {
+        document.getElementById('redPct').value = res.pct;
+      }
+    }
+
+    function redSave() {
+      var pctEl = document.getElementById('redPct');
+      var pct = Number(pctEl.value);
+      if (pctEl.value === '' || !isFinite(pct) || pct < 0 || pct > 100) {
+        showMsg('err', 'Pourcentage de reduction entre 0 et 100.');
+        return;
+      }
+      var boxes = document.querySelectorAll('.redChk');
+      if (!boxes.length) { showMsg('err', 'Aucun lot a enregistrer.'); return; }
+      var lots = [];
+      for (var i = 0; i < boxes.length; i++) {
+        lots.push({ lot: boxes[i].getAttribute('data-lot'), reduce: boxes[i].checked });
+      }
+      var btn = document.getElementById('redSaveBtn');
+      btn.disabled = true;
+      hideMsg();
+      google.script.run
+        .withSuccessHandler(function (res) {
+          btn.disabled = false;
+          showMsg('ok', 'Reduction enregistree: ' + res.pct + ' % sur les lots coches.');
+          redLoad();
+        })
+        .withFailureHandler(function (e) {
+          btn.disabled = false;
+          showMsg('err', e.message);
+        })
+        .saveReduction({ pct: pct, lots: lots });
+    }
+
+    redLoad();
 
     /* ---------- Corriger une saisie deja enregistree ---------- */
 
