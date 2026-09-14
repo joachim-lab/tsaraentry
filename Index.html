@@ -44,6 +44,9 @@
     #redBox input[type="number"] { border: 1px solid #c5221f; }
     #redApplyBtn { background: white; border: 1px solid #c5221f; border-radius: 4px; }
     #redBox td input.redRate { width: 90px; padding: 4px 6px; font-size: 16px; margin-top: 0; }
+    .redAllLbl { display: block; margin-top: 16px; font-weight: bold; font-size: 16px; }
+    .redAllLbl input { vertical-align: middle; margin-right: 6px; }
+    #redBox p.hint { margin: 4px 0 0; }
   </style>
   <?!= include('Theme'); ?>
   <?!= include('Spinner'); ?>
@@ -104,19 +107,20 @@
 
   <div id="redBox">
     <h2>Nourrissage réduit pour ralentir la croissance</h2>
-    <p class="hint">Lots de plus de 150 g. Chaque lot coché a son pourcentage (colonne AG de Stock poisson).</p>
 
     <label for="redPct">Pourcentage à appliquer aux lots cochés (%)</label>
-    <input type="number" id="redPct" min="1" max="100" step="1" placeholder="ex: 50">
+    <input type="number" id="redPct" min="0" max="100" step="1" placeholder="ex: 50">
+    <p class="hint">Mettre 0 pour pas de réduction.</p>
     <button id="redApplyBtn" onclick="redApply()">Appliquer aux lots cochés</button>
+    <button id="redSaveBtn" onclick="redSave()">Enregistrer</button>
+
+    <label class="redAllLbl"><input type="checkbox" id="redAll" onchange="redAllToggle()"> Tout cocher</label>
 
     <div id="redLoading">Chargement...</div>
     <table id="redTable" style="display:none">
       <thead><tr><th>Lot</th><th>Poids moyen (g)</th><th>Réduire</th><th>Réduction (%)</th></tr></thead>
       <tbody id="redBody"></tbody>
     </table>
-
-    <button id="redSaveBtn" onclick="redSave()">Enregistrer la réduction</button>
     <div id="redMsg"></div>
   </div>
 
@@ -211,6 +215,16 @@
 
     /* ---------- Reduction de provende (Stock poisson AF + AG par lot) ---------- */
 
+    var redDirty = false;
+
+    function redDirtyMark() { redDirty = true; }
+
+    window.addEventListener('beforeunload', function (e) {
+      if (!redDirty) return;
+      e.preventDefault();
+      e.returnValue = '';   // the browser shows its own generic warning
+    });
+
     function redLoad() {
       google.script.run
         .withSuccessHandler(redRender)
@@ -224,13 +238,14 @@
       var rows = (res && res.rows) || [];
       document.getElementById('redLoading').style.display = 'none';
       document.getElementById('redTable').style.display = '';
+      document.getElementById('redAll').checked = false;
       document.getElementById('redBody').innerHTML = rows.length
         ? rows.map(function (r) {
             return '<tr><td>' + r.lot + '</td><td>' + r.pm + '</td>' +
               '<td><input type="checkbox" class="redChk" data-lot="' + r.lot + '"' +
-              (r.reduce ? ' checked' : '') + '></td>' +
+              (r.reduce ? ' checked' : '') + ' onchange="redDirtyMark()"></td>' +
               '<td><input type="number" class="redRate" data-lot="' + r.lot +
-              '" min="1" max="100" step="1" value="' + r.rate + '"></td></tr>';
+              '" min="1" max="100" step="1" value="' + r.rate + '" oninput="redDirtyMark()"></td></tr>';
           }).join('')
         : '<tr><td colspan="4">Aucun lot au-dessus de 150 g.</td></tr>';
     }
@@ -242,23 +257,41 @@
       m.style.display = text ? 'block' : 'none';
     }
 
+    function redAllToggle() {
+      var on = document.getElementById('redAll').checked;
+      var boxes = document.querySelectorAll('.redChk');
+      for (var i = 0; i < boxes.length; i++) boxes[i].checked = on;
+      if (boxes.length) redDirtyMark();
+    }
+
     function redApply() {
       var pctEl = document.getElementById('redPct');
       var pct = Number(pctEl.value);
-      if (pctEl.value === '' || !isFinite(pct) || pct <= 0 || pct > 100) {
-        redMsg('err', 'Pourcentage entre 1 et 100.');
+      if (pctEl.value === '' || !isFinite(pct) || pct < 0 || pct > 100) {
+        redMsg('err', 'Pourcentage entre 0 et 100.');
         return;
       }
       var boxes = document.querySelectorAll('.redChk');
-      var applied = 0;
+      var touched = 0;
       for (var i = 0; i < boxes.length; i++) {
         if (!boxes[i].checked) continue;
         var rateEl = document.querySelector('.redRate[data-lot="' + boxes[i].getAttribute('data-lot') + '"]');
-        if (rateEl) { rateEl.value = pct; applied++; }
+        if (!rateEl) continue;
+        if (pct === 0) {
+          rateEl.value = '';
+          boxes[i].checked = false;   // 0 = no reduction: cell blanked, tick removed
+        } else {
+          rateEl.value = pct;
+        }
+        touched++;
       }
-      if (!applied) { redMsg('err', 'Aucun lot coche.'); return; }
-      redMsg('ok', pct + ' % place sur ' + applied + ' lot(s) coche(s). ' +
-                   'Rien n\'est ecrit avant Enregistrer la reduction.');
+      if (!touched) { redMsg('err', 'Aucun lot coche.'); return; }
+      if (pct === 0) document.getElementById('redAll').checked = false;
+      redDirtyMark();
+      redMsg('ok', (pct === 0
+        ? 'Reduction retiree pour ' + touched + ' lot(s) (cases decochees).'
+        : pct + ' % place sur ' + touched + ' lot(s) coche(s).') +
+        ' Rien n\'est ecrit avant Enregistrer.');
     }
 
     function redSave() {
@@ -291,6 +324,7 @@
         .withSuccessHandler(function (res) {
           btn.disabled = false;
           btn.textContent = lbl;
+          redDirty = false;
           var t = (res.ticked && res.ticked.length)
             ? res.ticked.map(function (x) { return x.lot + ' (' + x.rate + ' %)'; }).join(', ')
             : 'aucun';
