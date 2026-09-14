@@ -35,7 +35,7 @@
       accent-color: #c5221f; }
     #redSaveBtn { background: #c5221f; color: white; border: none; border-radius: 4px; }
     #redSaveBtn:disabled { background: #999; cursor: not-allowed; }
-    #redMsg { margin-top: 12px; padding: 10px; border-radius: 4px; font-size: 15px; display: none; }
+    #redMsg { margin: 10px 0 4px; padding: 10px; border-radius: 4px; font-size: 15px; display: none; }
     #redMsg.ok { background: #e6f4ea; color: #188038; display: block; }
     #redMsg.err { background: #fce8e6; color: #c5221f; display: block; }
     #redBox, #redBox *:not(#redSaveBtn) { color: #c5221f; }
@@ -109,6 +109,7 @@
 
   <div id="redBox">
     <h2>Nourrissage réduit pour ralentir la croissance</h2>
+    <div id="redMsg"></div>
 
     <label for="redPct">Pourcentage à appliquer aux lots cochés (%)</label>
     <input type="number" id="redPct" min="0" max="100" step="1" placeholder="ex: 50">
@@ -122,7 +123,6 @@
       <thead><tr><th>Lot</th><th>Poids moyen (g)</th><th>Réduire</th><th>Réduction (%)</th></tr></thead>
       <tbody id="redBody"></tbody>
     </table>
-    <div id="redMsg"></div>
   </div>
 
   <script>
