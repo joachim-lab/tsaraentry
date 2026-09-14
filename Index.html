@@ -44,7 +44,8 @@
     #redBox input[type="number"] { border: 1px solid #c5221f; }
     #redApplyBtn { background: white; border: 1px solid #c5221f; border-radius: 4px; }
     #redBox td input.redRate { width: 90px; padding: 4px 6px; font-size: 16px; margin-top: 0; }
-    .redAllLbl { display: block; margin-top: 16px; font-weight: bold; font-size: 16px; }
+    .redAllLbl { display: inline-block; margin: 16px 0 0 14px; font-weight: bold;
+      font-size: 16px; vertical-align: middle; }
     .redAllLbl input { vertical-align: middle; margin-right: 6px; }
     #redBox p.hint { margin: 4px 0 0; }
   </style>
@@ -113,7 +114,6 @@
     <p class="hint">Mettre 0 pour pas de réduction.</p>
     <button id="redApplyBtn" onclick="redApply()">Appliquer aux lots cochés</button>
     <button id="redSaveBtn" onclick="redSave()">Enregistrer</button>
-
     <label class="redAllLbl"><input type="checkbox" id="redAll" onchange="redAllToggle()"> Tout cocher</label>
 
     <div id="redLoading">Chargement...</div>
@@ -219,11 +219,32 @@
 
     function redDirtyMark() { redDirty = true; }
 
+    // Backstop only (tab close, reload). Browsers impose their own wording
+    // here - the French dialog below covers in-app navigation instead.
     window.addEventListener('beforeunload', function (e) {
       if (!redDirty) return;
       e.preventDefault();
-      e.returnValue = '';   // the browser shows its own generic warning
+      e.returnValue = '';
     });
+
+    // Link clicks while dirty: French confirm, asked BEFORE Spinner.html's
+    // document-level handler can show the busy overlay (window capture
+    // fires first). Cancel stops everything - no overlay, no navigation.
+    window.addEventListener('click', function (ev) {
+      if (!redDirty) return;
+      if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+      var a = ev.target;
+      while (a && a.tagName !== 'A') a = a.parentElement;
+      if (!a) return;
+      var href = a.getAttribute('href');
+      if (!href || href === '#') return;
+      if (confirm("Attention, vos changements n'ont pas \u00e9t\u00e9 sauv\u00e9s. Continuer sans sauver?")) {
+        redDirty = false;   // proceed; the beforeunload backstop stays quiet
+      } else {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+    }, true);
 
     function redLoad() {
       google.script.run
