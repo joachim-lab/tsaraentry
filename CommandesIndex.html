@@ -168,6 +168,9 @@
     .err  { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #fce8e6; color: #c5221f; font-size: 16px; }
     .ok   { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #e6f4ea; color: #188038; font-size: 16px; }
     .warn { margin-top: 10px; padding: 10px 12px; border-radius: 4px; background: #fef7e0; color: #b06000; font-size: 15px; }
+    /* Stock readout + demand total as one column, so the two lines
+       share a left edge instead of each finding its own. */
+    .demReadout { display: inline-block; vertical-align: middle; }
     /* THE STOCK BAR (Kim, 2026-09-12). The floor field used to be a
        float:right span inside the .warn band: on the 788px form panes it
        dropped out of the yellow band altogether, and the label, the input,
@@ -1180,9 +1183,13 @@
           'style="background:#188038;color:#fff;border-color:#188038">' +
           'Actualiser le stock</button> ' +
         '<span id="demOrderBtns"></span>' +
-        '<span id="demPool" class="muted"></span>' +
-        '<div id="demWant" class="muted" style="margin-top:4px"></div>' +
-        '</div>' +
+        // demPool and demWant share ONE inline-block: the second line
+        // then starts where "Disponible" starts, and keeps that
+        // alignment when the save/cancel pair widens the button row.
+        '<span class="demReadout">' +
+          '<span id="demPool" class="muted"></span>' +
+          '<div id="demWant" class="muted" style="margin-top:4px"></div>' +
+        '</span></div>' +
       '<div id="demList">Chargement…</div>' +
       '<div id="demForm"></div>';
     demMarkSubtabs();
@@ -1343,7 +1350,7 @@
         ? (r.poids != null ? r.nombre * r.poids / 1000 : 0)
         : r.nombre;
     });
-    n.textContent = 'Pré-commandes : ' +
+    n.textContent = 'Total pré-commandes : ' +
       fmtNum(demType === 'Poisson' ? Math.round(tot * 10) / 10 : tot) +
       (demType === 'Poisson' ? ' kg' : ' alevins');
   }
