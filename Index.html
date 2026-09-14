@@ -38,7 +38,12 @@
     #redMsg { margin-top: 12px; padding: 10px; border-radius: 4px; font-size: 15px; display: none; }
     #redMsg.ok { background: #e6f4ea; color: #188038; display: block; }
     #redMsg.err { background: #fce8e6; color: #c5221f; display: block; }
-    #redBox h2, #redBox p.hint, #redBox label[for="redPct"] { color: #c5221f; }
+    #redBox, #redBox *:not(#redSaveBtn) { color: #c5221f; }
+    #redBox { border-color: #c5221f; }
+    #redBox th, #redBox td { border-bottom-color: #c5221f; }
+    #redBox input[type="number"] { border: 1px solid #c5221f; }
+    #redApplyBtn { background: white; border: 1px solid #c5221f; border-radius: 4px; }
+    #redBox td input.redRate { width: 90px; padding: 4px 6px; font-size: 16px; margin-top: 0; }
   </style>
   <?!= include('Theme'); ?>
   <?!= include('Spinner'); ?>
@@ -99,13 +104,15 @@
 
   <div id="redBox">
     <h2>Nourrissage réduit pour ralentir la croissance</h2>
-    <p class="hint">Lots de plus de 150 g. Un seul pourcentage s'applique à tous les lots cochés.</p>
-    <label for="redPct">Réduction appliquée aux lots cochés (%)</label>
-    <input type="number" id="redPct" min="0" max="100" step="1" placeholder="ex: 50">
+    <p class="hint">Lots de plus de 150 g. Chaque lot coché a son pourcentage (colonne AG de Stock poisson).</p>
+
+    <label for="redPct">Pourcentage à appliquer aux lots cochés (%)</label>
+    <input type="number" id="redPct" min="1" max="100" step="1" placeholder="ex: 50">
+    <button id="redApplyBtn" onclick="redApply()">Appliquer aux lots cochés</button>
 
     <div id="redLoading">Chargement...</div>
     <table id="redTable" style="display:none">
-      <thead><tr><th>Lot</th><th>Poids moyen (g)</th><th>Réduire</th></tr></thead>
+      <thead><tr><th>Lot</th><th>Poids moyen (g)</th><th>Réduire</th><th>Réduction (%)</th></tr></thead>
       <tbody id="redBody"></tbody>
     </table>
 
@@ -202,7 +209,7 @@
         .submitNourrissage(pending);
     }
 
-    /* ---------- Reduction de provende (Stock poisson AF + AH1) ---------- */
+    /* ---------- Reduction de provende (Stock poisson AF + AG par lot) ---------- */
 
     function redLoad() {
       google.script.run
@@ -221,12 +228,11 @@
         ? rows.map(function (r) {
             return '<tr><td>' + r.lot + '</td><td>' + r.pm + '</td>' +
               '<td><input type="checkbox" class="redChk" data-lot="' + r.lot + '"' +
-              (r.reduce ? ' checked' : '') + '></td></tr>';
+              (r.reduce ? ' checked' : '') + '></td>' +
+              '<td><input type="number" class="redRate" data-lot="' + r.lot +
+              '" min="1" max="100" step="1" value="' + r.rate + '"></td></tr>';
           }).join('')
-        : '<tr><td colspan="3">Aucun lot au-dessus de 150 g.</td></tr>';
-      if (res && res.pct !== '' && res.pct !== null) {
-        document.getElementById('redPct').value = res.pct;
-      }
+        : '<tr><td colspan="4">Aucun lot au-dessus de 150 g.</td></tr>';
     }
 
     function redMsg(cls, text) {
@@ -236,18 +242,44 @@
       m.style.display = text ? 'block' : 'none';
     }
 
-    function redSave() {
+    function redApply() {
       var pctEl = document.getElementById('redPct');
       var pct = Number(pctEl.value);
-      if (pctEl.value === '' || !isFinite(pct) || pct < 0 || pct > 100) {
-        redMsg('err', 'Pourcentage de reduction entre 0 et 100.');
+      if (pctEl.value === '' || !isFinite(pct) || pct <= 0 || pct > 100) {
+        redMsg('err', 'Pourcentage entre 1 et 100.');
         return;
       }
       var boxes = document.querySelectorAll('.redChk');
-      if (!boxes.length) { redMsg('err', 'Aucun lot a enregistrer.'); return; }
-      var lots = [];
+      var applied = 0;
       for (var i = 0; i < boxes.length; i++) {
-        lots.push({ lot: boxes[i].getAttribute('data-lot'), reduce: boxes[i].checked });
+        if (!boxes[i].checked) continue;
+        var rateEl = document.querySelector('.redRate[data-lot="' + boxes[i].getAttribute('data-lot') + '"]');
+        if (rateEl) { rateEl.value = pct; applied++; }
+      }
+      if (!applied) { redMsg('err', 'Aucun lot coche.'); return; }
+      redMsg('ok', pct + ' % place sur ' + applied + ' lot(s) coche(s). ' +
+                   'Rien n\'est ecrit avant Enregistrer la reduction.');
+    }
+
+    function redSave() {
+      var boxes = document.querySelectorAll('.redChk');
+      if (!boxes.length) { redMsg('err', 'Aucun lot a enregistrer.'); return; }
+      var lots = [], bad = [];
+      for (var i = 0; i < boxes.length; i++) {
+        var lot = boxes[i].getAttribute('data-lot');
+        var rateEl = document.querySelector('.redRate[data-lot="' + lot + '"]');
+        var raw = rateEl ? rateEl.value : '';
+        var rate = raw === '' ? '' : Number(raw);
+        if (boxes[i].checked &&
+            (raw === '' || !isFinite(rate) || rate <= 0 || rate > 100)) {
+          bad.push(lot);
+          continue;
+        }
+        lots.push({ lot: lot, reduce: boxes[i].checked, rate: rate });
+      }
+      if (bad.length) {
+        redMsg('err', 'Pourcentage manquant ou invalide (1-100) pour: ' + bad.join(', '));
+        return;
       }
       var btn = document.getElementById('redSaveBtn');
       var lbl = btn.textContent;
@@ -260,9 +292,10 @@
           btn.disabled = false;
           btn.textContent = lbl;
           var t = (res.ticked && res.ticked.length)
-            ? res.ticked.length + ' lot(s) reduit(s) de ' + res.pct + ' % : ' + res.ticked.join(', ')
-            : 'Aucun lot reduit. Reduction ' + res.pct + ' % enregistree, mais aucune case cochee.';
-          redMsg('ok', 'Stock poisson mis a jour (' + res.changed + ' case(s) modifiee(s)). ' + t);
+            ? res.ticked.map(function (x) { return x.lot + ' (' + x.rate + ' %)'; }).join(', ')
+            : 'aucun';
+          redMsg('ok', 'Stock poisson mis a jour (' + res.changed +
+                       ' cellule(s) modifiee(s)). Lots reduits: ' + t + '.');
           redLoad();
         })
         .withFailureHandler(function (e) {
@@ -270,7 +303,7 @@
           btn.textContent = lbl;
           redMsg('err', 'Rien enregistre: ' + e.message);
         })
-        .saveReduction({ pct: pct, lots: lots });
+        .saveReduction({ lots: lots });
     }
 
     redLoad();

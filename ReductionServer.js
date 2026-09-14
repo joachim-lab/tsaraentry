@@ -3,10 +3,11 @@
  *
  * Stock poisson, tab "lot":
  *   AF (32) = per-lot tick "Reduire"
- *   AH1     = ONE reduction fraction for the whole selection (0.5 = 50 %)
- * Column S already consumes both:
- *   S = (O*P)*R*IF(AND($AH$1<>"",AF=TRUE),1-$AH$1,1)
- * This file only writes those two cells. No feeding maths lives here.
+ *   AG (33) = per-lot reduction rate in percent (30 = 30 %)
+ * Column S consumes both:
+ *   S = (O*P)*R*IF(AND(AF=TRUE;AG<>"");1-AG/100;1)
+ * AH1 (the old single global rate) is no longer read by S.
+ * This file only writes AF and AG. No feeding maths lives here.
  ***************************************************************/
 
 const RED_CFG = {
@@ -16,8 +17,7 @@ const RED_CFG = {
   LOT_COL: 14,    // N
   PM_COL: 16,     // P  = poids moyen (g)
   TICK_COL: 32,   // AF = Reduire
-  PCT_ROW: 1,     // AH1
-  PCT_COL: 34,
+  RATE_COL: 33,   // AG = reduction %
   MIN_PM: 150     // strictly above
 };
 
@@ -30,16 +30,14 @@ function redOpenLotSheet() {
 
 /**
  * Rows for the box: every lot with PM > 150 g, PLUS every lot already
- * ticked. A lot ticked directly in the sheet must never stay invisible
- * here - AH1 applies to it too.
- * Returns { pct, rows: [{ lot, pm, reduce }] }. pct is a percentage (50), not
- * the stored fraction (0.5).
+ * ticked - AF/AG apply to it whether or not it is heavy enough to show.
+ * Returns { rows: [{ lot, pm, reduce, rate }] }, rate in percent.
  */
 function getReductionLots() {
   const sh = redOpenLotSheet();
   const n = RED_CFG.END_ROW - RED_CFG.START_ROW + 1;
   const block = sh.getRange(RED_CFG.START_ROW, RED_CFG.LOT_COL, n,
-                            RED_CFG.TICK_COL - RED_CFG.LOT_COL + 1).getValues();
+                            RED_CFG.RATE_COL - RED_CFG.LOT_COL + 1).getValues();
 
   const rows = [];
   for (let i = 0; i < n; i++) {
@@ -47,36 +45,44 @@ function getReductionLots() {
     if (!lot) continue;
     const pm = Number(block[i][RED_CFG.PM_COL - RED_CFG.LOT_COL]);
     const tick = block[i][RED_CFG.TICK_COL - RED_CFG.LOT_COL] === true;
+    const raw = block[i][RED_CFG.RATE_COL - RED_CFG.LOT_COL];
     if (!(isFinite(pm) && pm > RED_CFG.MIN_PM) && !tick) continue;
-    rows.push({ lot: lot, pm: isFinite(pm) ? Math.round(pm * 10) / 10 : "", reduce: tick });
+    rows.push({
+      lot: lot,
+      pm: isFinite(pm) ? Math.round(pm * 10) / 10 : "",
+      reduce: tick,
+      rate: (raw === "" || raw === null || !isFinite(Number(raw))) ? "" : Number(raw)
+    });
   }
-
-  const raw = sh.getRange(RED_CFG.PCT_ROW, RED_CFG.PCT_COL).getValue();
-  const pct = (raw === "" || raw === null || !isFinite(Number(raw)))
-    ? "" : Math.round(Number(raw) * 1000) / 10;
-
-  return { pct: pct, rows: rows };
+  return { rows: rows };
 }
 
 /**
- * req = { pct: Number (0-100), lots: [{ lot, reduce }] }
- * Writes AF for the listed lots only - a tick on a row the screen did not
- * show is left alone - then writes AH1 = pct/100.
- * Rows are re-read here: the weekly engine re-sorts them, so a row index
- * captured when the screen loaded cannot be trusted.
+ * req = { lots: [{ lot, reduce, rate }] }, rate in percent, "" allowed on an
+ * unticked row (the rate is kept for later re-ticking if given).
+ * Writes AF and AG for the listed lots only, then reads both columns back -
+ * the confirmation describes Stock poisson, not the request. Rows are
+ * re-read here: the weekly engine re-sorts them.
  */
 function saveReduction(req) {
   if (!req || !req.lots || !req.lots.length) throw new Error("Aucun lot a enregistrer.");
-  const pct = Number(req.pct);
-  if (!isFinite(pct) || pct < 0 || pct > 100) {
-    throw new Error("Pourcentage invalide (attendu 0 a 100, recu: " + req.pct + ").");
-  }
+
+  req.lots.forEach(function (item) {
+    if (item.reduce !== true) return;
+    const rate = Number(item.rate);
+    if (item.rate === "" || item.rate === null || !isFinite(rate) || rate <= 0 || rate > 100) {
+      throw new Error("Pourcentage invalide pour " + item.lot +
+                      " (attendu 1 a 100, recu: " + item.rate + "). Rien n'a ete enregistre.");
+    }
+  });
 
   const sh = redOpenLotSheet();
   const n = RED_CFG.END_ROW - RED_CFG.START_ROW + 1;
   const lotVals = sh.getRange(RED_CFG.START_ROW, RED_CFG.LOT_COL, n, 1).getValues();
   const tickRange = sh.getRange(RED_CFG.START_ROW, RED_CFG.TICK_COL, n, 1);
+  const rateRange = sh.getRange(RED_CFG.START_ROW, RED_CFG.RATE_COL, n, 1);
   const tickVals = tickRange.getValues();
+  const rateVals = rateRange.getValues();
 
   const rowByLot = {};
   for (let i = 0; i < n; i++) {
@@ -88,11 +94,14 @@ function saveReduction(req) {
   let changed = 0;
   req.lots.forEach(function (item) {
     const lot = String(item.lot || "").trim();
-    const want = item.reduce === true;
     if (!(lot in rowByLot)) { missing.push(lot); return; }
     const i = rowByLot[lot];
-    if ((tickVals[i][0] === true) !== want) changed++;
-    tickVals[i][0] = want;
+    const wantTick = item.reduce === true;
+    const wantRate = (item.rate === "" || item.rate === null) ? "" : Number(item.rate);
+    if ((tickVals[i][0] === true) !== wantTick) changed++;
+    if (String(rateVals[i][0]) !== String(wantRate)) changed++;
+    tickVals[i][0] = wantTick;
+    rateVals[i][0] = wantRate;
   });
 
   if (missing.length) {
@@ -101,27 +110,16 @@ function saveReduction(req) {
   }
 
   tickRange.setValues(tickVals);
-  sh.getRange(RED_CFG.PCT_ROW, RED_CFG.PCT_COL).setValue(pct / 100);
+  rateRange.setValues(rateVals);
   SpreadsheetApp.flush();
 
-  // Read back from the sheet. The confirmation must describe Stock poisson,
-  // not what the screen sent - those are the same only if the write landed.
   const backTicks = sh.getRange(RED_CFG.START_ROW, RED_CFG.TICK_COL, n, 1).getValues();
-  const backPctRaw = sh.getRange(RED_CFG.PCT_ROW, RED_CFG.PCT_COL).getValue();
-  const backPct = Math.round(Number(backPctRaw) * 1000) / 10;
-
+  const backRates = sh.getRange(RED_CFG.START_ROW, RED_CFG.RATE_COL, n, 1).getValues();
   const ticked = [];
   for (let i = 0; i < n; i++) {
-    if (backTicks[i][0] === true) {
-      const lot = String(lotVals[i][0] || "").trim();
-      if (lot) ticked.push(lot);
-    }
+    if (backTicks[i][0] !== true) continue;
+    const lot = String(lotVals[i][0] || "").trim();
+    if (lot) ticked.push({ lot: lot, rate: backRates[i][0] });
   }
-
-  if (backPct !== pct) {
-    throw new Error("Ecriture non confirmee: AH1 vaut " + backPct + " % apres ecriture, " +
-                    pct + " % demande. Verifiez Stock poisson.");
-  }
-
-  return { changed: changed, pct: backPct, ticked: ticked };
+  return { changed: changed, ticked: ticked };
 }
