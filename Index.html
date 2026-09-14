@@ -48,6 +48,14 @@
       font-size: 16px; vertical-align: middle; }
     .redAllLbl input { vertical-align: middle; margin-right: 6px; }
     #redBox p.hint { margin: 4px 0 0; }
+    #redLeave { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.45); z-index: 100000; align-items: center; justify-content: center; }
+    #redLeave .rlBox { background: #fff; border-radius: 8px; padding: 20px 24px; max-width: 420px;
+      margin: 0 16px; box-shadow: 0 8px 30px rgba(0,0,0,0.3); }
+    #redLeave p { margin: 0 0 8px; font-size: 18px; color: #c5221f; font-weight: bold; }
+    #redLeave button { margin-right: 10px; }
+    #rlStay { background: #f1f3f4; color: #202124; border: 1px solid #ccc; border-radius: 4px; }
+    #rlGo { background: #c5221f; color: white; border: none; border-radius: 4px; }
   </style>
   <?!= include('Theme'); ?>
   <?!= include('Spinner'); ?>
@@ -122,6 +130,15 @@
       <tbody id="redBody"></tbody>
     </table>
     <div id="redMsg"></div>
+  </div>
+
+  <div id="redLeave">
+    <div class="rlBox">
+      <p>Attention, vos changements n'ont pas été sauvés.</p>
+      <p>Continuer sans sauver ?</p>
+      <button id="rlStay" onclick="redLeaveStay()">Annuler</button>
+      <button id="rlGo" onclick="redLeaveGo()">Continuer sans sauver</button>
+    </div>
   </div>
 
   <script>
@@ -230,6 +247,8 @@
     // Link clicks while dirty: French confirm, asked BEFORE Spinner.html's
     // document-level handler can show the busy overlay (window capture
     // fires first). Cancel stops everything - no overlay, no navigation.
+    var redLeaveHref = null;
+
     window.addEventListener('click', function (ev) {
       if (!redDirty) return;
       if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
@@ -238,13 +257,28 @@
       if (!a) return;
       var href = a.getAttribute('href');
       if (!href || href === '#') return;
-      if (confirm("Attention, vos changements n'ont pas \u00e9t\u00e9 sauv\u00e9s. Continuer sans sauver?")) {
-        redDirty = false;   // proceed; the beforeunload backstop stays quiet
-      } else {
-        ev.preventDefault();
-        ev.stopPropagation();
-      }
+      // Cancel the navigation NOW, synchronously, before asking anything:
+      // Spinner.html's document handler never runs, nothing starts loading.
+      ev.preventDefault();
+      ev.stopPropagation();
+      redLeaveHref = href;
+      document.getElementById('redLeave').style.display = 'flex';
     }, true);
+
+    function redLeaveStay() {
+      redLeaveHref = null;
+      document.getElementById('redLeave').style.display = 'none';
+    }
+
+    function redLeaveGo() {
+      var h = redLeaveHref;
+      redLeaveHref = null;
+      document.getElementById('redLeave').style.display = 'none';
+      if (!h) return;
+      redDirty = false;                 // beforeunload backstop stays quiet
+      if (window.busyGo) { busyGo(h); } // the shared wheel, as any other screen change
+      else { window.top.location.href = h; }
+    }
 
     function redLoad() {
       google.script.run
