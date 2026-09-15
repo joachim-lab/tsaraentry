@@ -3434,6 +3434,119 @@
    *  deliberately page-lifetime only, not stored. */
   var fulSumOpen = false;
 
+  // ---- Ordre de livraison (Kim, 2026-09-15) ----
+  var fulQOpen = false;
+  var fulQ = null;          // last fulQueue() result
+  var fulQDirty = {};       // key -> true once arrows moved that lot
+  function fulQueueToggle() {
+    fulQOpen = !fulQOpen;
+    el('fulQBody').style.display = fulQOpen ? '' : 'none';
+    el('fulQArrow').textContent = fulQOpen ? '▾' : '▸';
+    if (fulQOpen && !fulQ) fulQueueLoad();
+  }
+  function fulQueueLoad() {
+    el('fulQueue').innerHTML = '<div class="muted">Chargement de l’ordre…</div>';
+    google.script.run
+      .withSuccessHandler(function (q) { fulQ = q; fulQDirty = {}; drawFulQueue(); })
+      .withFailureHandler(function (e) {
+        el('fulQueue').innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+      })
+      .fulQueue();
+  }
+  function fulQRule(l) {
+    if (fulQDirty[l.key]) return 'ordre modifié, non enregistré';
+    if (l.manual) return 'ordre manuel';
+    if (l.short) return 'pas assez pour toutes : prix le plus élevé d’abord';
+    return 'première commandée, première livrée';
+  }
+  function fulQQty(r) {
+    if (r.isAl) return (r.nb == null ? '' : fmtNum(r.nb) + ' alevins');
+    if (r.kg != null) return fmtNum(r.kg) + ' kg';
+    return (r.nb == null ? '' : fmtNum(r.nb) + ' poissons');
+  }
+  function drawFulQueue() {
+    const can = RIGHTS.ordre !== false;
+    if (!fulQ || !fulQ.lots.length) {
+      el('fulQueue').innerHTML = '<div class="muted">Aucune commande non-livrée.</div>';
+      return;
+    }
+    var h = '';
+    fulQ.lots.forEach(function (l) {
+      const dirty = !!fulQDirty[l.key];
+      const live = l.rows.filter(function (r) { return !r.error; });
+      h += '<div style="margin-top:12px"><b>' + esc(l.key) + '</b>' +
+        ' · libre : ' + (l.avail == null ? 'inconnu' : fmtNum(l.avail) + ' poissons') +
+        ' · ' + esc(fulQRule(l)) + '</div>' +
+        '<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:15px">';
+      l.rows.forEach(function (r, i) {
+        const first = i === 0, last = i === live.length - 1;
+        const td = '<td style="padding:6px 8px;border:1px solid #dadce0">';
+        h += '<tr' + (r.error ? ' style="color:#d93025"' : '') + '>' +
+          td + (r.error ? '—' : (i + 1)) + '</td>' +
+          td + esc(r.orderNo || '(sans numéro)') + '</td>' +
+          td + esc(r.client) + '</td>' +
+          td + esc(r.dateTxt) + '</td>' +
+          td + fulQQty(r) + '</td>' +
+          td + fmtNum(r.price) + ' Ar</td>' +
+          td + (r.error ? esc(r.error) : (r.deducted ? 'réservé' : '')) + '</td>' +
+          '<td style="padding:6px 8px;border:1px solid #dadce0;white-space:nowrap">' +
+          (can && !r.error
+            ? '<button class="demBtn" onclick="fulQMove(\'' + esc(l.key) + '\',' + r.row + ',-1)" title="Monter"' +
+                (first ? ' disabled' : '') + '>&#9650;</button> ' +
+              '<button class="demBtn" onclick="fulQMove(\'' + esc(l.key) + '\',' + r.row + ',1)" title="Descendre"' +
+                (last ? ' disabled' : '') + '>&#9660;</button>'
+            : '') +
+          '</td></tr>';
+      });
+      h += '</table></div>';
+      if (can) {
+        h += '<div style="margin-top:6px">' +
+          (dirty
+            ? '<button class="demBtn" onclick="fulQSave(\'' + esc(l.key) + '\')" ' +
+                'style="background:#1a73e8;color:#fff">Enregistrer l’ordre</button> ' +
+              '<button class="demBtn" onclick="fulQueueLoad()">Annuler</button>'
+            : (l.manual
+                ? '<button class="demBtn" onclick="fulQAuto(\'' + esc(l.key) + '\')">Ordre automatique</button>'
+                : '')) +
+          '</div>';
+      }
+    });
+    h += '<div style="margin-top:12px"><button class="demBtn" onclick="fulQueueLoad()">Recharger</button></div>';
+    el('fulQueue').innerHTML = h;
+  }
+  /** Swap with the neighbour inside the lot's unblocked rows. */
+  function fulQMove(key, row, dir) {
+    const l = fulQ.lots.filter(function (x) { return x.key === key; })[0];
+    if (!l) return;
+    const live = l.rows.filter(function (r) { return !r.error; });
+    const blocked = l.rows.filter(function (r) { return r.error; });
+    var at = -1;
+    live.forEach(function (r, i) { if (r.row === row) at = i; });
+    const to = at + (dir < 0 ? -1 : 1);
+    if (at < 0 || to < 0 || to >= live.length) return;
+    const tmp = live[at]; live[at] = live[to]; live[to] = tmp;
+    l.rows = live.concat(blocked);
+    fulQDirty[key] = true;
+    drawFulQueue();
+  }
+  function fulQSave(key) {
+    const l = fulQ.lots.filter(function (x) { return x.key === key; })[0];
+    if (!l) return;
+    const rows = l.rows.filter(function (r) { return !r.error; }).map(function (r) { return r.row; });
+    setStatus('banner', 'Enregistrement de l’ordre…');
+    google.script.run
+      .withSuccessHandler(function () { setStatus('ok', 'Ordre enregistré.'); fulQueueLoad(); })
+      .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+      .fulSetQueue(key, rows);
+  }
+  function fulQAuto(key) {
+    setStatus('banner', 'Retour à l’ordre automatique…');
+    google.script.run
+      .withSuccessHandler(function () { setStatus('ok', 'Ordre automatique rétabli.'); fulQueueLoad(); })
+      .withFailureHandler(function (e) { setStatusAndScroll('err', esc(e.message)); })
+      .fulAutoQueue(key);
+  }
+
   function fulSumToggle() {
     fulSumOpen = !fulSumOpen;
     el('fulSumBody').style.display = fulSumOpen ? '' : 'none';
@@ -3665,6 +3778,17 @@
             '<div class="val" id="fTotUD_ar"></div>' +
           '</div>' +
           '<div class="fulPool" id="fulPool">Disponible à la vente : …</div>' +
+        '</div>' +
+      '</div>' +
+      // Ordre de livraison (Kim, 2026-09-15): open orders per lot in
+      // the order the engine will deduct them. Loaded on first open
+      // (it reads Stock Poisson), reloaded by "Recharger".
+      '<div class="card">' +
+        '<div class="fulSumHead" onclick="fulQueueToggle()">' +
+          '<span class="arw" id="fulQArrow">▸</span>' +
+          '<span>Ordre de livraison</span></div>' +
+        '<div id="fulQBody" style="display:none">' +
+          '<div id="fulQueue" class="muted">…</div>' +
         '</div>' +
       '</div>' +
       '<div id="fulForm"></div>' +

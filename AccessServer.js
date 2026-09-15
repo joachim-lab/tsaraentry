@@ -141,7 +141,10 @@ var ACCESS_CMD_COLS = [
   ["Champ N° facture", "nfacture"],
   ["Bouton Modifier", "modifier"],
   ["Bouton Annuler", "annuler"],
-  ["Bouton Facture", "facture"]
+  ["Bouton Facture", "facture"],
+  // Ordre de livraison card (Kim, 2026-09-15): arrows, Enregistrer,
+  // Ordre automatique. Unticked = the card is read-only.
+  ["Bouton Ordre", "ordre"]
 ];
 
 /**

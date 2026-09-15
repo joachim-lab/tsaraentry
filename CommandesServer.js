@@ -55,7 +55,11 @@ const CMD_CFG = {
     // received the order: from that moment the order is frozen and only
     // the payment can be recorded. AF = remise in percent (10 = 10 %),
     // read by the K/Q formulas of rows that carry a remise.
-    RECU: 31, REMISE: 32
+    RECU: 31, REMISE: 32,
+    // AG, appended 2026-09-15 (Kim): Priorité de livraison. 1 = first,
+    // blank = automatic. Written by fulSetQueue / fulAutoQueue only;
+    // read by TSARAENGINE (TT_PRIO_AG_COL) at deduction.
+    PRIORITE: 33
   }
 };
 
@@ -3228,6 +3232,207 @@ function cmdSellablePool() {
 function clearSellablePoolCache() {
   CacheService.getScriptCache().remove(SELLABLE_POOL_CACHE_KEY);
   Logger.log("sellable pool cache cleared");
+}
+
+/***************************************************************
+ * ORDRE DE LIVRAISON (Kim, 2026-09-15)
+ *
+ * Column AG "Priorité": 1 = first, blank = automatic. Written ONLY by
+ * fulSetQueue / fulAutoQueue below; read by TSARAENGINE at deduction.
+ * The engine deducts the open rows of a lot key in this order:
+ * manual first, then by date when they fit, by gross unit price when
+ * they do not. cmdRankRows is the SAME function as ttRankCommandes in
+ * TSARAENGINE/engine_core.js - change both or neither.
+ *
+ * What the queue shows per lot key: every row not delivered (W blank)
+ * and not cancelled (AA blank). A row already deducted (Y) is
+ * "réservé": its fish are committed, so it costs nothing in the fit
+ * test but keeps its place for shipping. A row blocked (Z) is shown
+ * last, without arrows: the engine never retries it until Z is
+ * cleared by a Modifier.
+ *
+ * "Libre" per key = Stock Poisson avail (demSellableLots: count minus
+ * fish deducted but not delivered, minus reservation, minus orders
+ * entered but not deducted) PLUS those same undeducted orders, so it
+ * is what the undeducted rows compete for. Advisory, up to 24 h old,
+ * like every Stock Poisson figure. The engine ranks against the lot
+ * file itself, so the two can differ after a tri or a mort.
+ ***************************************************************/
+
+function cmdRankRows(items, avail) {
+  const manual = items.filter(function (i) { return i.prio != null; });
+  const auto   = items.filter(function (i) { return i.prio == null; });
+  manual.sort(function (a, b) {
+    return (a.prio - b.prio) || (a.date - b.date) || (a.idx - b.idx);
+  });
+  var need = 0, left = avail;
+  auto.forEach(function (i) { need += i.qty; });
+  if (left != null) manual.forEach(function (i) { left -= i.qty; });
+  const short = left != null && need > left;
+  auto.sort(function (a, b) {
+    if (short && b.price !== a.price) return b.price - a.price;
+    return (a.date - b.date) || (a.idx - b.idx);
+  });
+  return { order: manual.concat(auto).map(function (i) { return i.idx; }),
+           short: short };
+}
+
+/** The 2026 tab must reach AG. Cut to AC on 2026-09-07, AE/AF appended
+ *  since: AG does not exist until setupPrioriteColumn runs once. */
+function fulPrioriteSheet() {
+  const sh = cmdSheet();
+  if (sh.getMaxColumns() < CMD_CFG.COL.PRIORITE) {
+    throw new Error("Colonne AG Priorité absente. Lancer setupPrioriteColumn " +
+                    "(tsaraentry -> CommandesServer.js).");
+  }
+  return sh;
+}
+
+/** RUN FROM EDITOR, ONCE: tsaraentry -> CommandesServer.js -> setupPrioriteColumn
+ *  Adds columns up to AG on the 2026 tab and writes the header. Safe to
+ *  re-run: it only adds what is missing. */
+function setupPrioriteColumn() {
+  const sh = cmdSheet();
+  const want = CMD_CFG.COL.PRIORITE;
+  const have = sh.getMaxColumns();
+  if (have < want) sh.insertColumnsAfter(have, want - have);
+  sh.getRange(1, want).setValue("Priorité");
+  Logger.log("2026 : " + sh.getMaxColumns() + " colonnes, AG1 = Priorité");
+}
+
+/** Raw open rows for the queue, keyed by canon lot. One sheet read. */
+function fulQueueRows() {
+  const sh = fulPrioriteSheet();
+  const C = CMD_CFG.COL;
+  const lastRow = findNextCommandeRow(sh) - 1;
+  const byKey = {};
+  if (lastRow < CMD_CFG.START_ROW) return byKey;
+  const vals = sh.getRange(CMD_CFG.START_ROW, 1,
+                           lastRow - CMD_CFG.START_ROW + 1, 33).getValues();
+  const tz = sh.getParent().getSpreadsheetTimeZone();
+  vals.forEach(function (r, i) {
+    const key = cmdCanonKey(r[C.LOT - 1]);
+    if (!key) return;
+    if (String(r[C.ANNULE - 1] || "").trim() !== "") return;
+    if (String(r[C.LIVRE - 1] || "").trim() !== "") return;
+    const qty = cmdDeduction(r[C.ALEVINS_LIVRER - 1], r[C.POISSON_NB - 1]);
+    if (qty == null) return;
+    const h = cmdToNum(r[C.ALEVINS_LIVRER - 1]);
+    const isAl = h != null && h > 0;
+    const d = r[C.DATE_CMD - 1];
+    const p = cmdToNum(r[C.PRIORITE - 1]);
+    const deducted = String(r[C.LOG - 1] || "").trim() !== "";
+    const error = String(r[C.ERROR - 1] || "").trim();
+    if (!byKey[key]) byKey[key] = [];
+    byKey[key].push({
+      row: CMD_CFG.START_ROW + i, idx: i, key: key,
+      orderNo: String(r[C.ORDER_NO - 1] || ""),
+      client: String(r[C.CLIENT - 1] || ""),
+      isAl: isAl,
+      nb: isAl ? cmdToNum(r[C.ALEVINS_NB - 1]) : cmdToNum(r[C.POISSON_NB - 1]),
+      kg: isAl ? null : cmdToNum(r[C.POISSON_KG - 1]),
+      qty: qty,
+      price: cmdToNum(r[isAl ? C.ALEVINS_PRIX - 1 : C.PRIX_KG - 1]) || 0,
+      date: (d instanceof Date) ? d.getTime() : 0,
+      dateTxt: (d instanceof Date) ? Utilities.formatDate(d, tz, "dd/MM/yyyy") : String(d || ""),
+      prio: (p != null && p > 0) ? p : null,
+      deducted: deducted,
+      error: error
+    });
+  });
+  return byKey;
+}
+
+/**
+ * The queue for the screen: [{ key, avail, short, rows: [...] }],
+ * lots sorted by key, rows in engine order, blocked rows last.
+ */
+function fulQueue() {
+  const byKey = fulQueueRows();
+  const scan = demSellableLots();
+  const availOf = {};
+  scan.lots.forEach(function (l) { availOf[l.key] = l.avail; });
+  scan.skipped.forEach(function (s) {
+    if (availOf[s.key] != null) return;
+    if (s.avail != null) availOf[s.key] = s.avail;
+    else if (s.why === "réservé TOUT") availOf[s.key] = 0;
+  });
+  const out = [];
+  Object.keys(byKey).sort().forEach(function (key) {
+    const all = byKey[key];
+    const live = all.filter(function (r) { return !r.error; });
+    const blocked = all.filter(function (r) { return r.error; });
+    var pend = 0;
+    live.forEach(function (r) { if (!r.deducted) pend += r.qty; });
+    const avail = availOf[key] == null ? null : availOf[key] + pend;
+    const items = live.map(function (r, i) {
+      return { idx: i, qty: r.deducted ? 0 : r.qty, price: r.price,
+               date: r.date, prio: r.prio };
+    });
+    const rk = cmdRankRows(items, avail);
+    const rows = rk.order.map(function (i) { return live[i]; }).concat(blocked);
+    out.push({ key: key, avail: avail, short: rk.short,
+               manual: live.some(function (r) { return r.prio != null; }),
+               rows: rows });
+  });
+  return { lots: out, grBlock: cmdGrBounds().block };
+}
+
+/**
+ * Store a complete manual order for ONE lot key. `rows` = every
+ * unblocked open row of that key, in the order wanted. The set must
+ * equal what the sheet holds now - otherwise the screen is stale and
+ * the write is refused (same rule as demSetOrder).
+ */
+function fulSetQueue(key, rows) {
+  const k = cmdCanonKey(key);
+  const want = (rows || []).map(Number);
+  const live = (fulQueueRows()[k] || []).filter(function (r) { return !r.error; });
+  const have = {};
+  live.forEach(function (r) { have[r.row] = true; });
+  const seen = {};
+  if (want.length !== live.length) {
+    throw new Error("La liste a changé depuis l'affichage. Recharger l'ordre.");
+  }
+  want.forEach(function (row) {
+    if (!have[row] || seen[row]) {
+      throw new Error("La liste a changé depuis l'affichage. Recharger l'ordre.");
+    }
+    seen[row] = true;
+  });
+  const sh = cmdSheet();
+  want.forEach(function (row, i) {
+    sh.getRange(row, CMD_CFG.COL.PRIORITE).setValue(i + 1);
+  });
+  return { n: want.length };
+}
+
+/** Back to the automatic rule for ONE lot key: clears AG on its open rows. */
+function fulAutoQueue(key) {
+  const k = cmdCanonKey(key);
+  const all = fulQueueRows()[k] || [];
+  const sh = cmdSheet();
+  all.forEach(function (r) {
+    if (r.prio != null) sh.getRange(r.row, CMD_CFG.COL.PRIORITE).clearContent();
+  });
+  return { n: all.length };
+}
+
+/** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> testFulQueue
+ *  Read-only. Logs the queue as the screen will show it. */
+function testFulQueue() {
+  const q = fulQueue();
+  q.lots.forEach(function (l) {
+    Logger.log(l.key + "  libre=" + l.avail + "  " +
+               (l.manual ? "MANUEL" : (l.short ? "PRIX (pas assez)" : "DATE")));
+    l.rows.forEach(function (r, i) {
+      Logger.log("  " + (i + 1) + "  row " + r.row + "  " + r.orderNo + "  " +
+                 r.client + "  qty=" + r.qty + "  prix=" + r.price +
+                 (r.prio != null ? "  prio=" + r.prio : "") +
+                 (r.deducted ? "  réservé" : "") + (r.error ? "  " + r.error : ""));
+    });
+  });
+  if (!q.lots.length) Logger.log("(aucune commande ouverte)");
 }
 
 /** RUN FROM EDITOR: tsaraentry -> CommandesServer.js -> grPoolDetail
