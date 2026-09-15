@@ -34,6 +34,27 @@
     #hSearch { max-width: 420px; margin-top: 0; }
     #histTable table { margin-top: 8px; }
     #histTable th, #histTable td { border: 1px solid #dadce0; }
+    /* WhatsApp popup. The class goes on #waZone, never on the card.
+       position:fixed, so no parent may carry transform or filter. */
+    .popup { position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+             z-index: 9000; background: rgba(13, 42, 26, 0.45);
+             display: flex; align-items: center; justify-content: center;
+             padding: 20px; }
+    .popup > .card { width: min(560px, 94vw); max-height: 88vh;
+                     overflow-y: auto; position: relative; margin: 0;
+                     background: #fff; border: 1px solid #dadce0;
+                     border-radius: 10px; padding: 18px 20px;
+                     box-sizing: border-box;
+                     box-shadow: 0 14px 44px rgba(0, 0, 0, 0.28); }
+    .popup h3 { margin: 0 40px 10px 0; font-size: 20px; }
+    .popup textarea { width: 100%; box-sizing: border-box; font-size: 16px;
+                      padding: 8px; font-family: Arial, sans-serif; }
+    .popX { position: absolute; top: 10px; right: 12px;
+            width: 34px; height: 34px; padding: 0; margin: 0;
+            background: #fff; color: #5C665E;
+            border: 1px solid #CDD6CF; border-radius: 8px;
+            font-size: 20px; line-height: 1; cursor: pointer; }
+    #waSendBtn { background: #188038; color: #fff; border: none; border-radius: 4px; }
   </style>
   <?!= include('Theme'); ?>
   <?!= include('Spinner'); ?>
@@ -98,6 +119,8 @@
     <div id="histInfo" class="muted" style="margin-top:10px">Chargement…</div>
     <div id="histTable"></div>
   </div>
+
+  <div id="waZone"></div>
 
   <div id="loading">Enregistrement en cours...</div>
 
@@ -220,6 +243,7 @@
 
     function submitAll() {
       if (!pending.length) return;
+      const saved = pending.slice();   // the lines this click saves, for WhatsApp
       document.getElementById('submitBtn').disabled = true;
       document.getElementById('loading').style.display = 'block';
       hideMsg();
@@ -230,6 +254,7 @@
           showMsg('ok', res.written + ' entrée(s) enregistrée(s).');
           pending = [];
           renderPending();
+          waOpen(saved);
         })
         .withFailureHandler(e => {
           document.getElementById('loading').style.display = 'none';
@@ -361,6 +386,57 @@
       });
 
       box.innerHTML = h + '</table>';
+    }
+
+    // ---------- WhatsApp: commande provende ----------
+    //
+    // Opened after a successful save of Nouvelle commande. The text is
+    // editable. The send button hands it to the WhatsApp APP with
+    // window.location, not an <a>: Spinner.html raises its overlay on
+    // every link click and never hides it (same reason as
+    // CommandesIndex.html waSend). No phone number: the sender picks
+    // the chat. NOTHING is written to the sheet.
+
+    /** "sac" below 2, "sacs" from 2. Any other unit is printed as in the sheet. */
+    function waUnit(unite, n) {
+      const u = String(unite || '').trim();
+      if (/^sacs?$/i.test(u)) return Number(n) < 2 ? 'sac' : 'sacs';
+      return u;
+    }
+
+    function waBuild(items) {
+      return 'Bonjour,\n' +
+        'Commande provende:\n' +
+        items.map(p => p.type + ': ' + p.nbreCommande + ' ' + waUnit(p.unite, p.nbreCommande))
+             .join('\n') +
+        '\n\nMerci';
+    }
+
+    function waOpen(items) {
+      const z = document.getElementById('waZone');
+      if (!z || !items || !items.length) return;
+      z.className = 'popup';
+      z.innerHTML =
+        '<div class="card">' +
+          '<button class="popX" onclick="waClose()" aria-label="Fermer">\u00d7</button>' +
+          '<h3>Commande provende \u2014 WhatsApp</h3>' +
+          '<textarea id="waText" rows="12"></textarea>' +
+          '<button id="waSendBtn" onclick="waSend()">Envoyer sur WhatsApp</button>' +
+        '</div>';
+      document.getElementById('waText').value = waBuild(items);
+    }
+
+    function waClose() {
+      const z = document.getElementById('waZone');
+      if (z) { z.className = ''; z.innerHTML = ''; }
+    }
+
+    function waSend() {
+      const box = document.getElementById('waText');
+      if (!box) return;
+      const t = box.value.trim();
+      if (!t) return;
+      window.location.href = 'whatsapp://send?text=' + encodeURIComponent(t);
     }
 
     function showMsg(cls, text) {
