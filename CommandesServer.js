@@ -3349,17 +3349,21 @@ function fulQueue() {
   const out = [];
   Object.keys(byKey).sort().forEach(function (key) {
     const all = byKey[key];
-    const live = all.filter(function (r) { return !r.error; });
+    // 2026-09-15 c (Kim): deducted = "ordre immuable", fixed on top by
+    // date; only the undeducted rows are ranked and movable.
+    const fixed = all.filter(function (r) { return !r.error && r.deducted; })
+      .sort(function (a, b) { return (a.date - b.date) || (a.row - b.row); });
+    const live = all.filter(function (r) { return !r.error && !r.deducted; });
     const blocked = all.filter(function (r) { return r.error; });
     var pend = 0;
-    live.forEach(function (r) { if (!r.deducted) pend += r.qty; });
-    const avail = availOf[key] == null ? null : availOf[key] + pend;
+    live.forEach(function (r) { pend += r.qty; });
+    const avail = availOf[key] == null ? null : Math.round(availOf[key] + pend);
     const items = live.map(function (r, i) {
-      return { idx: i, qty: r.deducted ? 0 : r.qty, price: r.price,
-               date: r.date, prio: r.prio };
+      return { idx: i, qty: r.qty, price: r.price, date: r.date, prio: r.prio };
     });
     const rk = cmdRankRows(items, avail);
-    const rows = rk.order.map(function (i) { return live[i]; }).concat(blocked);
+    const rows = fixed.concat(rk.order.map(function (i) { return live[i]; }))
+                      .concat(blocked);
     out.push({ key: key, avail: avail, short: rk.short,
                manual: live.some(function (r) { return r.prio != null; }),
                rows: rows });
@@ -3376,7 +3380,8 @@ function fulQueue() {
 function fulSetQueue(key, rows) {
   const k = cmdCanonKey(key);
   const want = (rows || []).map(Number);
-  const live = (fulQueueRows()[k] || []).filter(function (r) { return !r.error; });
+  const live = (fulQueueRows()[k] || [])
+    .filter(function (r) { return !r.error && !r.deducted; });
   const have = {};
   live.forEach(function (r) { have[r.row] = true; });
   const seen = {};

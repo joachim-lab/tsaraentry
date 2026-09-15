@@ -3472,13 +3472,14 @@
     var h = '';
     fulQ.lots.forEach(function (l) {
       const dirty = !!fulQDirty[l.key];
-      const live = l.rows.filter(function (r) { return !r.error; });
+      const live = l.rows.filter(function (r) { return !r.error && !r.deducted; });
       h += '<div style="margin-top:12px"><b>' + esc(l.key) + '</b>' +
         ' · libre : ' + (l.avail == null ? 'inconnu' : fmtNum(l.avail) + ' poissons') +
         ' · ' + esc(fulQRule(l)) + '</div>' +
         '<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:15px">';
       l.rows.forEach(function (r, i) {
-        const first = i === 0, last = i === live.length - 1;
+        const mi = live.indexOf(r);
+        const first = mi === 0, last = mi === live.length - 1;
         const td = '<td style="padding:6px 8px;border:1px solid #dadce0">';
         h += '<tr' + (r.error ? ' style="color:#d93025"' : '') + '>' +
           td + (r.error ? '—' : (i + 1)) + '</td>' +
@@ -3487,9 +3488,9 @@
           td + esc(r.dateTxt) + '</td>' +
           td + fulQQty(r) + '</td>' +
           td + fmtNum(r.price) + ' Ar</td>' +
-          td + (r.error ? esc(r.error) : (r.deducted ? 'réservé' : '')) + '</td>' +
+          td + (r.error ? esc(r.error) : (r.deducted ? 'ordre immuable' : '')) + '</td>' +
           '<td style="padding:6px 8px;border:1px solid #dadce0;white-space:nowrap">' +
-          (can && !r.error
+          (can && !r.error && !r.deducted
             ? '<button class="demBtn" onclick="fulQMove(\'' + esc(l.key) + '\',' + r.row + ',-1)" title="Monter"' +
                 (first ? ' disabled' : '') + '>&#9650;</button> ' +
               '<button class="demBtn" onclick="fulQMove(\'' + esc(l.key) + '\',' + r.row + ',1)" title="Descendre"' +
@@ -3517,21 +3518,23 @@
   function fulQMove(key, row, dir) {
     const l = fulQ.lots.filter(function (x) { return x.key === key; })[0];
     if (!l) return;
-    const live = l.rows.filter(function (r) { return !r.error; });
+    const fixed = l.rows.filter(function (r) { return !r.error && r.deducted; });
+    const live = l.rows.filter(function (r) { return !r.error && !r.deducted; });
     const blocked = l.rows.filter(function (r) { return r.error; });
     var at = -1;
     live.forEach(function (r, i) { if (r.row === row) at = i; });
     const to = at + (dir < 0 ? -1 : 1);
     if (at < 0 || to < 0 || to >= live.length) return;
     const tmp = live[at]; live[at] = live[to]; live[to] = tmp;
-    l.rows = live.concat(blocked);
+    l.rows = fixed.concat(live).concat(blocked);
     fulQDirty[key] = true;
     drawFulQueue();
   }
   function fulQSave(key) {
     const l = fulQ.lots.filter(function (x) { return x.key === key; })[0];
     if (!l) return;
-    const rows = l.rows.filter(function (r) { return !r.error; }).map(function (r) { return r.row; });
+    const rows = l.rows.filter(function (r) { return !r.error && !r.deducted; })
+      .map(function (r) { return r.row; });
     setStatus('banner', 'Enregistrement de l’ordre…');
     google.script.run
       .withSuccessHandler(function () { setStatus('ok', 'Ordre enregistré.'); fulQueueLoad(); })
