@@ -126,12 +126,20 @@
   }
 </style>
 <script>
-  // Logo click = back to the menu. Follows the screen's own "Menu" link so
-  // the real /exec URL is used; the menu has no such link and ignores it.
+  // Logo click = the Menu (home), from every screen. The back link holds
+  // the real /exec URL; dropping its ?screen= part gives the Menu, even on
+  // screens whose back link goes to a parent screen (Inventaire, Check
+  // stock, Achats). The menu has no back link and ignores the click.
   document.addEventListener('click', function (e) {
     var logo = e.target && e.target.closest ? e.target.closest('.tsaraLogo') : null;
     if (!logo) return;
     var back = document.getElementById('backLink') || document.querySelector('a.back');
-    if (back && back.getAttribute('href') && back.getAttribute('href') !== '#') back.click();
+    var href = back ? back.getAttribute('href') : '';
+    if (!href || href === '#') return;
+    var home = document.createElement('a');
+    home.href = href.split('?')[0];
+    document.body.appendChild(home);
+    home.click();
+    home.remove();
   });
 </script>
