@@ -135,6 +135,10 @@ var ACCESS_CMD_COLS = [
   ["Clients", "cli"],
   ["Résas", "res"],
   ["Champ date paiement", "paiement"],
+  ["Champ date livraison", "livraison"],
+  ["Champ reçue le", "reception"],
+  ["Champ téléphone", "telephone"],
+  ["Champ N° facture", "nfacture"],
   ["Bouton Modifier", "modifier"],
   ["Bouton Annuler", "annuler"],
   ["Bouton Facture", "facture"]
@@ -237,6 +241,24 @@ function testAccess() {
     shC.setFrozenColumns(2);
     console.log("Créé : onglet « " + ACCESS_CMD_TAB + " » (droits par compte, écran Commandes)");
   }
+  // A grid column added to ACCESS_CMD_COLS after the tab was created is
+  // appended at the right, with checkboxes. Rows that already hold an
+  // e-mail get it TICKED: a missing column meant "allowed", so nothing
+  // changes for anyone until Kim unticks a box.
+  const shX = ssA.getSheetByName(ACCESS_CMD_TAB);
+  const headX = shX.getRange(1, 1, 1, Math.max(1, shX.getLastColumn())).getValues()[0]
+    .map(function (h) { return String(h || "").trim().toLowerCase(); });
+  const rowsX = Math.max(shX.getLastRow(), 51) - 1;   // the seeded 50 rows, or more if used
+  const emailsX = shX.getRange(2, 1, rowsX, 1).getValues();
+  ACCESS_CMD_COLS.slice(2).forEach(function (col) {
+    if (headX.indexOf(col[0].toLowerCase()) >= 0) return;
+    const c = headX.length + 1;
+    shX.getRange(1, c).setValue(col[0]).setFontWeight("bold");
+    shX.getRange(2, c, rowsX, 1).insertCheckboxes()
+      .setValues(emailsX.map(function (r) { return [String(r[0] || "").trim() !== ""]; }));
+    headX.push(col[0].toLowerCase());
+    console.log("Colonne ajoutée : « " + col[0] + " » (cochée pour les comptes existants)");
+  });
   const values = accessReadTab();
   const cacheKeys = [];
   for (let i = 1; i < values.length; i++) {

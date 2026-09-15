@@ -305,7 +305,8 @@
   // Access rights in THIS screen (AccessServer.js, sheet "Accès Tsara
   // Entry", tab "commandes"): one boolean per tab / field / button.
   // No row in that tab = everything true. Keys: dem, new, rec, ful,
-  // hist, prix, cli, res (tabs), paiement (date field), modifier,
+  // hist, prix, cli, res (tabs); paiement, livraison, reception,
+  // telephone, nfacture (fields of Paiement & livraison); modifier,
   // annuler, facture (buttons).
   var RIGHTS = <?!= JSON.stringify(accessCommandesRights()) ?>;
   var TAB_KEY_ID = { dem: 'tabDem', new: 'tabNew', rec: 'tabRec',
@@ -4036,7 +4037,15 @@
     // save, so the rule is visible before the user types. Values are
     // NEVER cleared: a disabled field still sends its value, so an order
     // carrying a payment date recorded before these rules keeps it.
+    // Field id -> grid right. A field refused by the grid stays locked
+    // whatever the gates say; its stored value is still sent on save.
+    const FIELD_RIGHT = { uPaiement: 'paiement', uLivraison: 'livraison',
+      uReception: 'reception', uContact: 'telephone', uFacture: 'nfacture' };
     function fulLock(id, on, why) {
+      if (FIELD_RIGHT[id] && RIGHTS[FIELD_RIGHT[id]] === false) {
+        on = false;
+        why = 'Réservé — ce compte ne peut pas modifier ce champ.';
+      }
       el(id).disabled = !on;
       el(id).style.background = on ? '' : '#f1f3f4';
       el(id).title = on ? '' : why;
@@ -4049,10 +4058,9 @@
       fulLock('uLivraison', !recu, frozen);
       fulLock('uReception', !recu && liv, recu ? frozen : needLiv);
       fulLock('uRemise', !recu && liv, recu ? frozen : needLiv);
-      const canPay = RIGHTS.paiement !== false;
-      fulLock('uPaiement', rec && canPay, canPay
-        ? "Renseignez d'abord la date de réception."
-        : "Réservé — ce compte ne peut pas saisir un paiement.");
+      fulLock('uPaiement', rec, "Renseignez d'abord la date de réception.");
+      fulLock('uContact', true, '');
+      fulLock('uFacture', true, '');
     }
     ['uLivraison', 'uReception'].forEach(function (id) {
       el(id).addEventListener('change', fulSyncPaiement);
@@ -4164,7 +4172,9 @@
     // reason beside the field, not as a failure of a save he thought
     // had started.
     if (!el('uContact').value.trim()) {
-      setStatusAndScroll('err', 'Téléphone du client obligatoire.');
+      setStatusAndScroll('err', RIGHTS.telephone === false
+        ? 'Téléphone du client obligatoire, et ce compte ne peut pas le saisir : demandez à un responsable de le renseigner.'
+        : 'Téléphone du client obligatoire.');
       return;
     }
     if (!el('uMoyen').value) {
