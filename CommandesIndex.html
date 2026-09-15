@@ -2346,14 +2346,14 @@
       .histList();
   }
 
-  /** Quantity ordered: alevins as a count, grossis as a fish count. */
+  /** Quantity ordered: alevins as a count, grossis in kg (Kim, 2026-09-15). */
   function histQty(o) {
     const bits = [];
     if (Number(o.alevinsTotal || 0) > 0) {
       bits.push(fmtNum(Number(o.alevinsTotal)) + ' alevins');
     }
-    if (Number(o.poissonNbTotal || 0) > 0) {
-      bits.push(fmtNum(Math.round(Number(o.poissonNbTotal))) + ' grossis');
+    if (Number(o.poissonKgTotal || 0) > 0) {
+      bits.push(fmtNum(Number(o.poissonKgTotal)) + ' kg');
     }
     return bits.join(' + ');
   }
@@ -2364,7 +2364,7 @@
     const showPoisson = el('hPoisson') ? el('hPoisson').checked : true;
     const typed = histRows.filter(function (o) {
       const hasAlevins = Number(o.alevinsTotal || 0) > 0;
-      const hasPoisson = Number(o.poissonNbTotal || 0) > 0;
+      const hasPoisson = Number(o.poissonKgTotal || 0) > 0;
       return (showAlevins && hasAlevins) || (showPoisson && hasPoisson);
     });
     const rows = q

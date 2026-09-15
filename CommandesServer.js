@@ -3426,7 +3426,7 @@ function histList() {
         contact: r[C.CONTACT - 1],     // report only (histReport)
         alevinsTotal: 0,
         poissonNbTotal: 0,
-        poissonKgTotal: 0,             // report only (histReport)
+        poissonKgTotal: 0,             // Historique Quantité + histReport
         montantAr: 0
       };
       order.push(key);
