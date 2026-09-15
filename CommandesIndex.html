@@ -3548,25 +3548,21 @@
       .cmdSellablePool();
   }
 
-  /** "Imprimer": one Sheet of the orders the current filters show,
-   *  written server-side into "Rapports Commande" — the histPrint
-   *  pattern exactly. The tab is opened BEFORE the server call, or
-   *  the browser's popup blocker eats it. */
+  /** "Imprimer": a PDF of the orders the current filters show, printed
+   *  exactly as Impressions > Stock poisson prints (printPdf in
+   *  ImpressionsIndex.html): hidden iframe first; when the browser
+   *  refuses, the link opens the PDF in a tab where printing is one
+   *  keystroke. The iframe stays in the page — removing it closes the
+   *  print dialog. */
+  var fulPrintFrame = null;
   function fulPrint() {
     const btn = el('fulPrintBtn');
     const msg = el('fulPrintMsg');
+    const link = el('fulPdfLink');
     msg.innerHTML = '';
+    link.style.display = 'none';
     btn.disabled = true;
     btn.textContent = 'Pr\u00e9paration\u2026';
-    const win = window.open('', '_blank');
-    if (win) {
-      // Cosmetic only: a waiting text in the new tab. If a browser
-      // refuses the write, the tab stays blank and the report still opens.
-      try {
-        win.document.write('<title>Commandes ouvertes</title>' +
-          '<p style="font-family:Arial,sans-serif;font-size:18px">Pr\u00e9paration du rapport\u2026</p>');
-      } catch (err) { /* blank tab is acceptable */ }
-    }
 
     function done() {
       btn.disabled = false;
@@ -3576,19 +3572,43 @@
     google.script.run
       .withSuccessHandler(function (r) {
         done();
-        const link = '<a href="' + esc(r.url) + '" target="_blank">Ouvrir le rapport</a>';
-        if (win && !win.closed) {
-          win.location.href = r.url;
-          msg.innerHTML = '<div class="ok">Rapport pr\u00eat : ' + fmtNum(r.count) +
-            ' commande(s). ' + link + '</div>';
-        } else {
-          msg.innerHTML = '<div class="warn">Rapport pr\u00eat : ' + fmtNum(r.count) +
-            ' commande(s). Le navigateur a bloqu\u00e9 le nouvel onglet : ' + link + '</div>';
+        const bin = atob(r.base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+        link.href = url;
+        link.target = '_blank';
+
+        const note = r.archiveError
+          ? '<br>Imprim\u00e9, mais copie non enregistr\u00e9e : ' + esc(r.archiveError) : '';
+        msg.innerHTML = '<div class="' + (r.archiveError ? 'warn' : 'ok') + '">' +
+          fmtNum(r.count) + ' commande(s) envoy\u00e9e(s) \u00e0 l\u2019impression.' + note + '</div>';
+
+        function fallback() {
+          link.style.display = 'block';
+          msg.innerHTML = '<div class="warn">Impression directe bloqu\u00e9e par le navigateur ' +
+            '\u2014 ouvrez le PDF : il s\u2019imprime depuis l\u2019onglet (Cmd+P).' + note + '</div>';
         }
+
+        try {
+          if (fulPrintFrame && fulPrintFrame.parentNode) {
+            fulPrintFrame.parentNode.removeChild(fulPrintFrame);
+          }
+          const frame = document.createElement('iframe');
+          fulPrintFrame = frame;
+          frame.style.display = 'none';
+          frame.onload = function () {
+            try {
+              frame.contentWindow.focus();
+              frame.contentWindow.print();
+            } catch (err) { fallback(); }
+          };
+          frame.src = url;
+          document.body.appendChild(frame);
+        } catch (err) { fallback(); }
       })
       .withFailureHandler(function (e) {
         done();
-        if (win && !win.closed) win.close();
         msg.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
       })
       .fulReport({
@@ -3633,10 +3653,13 @@
             '</div>' +
           '</div>' +
         '</div>' +
-        // "Imprimer" (Kim, 2026-09-15): one Sheet of what the filters
-        // above currently show. Same pattern as the Historique button.
+        // "Imprimer" (Kim, 2026-09-15): one PDF of what the filters
+        // above currently show, printed like Impressions > Stock poisson.
         '<button id="fulPrintBtn" class="primary" style="margin-top:12px" onclick="fulPrint()">Imprimer</button>' +
         '<div id="fulPrintMsg"></div>' +
+        // Fallback only, shown when the browser refuses the hidden-frame
+        // print. A blob: href: Spinner.html ignores it, no stuck overlay.
+        '<a id="fulPdfLink" style="display:none;margin-top:8px;font-size:17px">Ouvrir le PDF</a>' +
       '</div>' +
       // Collapsible summary (Kim 2026-09-11): the two category
       // totals, the order count over every match, and the farm-wide

@@ -568,10 +568,16 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
 /***************************************************************
  * MODE B — "Imprimer" on Paiement & livraison (Kim, 2026-09-15).
  *
- * One report file of the orders the tab currently SHOWS: same query,
- * same four checkboxes, uncapped where the screen stops at 25. The
- * file lands in "Rapports Commande" (HIST_REPORT_CFG.FOLDER_ID),
- * like the Historique report; printing happens from Sheets.
+ * One PDF of the orders the tab currently SHOWS: same query, same
+ * four checkboxes, uncapped where the screen stops at 25. Printed the
+ * way Impressions > Stock poisson prints (Kim, 2026-09-15): the
+ * bytes go to the browser, which prints them from a hidden frame.
+ *
+ * The layout is a Sheet, because the Sheets PDF export is the layout
+ * engine the other printouts already use. That Sheet is a throw-away:
+ * it is built in "Rapports Commande" (so a crash never leaves it in
+ * the My Drive root), exported, then sent to the bin. The PDF itself
+ * is kept in "Impressions Commandes" (IMPR_CFG, 30 newest).
  ***************************************************************/
 const FUL_REPORT_CFG = {
   NAME: "Commandes ouvertes",
@@ -584,9 +590,9 @@ const FUL_REPORT_CFG = {
 /**
  * p = { query, deliveredUnpaid, undelivered, alevins, poisson } — the
  * screen's search box and four checkboxes, as the user set them.
- * Returns { url, name, count }.
+ * Builds the throw-away Sheet. Returns { ss, sh, count, lastRow, ncol }.
  */
-function fulReport(p) {
+function fulBuildSheet(p) {
   p = p || {};
   if (!p.deliveredUnpaid && !p.undelivered) {
     throw new Error("Cocher au moins une case : livrées et non-payées, ou non-livrées.");
@@ -597,6 +603,7 @@ function fulReport(p) {
   const res = cmdFindOrders(String(p.query || ""), !!p.deliveredUnpaid,
     !!p.undelivered, !!p.alevins, !!p.poisson, true);
   const orders = res.orders;                       // newest first, like the screen
+  if (!orders.length) throw new Error("Aucune commande à imprimer.");
   const tz = Session.getScriptTimeZone();
 
   var kg = 0, alv = 0, ar = 0;
@@ -669,7 +676,48 @@ function fulReport(p) {
     " · généré le " + Utilities.formatDate(now, tz, "dd/MM/yy HH:mm"));
   SpreadsheetApp.flush();
 
-  return { url: ss.getUrl() + "#gid=" + sh.getSheetId(), name: name, count: data.length };
+  return { ss: ss, sh: sh, count: data.length, lastRow: lastRow, ncol: NCOL };
+}
+
+/**
+ * The "Imprimer" call. p = { query, deliveredUnpaid, undelivered,
+ * alevins, poisson } — the screen's search box and four checkboxes.
+ * Returns the tempFetchPdf object { base64, filename, size } plus
+ * count, and archiveUrl or archiveError (imprWithArchive).
+ *
+ * Export parameters are the Stock poisson ones (tempBuildPdf), plus
+ * fzr=true: the title and the header row repeat on every page.
+ */
+function fulReport(p) {
+  const b = fulBuildSheet(p);
+  const file = DriveApp.getFileById(b.ss.getId());
+  var pdf;
+  try {
+    const url = "https://docs.google.com/spreadsheets/d/" + b.ss.getId() + "/export"
+      + "?format=pdf"
+      + "&gid=" + b.sh.getSheetId()
+      + "&size=A4"
+      + "&portrait=false"
+      + "&fitw=true"
+      + "&gridlines=true"
+      + "&printtitle=false"
+      + "&sheetnames=false"
+      + "&pagenum=UNDEFINED"
+      + "&fzr=true"
+      + "&attachment=false"
+      + "&top_margin=0.25&bottom_margin=0.25&left_margin=0.25&right_margin=0.25"
+      + "&r1=0"
+      + "&c1=0"
+      + "&r2=" + b.lastRow
+      + "&c2=" + b.ncol;
+    pdf = tempFetchPdf(url, "Commandes_ouvertes");
+  } finally {
+    // Export done or failed, the Sheet has served: bin it either way.
+    file.setTrashed(true);
+  }
+  pdf = imprWithArchive("COMMANDES", pdf);
+  pdf.count = b.count;
+  return pdf;
 }
 
 /**

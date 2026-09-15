@@ -34,7 +34,9 @@ const IMPR_CFG = {
   FOLDERS: {
     STOCK:     { id: "1zQD-i_VOR-koU0QdWGU5uJ_gwjLvItp9", name: "Impressions Stock poisson" },
     PROGRAMME: { id: "10Gamf754_CYjrtl1UhqxA2rkRFkkOUI0", name: "Impressions Programme" },
-    RECETTE:   { id: "1ESDrR05hOKxMJkizXf5L26HkiDlWB8gO", name: "Impressions Recette MT" }
+    RECETTE:   { id: "1ESDrR05hOKxMJkizXf5L26HkiDlWB8gO", name: "Impressions Recette MT" },
+    // Commandes > Paiement & livraison > Imprimer (fulReport, 2026-09-15)
+    COMMANDES: { id: "1fCzVOx-NyTOZyzkstyYVj66DDNIutyhj", name: "Impressions Commandes" }
   }
 };
 
