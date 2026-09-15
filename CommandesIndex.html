@@ -2695,7 +2695,7 @@
     if (el('livRow')) el('livRow').style.display = '';
 
     wrap.innerHTML = lines.map((ln, i) =>
-      '<div class="card"><div class="lineHead"><h3>Lot ' + (i+1) + '</h3>' +
+      '<div class="card"><div class="lineHead"><span></span>' +
         (lines.length > 1 ? '<span class="del" onclick="removeLine('+i+')">Retirer</span>' : '') +
       '</div>' +
       '<label>Lot</label><select data-l="'+i+'" data-k="lot" onchange="onLotChange(this)">' +
