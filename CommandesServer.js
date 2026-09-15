@@ -46,11 +46,10 @@ const CMD_CFG = {
     // where it always was: J (Prix transport, AL) / P (Frais
     // additionnels, GR) — plain values feeding the K/Q formulas.
     LIVRAISON: 28, KM: 29,
-    // AD, appended 2026-09-09: the moment the delivery confirmation was
-    // sent on WhatsApp. Its only job is to stop a second send, by any
-    // of the three senders and across a page reload. The engine reads
-    // columns 1..27 only, so nothing downstream sees this.
-    // Clear the cell to let the message be sent again.
+    // AD: RETIRED 2026-09-15 (Kim). It held the "WhatsApp sent" stamp
+    // of the 2026-09-09 persistent box. No code reads or writes it any
+    // more; old stamps stay in the sheet. The number stays here only to
+    // document that AE/AF sit after it. Do not reuse AD.
     WA_SENT: 30,
     // AE + AF, appended 2026-09-10 (Kim). AE = the date the client
     // received the order: from that moment the order is frozen and only
@@ -442,7 +441,6 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
         montantAr: 0,
         livraison: r[C.LIVRAISON - 1],
         km: r[C.KM - 1],
-        waSent: r[C.WA_SENT - 1],
         reception: r[C.RECU - 1],
         remise: cmdToNum(remRaw[i][0]) || 0,
         coutLivraison: 0
@@ -473,7 +471,6 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
                        cmdNumFromDisplay_(r[C.FRAIS - 1]);
     if (!g.livraison && r[C.LIVRAISON - 1]) g.livraison = r[C.LIVRAISON - 1];
     if (!g.km && r[C.KM - 1]) g.km = r[C.KM - 1];
-    if (!g.waSent && r[C.WA_SENT - 1]) g.waSent = r[C.WA_SENT - 1];
     if (!g.reception && r[C.RECU - 1]) g.reception = r[C.RECU - 1];
     if (!g.remise) g.remise = cmdToNum(remRaw[i][0]) || 0;
     // Any row carrying fulfilment data represents the order's state.
@@ -1252,10 +1249,7 @@ function cmdAddDeliveryHeaders() {
   if (!sh.getRange(1, C.KM).getValue()) {
     sh.getRange(1, C.KM).setValue("Km").setFontWeight("bold");
   }
-  if (!sh.getRange(1, C.WA_SENT).getValue()) {
-    sh.getRange(1, C.WA_SENT).setValue("WhatsApp envoyé").setFontWeight("bold");
-  }
-  Logger.log("En-têtes Livraison/Km/WhatsApp en place sur " + CMD_CFG.SHEET + ".");
+  Logger.log("En-têtes Livraison/Km en place sur " + CMD_CFG.SHEET + ".");
 }
 
 /**
@@ -4764,14 +4758,13 @@ function cmdWhatsappRapport(rows) {
 
   // One block read over the order's span, not a read per row.
   const span = last - first + 1;
-  const vals = sh.getRange(first, 1, span, C.WA_SENT).getDisplayValues();
+  const vals = sh.getRange(first, 1, span, C.LIVRAISON).getDisplayValues();
   const liv = sh.getRange(first, C.DATE_LIVRAISON, span, 1).getValues();
 
   const want = {};
   for (let i = 0; i < nums.length; i++) want[nums[i]] = true;
 
   let orderNo = "", client = "", contact = "", livraison = "", dateLiv = null;
-  let sent = "";
   const pmPoisson = [], pmAlevins = [];
   let kg = 0, alevins = 0;
 
@@ -4783,7 +4776,6 @@ function cmdWhatsappRapport(rows) {
     if (!client && r[C.CLIENT - 1]) client = String(r[C.CLIENT - 1]).trim();
     if (!contact && r[C.CONTACT - 1]) contact = String(r[C.CONTACT - 1]).trim();
     if (!livraison && r[C.LIVRAISON - 1]) livraison = String(r[C.LIVRAISON - 1]).trim();
-    if (!sent && r[C.WA_SENT - 1]) sent = String(r[C.WA_SENT - 1]).trim();
     if (!dateLiv && liv[i][0] instanceof Date) dateLiv = liv[i][0];
 
     const pp = cmdCalibreEntier_(r[C.POISSON_PM - 1]);
@@ -4796,7 +4788,7 @@ function cmdWhatsappRapport(rows) {
   }
 
   // Nothing to deliver: no report and, on screen, no card at all.
-  if (!kg && !alevins) return { text: "", count: 0, sent: "" };
+  if (!kg && !alevins) return { text: "", count: 0 };
 
   const LIV_LABEL = {
     enlevement: "Récupération à la ferme",
@@ -4832,39 +4824,6 @@ function cmdWhatsappRapport(rows) {
   const text = "Bonjour,\n\nRapport de livraison " + objet + " :\n\n" +
                body.join("\n") + "\n\nMerci";
 
-  return { text: text, count: 1, sent: sent };
+  return { text: text, count: 1 };
 }
 
-
-/**
- * Stamp column AD when the confirmation has been handed to WhatsApp.
- * Written on every row of the order, so the order reads as sent
- * whichever of its rows is looked at.
- *
- * The stamp is OPTIMISTIC: it records that the message was handed to
- * the WhatsApp app, which is the last event this code can observe. If
- * the sender then abandoned the message, clear AD on the order's rows
- * and the box comes back.
- *
- * The header writes itself the first time, so the column needs no
- * manual preparation.
- */
-function cmdWhatsappMarkSent(rows) {
-  const sh = cmdSheet();
-  const C = CMD_CFG.COL;
-  const lastRow = findNextCommandeRow(sh) - 1;
-  const targets = (rows || []).map(Number).filter(function (r) {
-    return isFinite(r) && r >= CMD_CFG.START_ROW && r <= lastRow;
-  });
-  if (!targets.length) throw new Error("Aucune ligne de commande valide.");
-
-  if (!sh.getRange(1, C.WA_SENT).getValue()) {
-    sh.getRange(1, C.WA_SENT).setValue("WhatsApp envoyé").setFontWeight("bold");
-  }
-
-  const now = new Date();
-  targets.forEach(function (r) { sh.getRange(r, C.WA_SENT).setValue(now); });
-  SpreadsheetApp.flush();
-
-  return { sent: sh.getRange(targets[0], C.WA_SENT).getDisplayValue() };
-}

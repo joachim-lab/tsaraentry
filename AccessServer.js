@@ -7,9 +7,11 @@
  *   A = email   B = nom   C = écrans
  * C holds screen keys separated by commas, or * for every screen:
  *   nourrissage, inventaires, impressions, databassins, creerlot,
- *   commandes, morts, lot, tracabilite, paiement
- * paiement: the Commandes screen with ONLY the Paiement & livraison
- * tab (the tab bar is hidden). commandes = the full screen.
+ *   commandes, morts, lot, tracabilite
+ * Fine-grained rights INSIDE the Commandes screen (tabs, fields,
+ * buttons) live in a second tab of the same file: "commandes",
+ * one row per restricted account, one checkbox per element.
+ * No row = the full screen. See accessCommandesRights().
  * The first row with the e-mail wins. Unknown words in C are ignored
  * (testAccess lists them).
  *
@@ -32,7 +34,7 @@
  ***************************************************************/
 
 var ACCESS_KEYS = ["nourrissage", "inventaires", "impressions", "databassins",
-  "creerlot", "commandes", "morts", "lot", "tracabilite", "paiement"];
+  "creerlot", "commandes", "morts", "lot", "tracabilite"];
 
 /** ?screen= value -> access key. A sub-screen takes its tile's key. */
 var ACCESS_SCREEN_KEY = {
@@ -106,19 +108,80 @@ function accessMenuKeys() {
 /** True when the current account may open this ?screen= value. */
 function accessAllows(screen) {
   if (!Object.prototype.hasOwnProperty.call(ACCESS_SCREEN_KEY, screen)) return false;
-  const keys = accessMenuKeys();
-  const k = ACCESS_SCREEN_KEY[screen];
-  if (k === "commandes" && keys.indexOf("paiement") >= 0) return true;
-  return keys.indexOf(k) >= 0;
+  return accessMenuKeys().indexOf(ACCESS_SCREEN_KEY[screen]) >= 0;
+}
+
+/***** Droits fins dans l'écran Commandes (onglet "commandes") *****/
+
+var ACCESS_CMD_TAB = "commandes";
+
+/**
+ * Column header (row 1 of the tab, exact text) -> right key.
+ * The first two columns identify the account; every later column is a
+ * checkbox: checked = allowed. To make a NEW element controllable, add
+ * a line here, add the column in the sheet, and test the element
+ * against RIGHTS.<key> in CommandesIndex.html. A sheet without the
+ * column defaults to allowed.
+ */
+var ACCESS_CMD_COLS = [
+  ["email", "email"],
+  ["nom", "nom"],
+  ["Pré-commandes", "dem"],
+  ["Nouvelle cmd", "new"],
+  ["Récurrentes", "rec"],
+  ["Paiement & livraison", "ful"],
+  ["Historique", "hist"],
+  ["Prix", "prix"],
+  ["Clients", "cli"],
+  ["Résas", "res"],
+  ["Champ date paiement", "paiement"],
+  ["Bouton Modifier", "modifier"],
+  ["Bouton Annuler", "annuler"],
+  ["Bouton Facture", "facture"]
+];
+
+/**
+ * Pure. Rights of one e-mail in the Commandes screen, from the grid
+ * values (row 0 = header). No row for the e-mail, or no grid at all:
+ * every right true - the screen itself is already gated by the tab
+ * "acces". A row that exists: checked = true, anything else = false,
+ * so an all-blank row hides everything. A header column missing from
+ * the sheet defaults to true.
+ */
+function accessCmdParse(values, email) {
+  const out = {};
+  for (let i = 2; i < ACCESS_CMD_COLS.length; i++) out[ACCESS_CMD_COLS[i][1]] = true;
+  const e = String(email || "").trim().toLowerCase();
+  if (!e || !values || values.length < 2) return out;
+  const head = values[0].map(function (h) { return String(h || "").trim().toLowerCase(); });
+  for (let r = 1; r < values.length; r++) {
+    if (String(values[r][0] || "").trim().toLowerCase() !== e) continue;
+    for (let i = 2; i < ACCESS_CMD_COLS.length; i++) {
+      const c = head.indexOf(ACCESS_CMD_COLS[i][0].toLowerCase());
+      out[ACCESS_CMD_COLS[i][1]] = c < 0 ? true : values[r][c] === true;
+    }
+    return out;
+  }
+  return out;
 }
 
 /**
- * True when the current account holds the full "commandes" key.
- * With "paiement" alone, the Commandes screen opens on Paiement &
- * livraison and the tab bar is hidden (CommandesIndex.html).
+ * The rights of the current account in the Commandes screen. Injected
+ * into CommandesIndex.html at page build as RIGHTS. Cached like
+ * accessMenuKeys; testAccess clears the cache at once. Tab missing
+ * from the file: every right true (the tab appears at the next
+ * testAccess run).
  */
-function accessFullCommandes() {
-  return accessMenuKeys().indexOf("commandes") >= 0;
+function accessCommandesRights() {
+  const email = accessEmail();
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get("accCmd:" + email);
+  if (hit !== null) return JSON.parse(hit);
+  const id = PropertiesService.getScriptProperties().getProperty(ACCESS_PROP);
+  const sh = id ? SpreadsheetApp.openById(id).getSheetByName(ACCESS_CMD_TAB) : null;
+  const rights = accessCmdParse(sh ? sh.getDataRange().getValues() : null, email);
+  cache.put("accCmd:" + email, JSON.stringify(rights), ACCESS_CACHE_SEC);
+  return rights;
 }
 
 function accessEscape(s) {
@@ -164,6 +227,16 @@ function testAccess() {
     props.setProperty(ACCESS_PROP, ss.getId());
     console.log("Créé : Accès Tsara Entry");
   }
+  const ssA = SpreadsheetApp.openById(props.getProperty(ACCESS_PROP));
+  if (!ssA.getSheetByName(ACCESS_CMD_TAB)) {
+    const shC = ssA.insertSheet(ACCESS_CMD_TAB);
+    const heads = ACCESS_CMD_COLS.map(function (c) { return c[0]; });
+    shC.getRange(1, 1, 1, heads.length).setValues([heads]).setFontWeight("bold");
+    shC.getRange(2, 3, 50, heads.length - 2).insertCheckboxes();
+    shC.setFrozenRows(1);
+    shC.setFrozenColumns(2);
+    console.log("Créé : onglet « " + ACCESS_CMD_TAB + " » (droits par compte, écran Commandes)");
+  }
   const values = accessReadTab();
   const cacheKeys = [];
   for (let i = 1; i < values.length; i++) {
@@ -175,6 +248,16 @@ function testAccess() {
       .filter(function (w) { return w && ACCESS_KEYS.indexOf(w) < 0; });
     console.log("Ligne " + (i + 1) + " " + e + " -> " + JSON.stringify(accessParse(values, e)) +
       (unknown.length ? "  MOTS INCONNUS : " + unknown.join(", ") : ""));
+  }
+  const shG = ssA.getSheetByName(ACCESS_CMD_TAB);
+  const gv = shG ? shG.getDataRange().getValues() : null;
+  if (gv) {
+    for (let g = 1; g < gv.length; g++) {
+      const ge = String(gv[g][0] || "").trim().toLowerCase();
+      if (!ge) continue;
+      cacheKeys.push("accCmd:" + ge);
+      console.log("commandes " + ge + " -> " + JSON.stringify(accessCmdParse(gv, ge)));
+    }
   }
   if (cacheKeys.length) CacheService.getScriptCache().removeAll(cacheKeys);
   console.log("Fichier : " + SpreadsheetApp.openById(props.getProperty(ACCESS_PROP)).getUrl());

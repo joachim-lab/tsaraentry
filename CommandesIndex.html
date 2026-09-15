@@ -89,8 +89,7 @@
     .demBtn:disabled { color: #9aa0a6; cursor: not-allowed; }
     /* ONE centred popup shell for this screen (Kim, 2026-09-12).
        Three users, all zones that live inside the open order card:
-         #waZone  - the editable WhatsApp report and its confirm step;
-                    the "deja envoyee" line stays inline under the order.
+         #waZone  - the WhatsApp delivery report, shown once.
          #modZone - Modifier la commande.
          #recuZone - the "commande recue, plus modifiable" notice.
        The class is put on the ZONE, never on the card, so clearing the
@@ -230,7 +229,7 @@
   <a class="backlink" id="backLink" href="#">&larr; Menu</a>
   <h1>Commandes</h1>
 
-  <div class="tabsWrap"<?!= accessFullCommandes() ? '' : ' style="display:none"' ?>><div class="tabs">
+  <div class="tabsWrap"><div class="tabs">
     <div class="tab" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
     <div class="tab" id="tabNew" onclick="switchMode('new')">Nouvelle cmd</div>
     <div class="tab" id="tabRec" onclick="switchMode('rec')">R&eacute;currentes</div>
@@ -302,6 +301,36 @@
     return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   }
 
+  // Access rights in THIS screen (AccessServer.js, sheet "Accès Tsara
+  // Entry", tab "commandes"): one boolean per tab / field / button.
+  // No row in that tab = everything true. Keys: dem, new, rec, ful,
+  // hist, prix, cli, res (tabs), paiement (date field), modifier,
+  // annuler, facture (buttons).
+  var RIGHTS = <?!= JSON.stringify(accessCommandesRights()) ?>;
+  var TAB_KEY_ID = { dem: 'tabDem', new: 'tabNew', rec: 'tabRec',
+    ful: 'tabFul', hist: 'tabHist', prix: 'tabPrix', cli: 'tabCli', res: 'tabRes' };
+
+  // Hide the refused tabs; hide the whole bar when 0 or 1 tab remains.
+  function applyTabRights() {
+    var shown = 0;
+    Object.keys(TAB_KEY_ID).forEach(function (k) {
+      var ok = RIGHTS[k] !== false;
+      el(TAB_KEY_ID[k]).style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    if (shown <= 1) document.querySelector('.tabsWrap').style.display = 'none';
+  }
+
+  // Landing tab: Paiement & livraison when allowed, else the first
+  // allowed tab in this order.
+  function landingTab() {
+    var order = ['ful', 'dem', 'new', 'rec', 'hist', 'prix', 'cli', 'res'];
+    for (var i = 0; i < order.length; i++) {
+      if (RIGHTS[order[i]] !== false) return order[i];
+    }
+    return 'ful';
+  }
+
   // ---------- boot ----------
   google.script.run
     // renderNew() still runs: switchMode has no 'new' branch, so the
@@ -315,7 +344,7 @@
     // The stock check (demVerifStock) runs here too (Kim, 2026-09-11):
     // Pré-commandes is no longer the landing tab, and staff need the
     // stock bars in Nouvelle cmd and Récurrentes filled on arrival.
-    .withSuccessHandler(o => { OPTS = o; renderNew(); switchMode('ful'); demVerifStock(); dlRefresh(); })
+    .withSuccessHandler(o => { OPTS = o; renderNew(); applyTabRights(); switchMode(landingTab()); demVerifStock(); dlRefresh(); })
     .withFailureHandler(e => setStatus('err', 'Erreur chargement : ' + esc(e.message)))
     .cmdGetOptions();
 
@@ -373,6 +402,7 @@
   }
 
   function switchMode(m) {
+    if (RIGHTS[m] === false) return;   // tab refused for this account
     mode = m;
     el('tabNew').className = 'tab' + (m === 'new' ? ' active' : '');
     el('tabFul').className = 'tab' + (m === 'ful' ? ' active' : '');
@@ -3325,26 +3355,16 @@
   // ---------- MODE B: fulfilment ----------
   /* ---------- Rapport livraison WhatsApp ----------
    *
-   * ONE ORDER, ONE MESSAGE, AND IT LIVES WITH ITS ORDER
-   * (Kim, 2026-09-09). The box is drawn under the order's own summary
-   * line and is opened and closed BY the order box, not beside it:
-   * open the order and the message is there, close it and it goes,
-   * reopen it and it comes back with whatever was typed into it.
+   * ONE CHANCE (Kim, 2026-09-15). The box opens once: on the save that
+   * records the delivery date (V) for the first time. doFulfil is the
+   * only caller. Opening an order never shows it. "Envoyer" hands the
+   * text to WhatsApp and closes the box; X closes it too. Either way
+   * it never comes back. Nothing is written to the sheet.
    *
-   * WHAT DECIDES THE STATE — column AD (WA_SENT), read with the order:
-   *   not delivered      -> no box at all.
-   *   delivered, AD empty-> the editable message, ready to send.
-   *   delivered, AD set  -> "déjà envoyée", and no way to send twice.
-   *
-   * AD is in the sheet and not in this page, so the block survives a
-   * reload and holds across Charles, Audry and Hasina. Clearing the
-   * cell brings the box back.
-   *
-   * Remarks typed but not yet sent live in waDraft for as long as the
-   * page does. They are deliberately NOT written to the sheet: an
-   * unsent draft is not a fact about the delivery.
+   * Replaces the 2026-09-09 box that stayed until a person confirmed
+   * the send (column AD, "Rouvrir", "déjà envoyée"). Column AD is
+   * retired; its old stamps stay in the sheet and nothing reads them.
    */
-  var waDraft = {};    // key -> text typed but not sent
 
   /** Put the order box, then the whatsapp box, under one summary line. */
   function fulAnchor(key) {
@@ -3354,87 +3374,35 @@
     card.parentNode.insertBefore(el('waZone'), el('fulForm').nextSibling);
   }
 
-  /** Empty the box. The order's draft and its AD stamp are untouched. */
+  /** Empty the box. */
   function waClose() {
     const z = el('waZone');
     if (z) { z.innerHTML = ''; z.className = ''; }
   }
 
-  /** X on the editable popup: keep a visible way back under the order. */
-  function waHide(key) {
-    const z = el('waZone');
-    if (!z) return;
-    z.className = '';
-    z.innerHTML =
-      '<div class="card"><div style="display:flex;align-items:center;' +
-        'gap:14px;flex-wrap:wrap">' +
-        '<span class="muted" style="font-size:15px">' +
-          'Rapport de livraison WhatsApp non envoy\u00e9</span>' +
-        '<button class="go" style="margin-top:0;padding:7px 12px;font-size:15px" ' +
-          'onclick="waBack(\'' + esc(key) + '\')">Rouvrir le rapport</button>' +
-      '</div></div>';
-  }
-
-  /** The one line an order that has already gone out is allowed to show. */
-  function waSentHtml(stamp) {
-    return '<div class="card"><div class="muted" style="font-size:15px">' +
-      '✓ Confirmation de livraison déjà envoyée par WhatsApp' +
-      (stamp ? ' — ' + esc(stamp) : '') + '</div></div>';
-  }
-
-  /**
-   * Draw the box for one order. Called when an order is opened and
-   * again after a save. `o` is the order from the hits list, so the
-   * AD stamp comes free with it and costs no server call.
-   */
-  function waShow(o) {
+  /** Open the box for the rows of the order just marked delivered. */
+  function waShow(rows) {
     const zone = el('waZone');
-    if (!zone || !o) return;
+    if (!zone || !rows || !rows.length) return;
     waClose();
-
-    // Nothing shipped, nothing to announce.
-    if (!String(o.dateLivraison || '').trim()) return;
-
-    // Received (AE, Kim 2026-09-10): the delivery is over. No box at
-    // all, not even the "déjà envoyée" line.
-    if (String(o.reception || '').trim()) return;
-
-    if (String(o.waSent || '').trim()) {
-      zone.className = '';
-      zone.innerHTML = waSentHtml(o.waSent);
-      return;
-    }
-
     google.script.run
       .withSuccessHandler(res => {
         if (!res || !res.count) return;
-        // The sheet wins over this page: another sender may have gone
-        // first between the list being drawn and this call returning.
-        if (String(res.sent || '').trim()) {
-          o.waSent = res.sent;
-          zone.className = '';
-          zone.innerHTML = waSentHtml(res.sent);
-          return;
-        }
         zone.className = 'popup';
         zone.innerHTML =
           '<div class="card">' +
-            '<button class="popX" onclick="waHide(\'' + esc(o.key) + '\')" aria-label="Fermer">×</button>' +
+            '<button class="popX" onclick="waClose()" aria-label="Fermer">×</button>' +
             '<h3>Rapport de livraison — WhatsApp</h3>' +
             '<label for="waText">Remarques / Instructions</label>' +
             '<textarea id="waText" rows="14" ' +
               'style="width:100%;box-sizing:border-box;font-size:15px"></textarea>' +
-            '<button class="go" onclick="waSend(\'' + esc(o.key) + '\')">' +
+            '<button class="go" onclick="waSend()">' +
               'Envoyer Whatsapp de livraison</button>' +
           '</div>';
-        // A draft typed earlier in this page beats a freshly built text.
-        el('waText').value = (waDraft[o.key] != null) ? waDraft[o.key] : res.text;
-        el('waText').addEventListener('input', function () {
-          waDraft[o.key] = this.value;
-        });
+        el('waText').value = res.text;
       })
       .withFailureHandler(() => waClose())
-      .cmdWhatsappRapport(o.rows);
+      .cmdWhatsappRapport(rows);
   }
 
   /**
@@ -3449,65 +3417,14 @@
    * deliberately never hides because a link is assumed to replace the
    * page. A whatsapp: link hands off to the OS and the page stays, so
    * that overlay would spin for ever. (Kim, 2026-09-09.)
-   *
-   * NOTHING IS WRITTEN HERE. This page cannot observe whether the
-   * message left WhatsApp, so it asks instead of assuming. An earlier
-   * version stamped column AD on this click and reported an abandoned
-   * message as sent.
    */
-  function waSend(key) {
+  function waSend() {
     const box = el('waText');
     if (!box) return;
     const t = box.value.trim();
     if (!t) { setStatus('err', 'Le rapport est vide.'); return; }
-    waDraft[key] = box.value;
-
     window.location.href = 'whatsapp://send?text=' + encodeURIComponent(t);
-    waAskConfirm(key);
-  }
-
-  /** The only door to column AD: a person saying the message went out. */
-  function waAskConfirm(key) {
-    const zone = el('waZone');
-    if (!zone) return;
-    zone.className = 'popup';
-    zone.innerHTML =
-      '<div class="card">' +
-        '<button class="popX" onclick="waBack(\'' + esc(key) + '\')" aria-label="Fermer">×</button>' +
-        '<h3>Message envoyé ?</h3>' +
-        '<div class="muted" style="font-size:15px;padding-bottom:8px">' +
-          'WhatsApp a été ouvert. Répondez Oui seulement si le message est parti. ' +
-          'Le texte est conservé tant que vous ne confirmez pas.</div>' +
-        '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
-          '<button class="go" onclick="waMarkSent(\'' + esc(key) + '\')">' +
-            'Oui, message envoyé</button>' +
-          '<button onclick="waBack(\'' + esc(key) + '\')" ' +
-            'style="margin-top:18px;background:#fff;color:#5f6368;' +
-            'border:1px solid #dadce0;border-radius:4px;padding:10px 14px;' +
-            'font-size:17px;cursor:pointer">Non, pas encore</button>' +
-        '</div>' +
-      '</div>';
-  }
-
-  /** Back to the editable message, with the draft intact. */
-  function waBack(key) {
-    const o = hits.filter(h => h.key === key)[0];
-    if (o) waShow(o);
-  }
-
-  function waMarkSent(key) {
-    const o = hits.filter(h => h.key === key)[0];
-    if (!o) return;
-    google.script.run
-      .withSuccessHandler(res => {
-        o.waSent = (res && res.sent) || 'envoyée';
-        delete waDraft[key];
-        const z = el('waZone');
-        if (z) { z.className = ''; z.innerHTML = waSentHtml(o.waSent); }
-      })
-      .withFailureHandler(e => setStatus('err',
-        'Marquage impossible : ' + esc(e.message)))
-      .cmdWhatsappMarkSent(o.rows);
+    waClose();
   }
 
   /** Collapsed/expanded state of the summary card. Starts CLOSED
@@ -4007,22 +3924,28 @@
         // rather than the button being hidden with no reason given.
         (recu
         ? '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">' +
-            '<button id="btnFacture" onclick="fulFacture(this)" ' +
+            (RIGHTS.facture !== false
+            ? '<button id="btnFacture" onclick="fulFacture(this)" ' +
               'style="background:#fff;color:#1a73e8;border:1px solid #1a73e8;' +
               'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
-              'Imprimer la facture</button>' +
+              'Imprimer la facture</button>'
+            : '') +
           '</div>' +
           '<div id="facMsg"></div>'
         :
         '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">' +
-          '<button id="btnMod" onclick="loadModify()" ' +
+          (RIGHTS.modifier !== false
+          ? '<button id="btnMod" onclick="loadModify()" ' +
             'style="background:#fff;color:#1a73e8;border:1px solid #1a73e8;' +
             'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
-            'Modifier la commande</button>' +
-          '<button id="btnCancel" onclick="askCancel()" ' +
+            'Modifier la commande</button>'
+          : '') +
+          (RIGHTS.annuler !== false
+          ? '<button id="btnCancel" onclick="askCancel()" ' +
             'style="background:#fff;color:#c5221f;border:1px solid #c5221f;' +
             'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
-            'Annuler la commande</button>' +
+            'Annuler la commande</button>'
+          : '') +
         '</div>') +
         '<div id="modZone"></div>' +
       '</div>';
@@ -4047,7 +3970,10 @@
       fulLock('uLivraison', !recu, frozen);
       fulLock('uReception', !recu && liv, recu ? frozen : needLiv);
       fulLock('uRemise', !recu && liv, recu ? frozen : needLiv);
-      fulLock('uPaiement', rec, "Renseignez d'abord la date de réception.");
+      const canPay = RIGHTS.paiement !== false;
+      fulLock('uPaiement', rec && canPay, canPay
+        ? "Renseignez d'abord la date de réception."
+        : "Réservé — ce compte ne peut pas saisir un paiement.");
     }
     ['uLivraison', 'uReception'].forEach(function (id) {
       el(id).addEventListener('change', fulSyncPaiement);
@@ -4058,9 +3984,9 @@
     // A received order says so on opening, over the card.
     if (recu) recuPopup();
 
-    // The message belongs to the order that is open, and to no other.
+    // The order box sits under its own summary line. The WhatsApp box
+    // is NOT drawn on opening: doFulfil opens it once (Kim, 2026-09-15).
     fulAnchor(key);
-    waShow(o);
 
     // The results list can be long; make sure the form is actually seen.
     const node = el('fulForm');
@@ -4176,6 +4102,9 @@
     const waDate = el('uLivraison').value;   // read now: the save clears the form
     const waRows = o.rows;
     const waKeyNow = o.key;
+    // Delivered before this save? The WhatsApp box opens only on the
+    // save that records the delivery date for the first time.
+    const livBefore = String(o.dateLivraison || '').trim() !== '';
     setStatus('banner', 'Enregistrement…');
 
     google.script.run
@@ -4219,6 +4148,8 @@
         const finish = function (box) {
           doSearch(box, () => {
             if (waDate && el('hit_' + waKeyNow)) selectHit(waKeyNow);
+            // The one chance. Opens even when the filters hide the order.
+            if (waDate && !livBefore) waShow(waRows);
           });
         };
         if (!(recuNow && !recuBefore && String(o.orderNumber || '').trim())) {

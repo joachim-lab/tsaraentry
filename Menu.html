@@ -65,7 +65,6 @@
       for (var i = 0; i < tiles.length; i++) {
         var m = /[?&]screen=([a-z]+)/.exec(tiles[i].getAttribute('href') || '');
         var k = m && Object.prototype.hasOwnProperty.call(keyOf, m[1]) ? keyOf[m[1]] : null;
-        if (k === 'commandes' && allowed.indexOf('paiement') >= 0) k = 'paiement';
         if (k && allowed.indexOf(k) >= 0) shown++;
         else tiles[i].parentNode.removeChild(tiles[i]);
       }
