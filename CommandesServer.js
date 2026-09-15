@@ -2140,10 +2140,11 @@ function installNotSellableTrigger() {
 
 /**
  * {canonKey: available fish} for the lot dropdown.
- * available = Stock Poisson count - NOMBRE reservation - orders
- * entered but not yet deducted. The same arithmetic the save check
- * enforces, so the number in the label is the number that will be
- * accepted. TOUT lots are omitted - the dropdown already greys them
+ * available = Stock Poisson count - orders deducted but not yet
+ * delivered (O adds them back, see demOrderMaps) - NOMBRE reservation
+ * - orders entered but not yet deducted. The same arithmetic the save
+ * check enforces on the lot file, so the number in the label is the
+ * number that will be accepted. TOUT lots are omitted - the dropdown already greys them
  * via reservedAll, and a count would contradict the "reserve" label.
  * Advisory: Stock Poisson can lag the lot files by up to 24 h; the
  * per-selection readout and the save check remain the authority.
@@ -2154,7 +2155,7 @@ function installNotSellableTrigger() {
  * notSellable and non-positive stock, the dropdown must not). Merge
  * the two only if the filters are made explicit parameters.
  */
-function buildAvailMap(optResv, optPend) {
+function buildAvailMap(optResv, optOrders) {
   const ss = SpreadsheetApp.openById(STOCK_PM_CFG.SS_ID);
   const sh = ss.getSheetByName(STOCK_PM_CFG.SHEET);
   const out = {};
@@ -2164,14 +2165,16 @@ function buildAvailMap(optResv, optPend) {
   const vals = sh.getRange(STOCK_PM_CFG.START_ROW, 14,
                            lastRow - STOCK_PM_CFG.START_ROW + 1, 3).getValues();
   const resv = optResv || demResMap();
-  const pend = optPend || demPendingMap();
+  const orders = optOrders || demOrderMaps();
+  const pend = orders.pend, undeliv = orders.undeliv;
   for (var i = 0; i < vals.length; i++) {
     const key = cmdCanonKey(vals[i][0]);
     if (!key) continue;
     if (resv[key] === "TOUT") continue;
     const count = cmdToNum(vals[i][1]);
     if (count == null) continue;
-    out[key] = Math.round(count - (resv[key] || 0) - (pend[key] || 0));
+    out[key] = Math.round(count - (undeliv[key] || 0) -
+                          (resv[key] || 0) - (pend[key] || 0));
   }
   return out;
 }
@@ -2187,14 +2190,15 @@ function cmdGetLotGateData() {
   // (resNum / pend) so the slim per-selection call cmdGetLotStock
   // can run the same arithmetic without re-reading (2026-09-11).
   const resv = demResMap();
-  const pend = demPendingMap();
+  const orders = demOrderMaps();
+  const pend = orders.pend;
   const resNum = {};
   Object.keys(resv).forEach(function (k) {
     if (resv[k] !== "TOUT") resNum[k] = resv[k];
   });
   return {
     pm: cmdGetLotPmMap(),
-    avail: buildAvailMap(resv, pend),
+    avail: buildAvailMap(resv, orders),
     resNum: resNum,
     pend: pend,
     reservedAll: buildReservedAllMap(),
@@ -3029,26 +3033,63 @@ function demResMap() {
   return out;
 }
 
-/** {canonKey: pending fish} - ONE scan of the orders sheet.
+/** {canonKey: pending fish} - orders entered, NOT yet deducted.
  *  Same row eligibility as cmdGetPendingQty: Y, Z, AA all empty. */
 function demPendingMap() {
+  return demOrderMaps().pend;
+}
+
+/**
+ * { pend, undeliv } - ONE scan of the orders sheet, two maps by canonKey.
+ *
+ * pend    - entered, NOT yet deducted. Y, Z, AA all empty (same rule
+ *           as cmdGetPendingQty). Quantity: H, else N.
+ * undeliv - deducted, NOT yet delivered. Mirrors TSARAENGINE
+ *           tt_pendingDeliveryByKey: Y starts with "Processed on",
+ *           W (Livré?) empty, AA empty; Z is not read. Quantity: the
+ *           [qty=] stamp in Y, else H, else N (tt_recreditQty).
+ *
+ * WHY undeliv (2026-09-15). Stock Poisson column O is the PHYSICAL
+ * count: updateStockPoisson adds undeliv back each night, so the
+ * feeders ration the fish still in the cage. The lot file, the engine,
+ * the save check and the V3 Réservations holds all use the count
+ * WITHOUT those fish. Any sellable figure built on O must subtract
+ * undeliv, or every sold-but-undelivered fish reads as free stock
+ * (26-2-A on 2026-09-15: 21 000 shown, 0 real).
+ * Residual lag: an order delivered today stays in O until tonight's
+ * run, so the figure is high by that order for up to one day - the
+ * same 24 h lag every Stock Poisson figure already carries.
+ */
+function demOrderMaps() {
   const sh = cmdSheet();
   const lastRow = findNextCommandeRow(sh) - 1;
-  const out = {};
+  const out = { pend: {}, undeliv: {} };
   if (lastRow < CMD_CFG.START_ROW) return out;
+  const C = CMD_CFG.COL;
   const data = sh.getRange(CMD_CFG.START_ROW, 1,
                            lastRow - CMD_CFG.START_ROW + 1, 27).getValues();
   for (var i = 0; i < data.length; i++) {
     const r = data[i];
-    const key = cmdCanonKey(r[CMD_CFG.COL.LOT - 1]);
+    const key = cmdCanonKey(r[C.LOT - 1]);
     if (!key) continue;
-    if (String(r[CMD_CFG.COL.LOG - 1]    || "").trim() !== "") continue;
-    if (String(r[CMD_CFG.COL.ERROR - 1]  || "").trim() !== "") continue;
-    if (String(r[CMD_CFG.COL.ANNULE - 1] || "").trim() !== "") continue;
-    const ded = cmdDeduction(r[CMD_CFG.COL.ALEVINS_LIVRER - 1],
-                             r[CMD_CFG.COL.POISSON_NB - 1]);
-    if (ded == null) continue;
-    out[key] = (out[key] || 0) + ded;
+    if (String(r[C.ANNULE - 1] || "").trim() !== "") continue;
+    const log = String(r[C.LOG - 1] || "");
+    if (log.trim() === "") {
+      if (String(r[C.ERROR - 1] || "").trim() !== "") continue;
+      const ded = cmdDeduction(r[C.ALEVINS_LIVRER - 1], r[C.POISSON_NB - 1]);
+      if (ded == null) continue;
+      out.pend[key] = (out.pend[key] || 0) + ded;
+      continue;
+    }
+    if (log.indexOf("Processed on") !== 0) continue;
+    if (String(r[C.LIVRE - 1] || "").trim() !== "") continue;
+    const m = /\[qty=([0-9][0-9.,]*)\]/.exec(log);
+    var qty = m ? cmdToNum(m[1]) : null;
+    if (qty == null || !(qty > 0)) {
+      qty = cmdDeduction(r[C.ALEVINS_LIVRER - 1], r[C.POISSON_NB - 1]);
+    }
+    if (qty == null) continue;
+    out.undeliv[key] = (out.undeliv[key] || 0) + qty;
   }
   return out;
 }
@@ -3104,7 +3145,8 @@ function demSellableLots() {
     const vals = sh.getRange(STOCK_PM_CFG.START_ROW, 14,
                              lastRow - STOCK_PM_CFG.START_ROW + 1, 3).getValues();
     const resv = demResMap();
-    const pend = demPendingMap();
+    const orders = demOrderMaps();
+    const pend = orders.pend, undeliv = orders.undeliv;
     const notSellable = getNotSellableMap();
     const fryMax = cmdFryMaxPm();
     for (var i = 0; i < vals.length; i++) {
@@ -3121,7 +3163,7 @@ function demSellableLots() {
       if (r === "TOUT") { skipped.push({ key: key, why: "réservé TOUT" }); continue; }
       const count = cmdToNum(vals[i][1]);
       if (count == null || count <= 0) continue;
-      const avail = count - (r || 0) - (pend[key] || 0);
+      const avail = count - (undeliv[key] || 0) - (r || 0) - (pend[key] || 0);
       const pm = cmdToNum(vals[i][2]);
       if (avail <= 0) {
         skipped.push({ key: key, avail: avail, pm: pm, why: "rien de libre" });
@@ -3158,8 +3200,8 @@ var SELLABLE_POOL_CACHE_SECONDS = 300;
  * card: { kg, alevins, grBlock }. Same pool as the Pré-commandes
  * screen and the nightly mail (demSellableLots) — fry as a count,
  * fish in KG at/above the sale floor (grBlock, so the screen can name
- * the floor), net of reservations and of orders entered but not yet
- * deducted. ADVISORY like its source: Stock Poisson can lag the lot
+ * the floor), net of orders deducted but not yet delivered, of
+ * reservations and of orders entered but not yet deducted. ADVISORY like its source: Stock Poisson can lag the lot
  * files by up to 24 h.
  *
  * Cached 5 min: the scan opens Stock Poisson and rescans the orders
@@ -4171,7 +4213,8 @@ function recDelete(p) {
 /**
  * Volume-weighted mean PM of the lots a grossi order could be served
  * from, in grams. Same pool arithmetic as demCheckStock - Stock
- * Poisson count minus réservations minus commandes non déduites, lots
+ * Poisson count minus commandes déduites non livrées, minus
+ * réservations, minus commandes non déduites, lots
  * excluded by getNotSellableMap or by the type gate - so the derived
  * fish count agrees with the verdict the screen will show.
  *
@@ -4188,7 +4231,8 @@ function recGrossisPm() {
   const vals = sh.getRange(STOCK_PM_CFG.START_ROW, 14,
                            lastRow - STOCK_PM_CFG.START_ROW + 1, 3).getValues();
   const resv = demResMap();
-  const pend = demPendingMap();
+  const orders = demOrderMaps();
+  const pend = orders.pend, undeliv = orders.undeliv;
   const notSellable = getNotSellableMap();
   const fryMax = cmdFryMaxPm();
 
@@ -4200,7 +4244,7 @@ function recGrossisPm() {
     if (r === "TOUT") continue;
     const count = cmdToNum(vals[i][1]);
     if (count == null || count <= 0) continue;
-    const avail = count - (r || 0) - (pend[key] || 0);
+    const avail = count - (undeliv[key] || 0) - (r || 0) - (pend[key] || 0);
     if (avail <= 0) continue;
     const pm = cmdToNum(vals[i][2]);
     if (pm == null || pm <= 0) continue;
