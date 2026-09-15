@@ -18,6 +18,7 @@
            margin: 0; padding: 0; accent-color: #146E3C; cursor: pointer; }
     button { padding: 9px 16px; font-size: 17px; cursor: pointer; border: none; border-radius: 4px; }
     .primary { background: #1a73e8; color: #fff; }
+    #fulPrintBtn:disabled { background: #999; cursor: not-allowed; }
     .go { background: #188038; color: #fff; margin-top: 18px; }
     .go:disabled { background: #999; cursor: not-allowed; }
     .ghost { background: #f1f3f4; color: #202124; }
@@ -3465,7 +3466,51 @@
       .cmdSellablePool();
   }
 
-  /** "Imprimer": a PDF of the orders the current filters show, printed
+  /** Orders ticked for printing (Kim, 2026-09-15). key -> true.
+   *  Page lifetime: a tick survives a re-search and a save, so
+   *  recording a payment does not lose the selection. Only ticked
+   *  orders that are ON SCREEN print (fulPickShown): an order that
+   *  left the list — paid, or filtered away — never prints unseen. */
+  var fulPick = {};
+
+  function fulPickShown() {
+    return (hits || []).filter(o => fulPick[o.key]).map(o => o.key);
+  }
+
+  function fulPickRefresh() {
+    const btn = el('fulPrintBtn');
+    if (!btn) return;
+    // Same source as fulPickShown: ticked AND on screen, so this total
+    // is exactly the total the PDF prints.
+    const picked = (hits || []).filter(o => fulPick[o.key]);
+    const n = picked.length;
+    btn.textContent = 'Imprimer la s\u00e9lection (' + n + ')';
+    const tot = el('fulPickTot');
+    if (tot) {
+      let kg = 0, al = 0;
+      picked.forEach(o => {
+        kg += Number(o.poissonKgTotal || 0);
+        al += Number(o.alevinsTotal || 0);
+      });
+      const bits = [];
+      if (kg > 0) bits.push(fmtNum(kg) + ' kg');
+      if (al > 0) bits.push(fmtNum(al) + ' alevins');
+      tot.textContent = n ? 'Coch\u00e9es : ' + (bits.join(' + ') || '\u2014') : '';
+    }
+    btn.disabled = n === 0;
+    const all = el('fulPickAll');
+    if (all) all.checked = hits.length > 0 && n === hits.length;
+  }
+
+  /** Ticks or unticks every order on screen, and only those. */
+  function fulPickAllToggle() {
+    const on = el('fulPickAll').checked;
+    hits.forEach(o => { if (on) fulPick[o.key] = true; else delete fulPick[o.key]; });
+    document.querySelectorAll('#hits input[data-pick]').forEach(cb => { cb.checked = on; });
+    fulPickRefresh();
+  }
+
+  /** "Imprimer la sélection": a PDF of the TICKED orders, printed
    *  exactly as Impressions > Stock poisson prints (printPdf in
    *  ImpressionsIndex.html): hidden iframe first; when the browser
    *  refuses, the link opens the PDF in a tab where printing is one
@@ -3478,12 +3523,16 @@
     const link = el('fulPdfLink');
     msg.innerHTML = '';
     link.style.display = 'none';
+    const keys = fulPickShown();
+    if (!keys.length) {
+      msg.innerHTML = '<div class="err">Cocher au moins une commande \u00e0 imprimer.</div>';
+      return;
+    }
     btn.disabled = true;
     btn.textContent = 'Pr\u00e9paration\u2026';
 
     function done() {
-      btn.disabled = false;
-      btn.textContent = 'Imprimer';
+      fulPickRefresh();
     }
 
     google.script.run
@@ -3496,9 +3545,12 @@
         link.href = url;
         link.target = '_blank';
 
-        const note = r.archiveError
-          ? '<br>Imprim\u00e9, mais copie non enregistr\u00e9e : ' + esc(r.archiveError) : '';
-        msg.innerHTML = '<div class="' + (r.archiveError ? 'warn' : 'ok') + '">' +
+        const note =
+          (r.missing ? '<br>' + fmtNum(r.missing) + ' commande(s) coch\u00e9e(s) plus ouverte(s) : ' +
+            'pas dans le PDF.' : '') +
+          (r.archiveError
+            ? '<br>Imprim\u00e9, mais copie non enregistr\u00e9e : ' + esc(r.archiveError) : '');
+        msg.innerHTML = '<div class="' + ((r.archiveError || r.missing) ? 'warn' : 'ok') + '">' +
           fmtNum(r.count) + ' commande(s) envoy\u00e9e(s) \u00e0 l\u2019impression.' + note + '</div>';
 
         function fallback() {
@@ -3528,13 +3580,7 @@
         done();
         msg.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
       })
-      .fulReport({
-        query: el('ficherche').value,
-        deliveredUnpaid: el('fDeliveredUnpaid').checked,
-        undelivered: el('fUndelivered').checked,
-        alevins: el('fAlevins').checked,
-        poisson: el('fPoisson').checked
-      });
+      .fulReport({ keys: keys });
   }
 
   function renderFul() {
@@ -3570,9 +3616,16 @@
             '</div>' +
           '</div>' +
         '</div>' +
-        // "Imprimer" (Kim, 2026-09-15): one PDF of what the filters
-        // above currently show, printed like Impressions > Stock poisson.
-        '<button id="fulPrintBtn" class="primary" style="margin-top:12px" onclick="fulPrint()">Imprimer</button>' +
+        // "Imprimer la sélection" (Kim, 2026-09-15): one PDF of the ticked
+        // orders, printed like Impressions > Stock poisson. Disabled at 0.
+        '<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-top:12px">' +
+          '<button id="fulPrintBtn" class="primary" style="margin-top:0" onclick="fulPrint()" disabled>' +
+            'Imprimer la s\u00e9lection (0)</button>' +
+          '<label class="chk"><input type="checkbox" id="fulPickAll" onchange="fulPickAllToggle()">' +
+            'Tout cocher</label>' +
+          // Total of the TICKED orders (Kim, 2026-09-15). Filled by fulPickRefresh.
+          '<span id="fulPickTot" style="font-size:17px;font-weight:bold"></span>' +
+        '</div>' +
         '<div id="fulPrintMsg"></div>' +
         // Fallback only, shown when the browser refuses the hidden-frame
         // print. A blob: href: Spinner.html ignores it, no stuck overlay.
@@ -3619,11 +3672,20 @@
     el('hits').addEventListener('click', function (ev) {
       const card = ev.target.closest ? ev.target.closest('.hit') : null;
       if (!card) return;
+      if (ev.target.closest('.fulPick')) return;   // a tick, not an open
       const key = card.getAttribute('data-key');
       // Click the card that is already open to close it, as the
       // Clients screen does (cliToggle).
       if (!key) return;
       if (key === selectedKey) fulClose(); else selectHit(key);
+    });
+
+    // Tick boxes, delegated for the same reason as the click above.
+    el('hits').addEventListener('change', function (ev) {
+      const k = ev.target.getAttribute ? ev.target.getAttribute('data-pick') : null;
+      if (k == null) return;
+      if (ev.target.checked) fulPick[k] = true; else delete fulPick[k];
+      fulPickRefresh();
     });
 
     doSearch();
@@ -3771,6 +3833,11 @@
         el('hits').innerHTML = hits.length
           ? hits.map(o =>
               '<div class="hit'+hitClass(o)+'" id="hit_'+esc(o.key)+'" data-key="'+esc(o.key)+'">' +
+                // .fulPick is skipped by the card click listener: ticking
+                // never opens the order.
+                '<label class="chk fulPick" style="float:right;margin-left:12px">' +
+                  '<input type="checkbox" data-pick="' + esc(o.key) + '"' +
+                  (fulPick[o.key] ? ' checked' : '') + '>Imprimer</label>' +
                 '<b>' + esc(o.orderNumber || '(sans numéro)') + '</b> · ' + esc(o.client) +
                 '<div class="muted">' + esc(o.dateCommande) + ' · lots : ' + esc(o.lots.join(', ') || '—') +
                 hitQty(o) + hitPrix(o) +
@@ -3781,6 +3848,7 @@
                 ' · <b>' + fmtAr(o.montantAr) + '</b></div>' +
               '</div>').join('')
           : '<div class="warn">' + esc(empty) + '</div>';
+        fulPickRefresh();
         // Runs only once the list exists, so anything that anchors
         // itself to a summary line finds one.
         if (done) done();

@@ -565,8 +565,9 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
 /***************************************************************
  * MODE B — "Imprimer" on Paiement & livraison (Kim, 2026-09-15).
  *
- * One PDF of the orders the tab currently SHOWS: same query, same
- * four checkboxes, uncapped where the screen stops at 25. Printed the
+ * One PDF of the orders TICKED on the tab (Kim, 2026-09-15: not
+ * every open order has to be printed). The browser sends the keys of
+ * the ticked orders it shows; the server re-reads them. Printed the
  * way Impressions > Stock poisson prints (Kim, 2026-09-15): the
  * bytes go to the browser, which prints them from a hidden frame.
  *
@@ -585,22 +586,38 @@ const FUL_REPORT_CFG = {
 };
 
 /**
- * p = { query, deliveredUnpaid, undelivered, alevins, poisson } — the
- * screen's search box and four checkboxes, as the user set them.
- * Builds the throw-away Sheet. Returns { ss, sh, count, lastRow, ncol }.
+ * The open orders whose key is in `keys`, newest first like the screen.
+ * The keys are re-read against the sheet NOW: an order paid-and-
+ * delivered or cancelled since the screen was drawn is dropped, and
+ * counted in `missing` so the screen can say so. No Sheets or Drive
+ * call beyond cmdFindOrders, so the Node harness can test it.
+ * Returns { orders, missing }.
+ */
+function fulPickOrders(keys) {
+  const want = {};
+  (keys || []).forEach(function (k) {
+    k = String(k == null ? "" : k).trim();
+    if (k) want[k] = true;
+  });
+  const asked = Object.keys(want).length;
+  if (!asked) throw new Error("Cocher au moins une commande à imprimer.");
+  const orders = cmdFindOrders("", true, true, true, true, true).orders
+    .filter(function (o) { return want[o.key]; });
+  if (!orders.length) {
+    throw new Error("Les commandes cochées ne sont plus ouvertes " +
+      "(livrées et payées, ou annulées). Relancer la recherche.");
+  }
+  return { orders: orders, missing: asked - orders.length };
+}
+
+/**
+ * p = { keys: [...] } — the keys of the ticked orders.
+ * Builds the throw-away Sheet. Returns { ss, sh, count, missing, lastRow, ncol }.
  */
 function fulBuildSheet(p) {
   p = p || {};
-  if (!p.deliveredUnpaid && !p.undelivered) {
-    throw new Error("Cocher au moins une case : livrées et non-payées, ou non-livrées.");
-  }
-  if (!p.alevins && !p.poisson) {
-    throw new Error("Cocher Alevins ou Poisson pour imprimer des commandes.");
-  }
-  const res = cmdFindOrders(String(p.query || ""), !!p.deliveredUnpaid,
-    !!p.undelivered, !!p.alevins, !!p.poisson, true);
-  const orders = res.orders;                       // newest first, like the screen
-  if (!orders.length) throw new Error("Aucune commande à imprimer.");
+  const pick = fulPickOrders(p.keys);
+  const orders = pick.orders;                      // newest first, like the screen
   const tz = Session.getScriptTimeZone();
 
   var kg = 0, alv = 0, ar = 0;
@@ -657,30 +674,21 @@ function fulBuildSheet(p) {
   sh.setFrozenRows(HR);                            // header repeats on every printed page
   sh.autoResizeColumns(1, NCOL);
 
-  const picked = [];
-  if (p.deliveredUnpaid) picked.push("livrées et non-payées");
-  if (p.undelivered) picked.push("non-livrées");
-  const types = [];
-  if (p.alevins) types.push("Alevins");
-  if (p.poisson) types.push("Poisson");
-  const q = String(p.query || "").trim();
-
   // Title AFTER the resize: a long title in A1 would widen column A.
   sh.getRange(1, 1).setValue(FUL_REPORT_CFG.NAME + " — Paiement & livraison")
     .setFontWeight("bold").setFontSize(14);
-  sh.getRange(2, 1).setValue("Commandes " + picked.join(" + ") + " · " + types.join(" + ") +
-    (q ? " · recherche : " + q : "") +
+  sh.getRange(2, 1).setValue("Sélection de " + data.length + " commande(s)" +
     " · généré le " + Utilities.formatDate(now, tz, "dd/MM/yy HH:mm"));
   SpreadsheetApp.flush();
 
-  return { ss: ss, sh: sh, count: data.length, lastRow: lastRow, ncol: NCOL };
+  return { ss: ss, sh: sh, count: data.length, missing: pick.missing,
+           lastRow: lastRow, ncol: NCOL };
 }
 
 /**
- * The "Imprimer" call. p = { query, deliveredUnpaid, undelivered,
- * alevins, poisson } — the screen's search box and four checkboxes.
+ * The "Imprimer la sélection" call. p = { keys: [...] }.
  * Returns the tempFetchPdf object { base64, filename, size } plus
- * count, and archiveUrl or archiveError (imprWithArchive).
+ * count, missing, and archiveUrl or archiveError (imprWithArchive).
  *
  * Export parameters are the Stock poisson ones (tempBuildPdf), plus
  * fzr=true: the title and the header row repeat on every page.
@@ -714,6 +722,7 @@ function fulReport(p) {
   }
   pdf = imprWithArchive("COMMANDES", pdf);
   pdf.count = b.count;
+  pdf.missing = b.missing;
   return pdf;
 }
 
