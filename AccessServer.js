@@ -236,28 +236,26 @@ function testAccess() {
     const shC = ssA.insertSheet(ACCESS_CMD_TAB);
     const heads = ACCESS_CMD_COLS.map(function (c) { return c[0]; });
     shC.getRange(1, 1, 1, heads.length).setValues([heads]).setFontWeight("bold");
-    shC.getRange(2, 3, 50, heads.length - 2).insertCheckboxes();
+    shC.getRange(2, 3, 50, heads.length - 2).insertCheckboxes().check();
     shC.setFrozenRows(1);
     shC.setFrozenColumns(2);
     console.log("Créé : onglet « " + ACCESS_CMD_TAB + " » (droits par compte, écran Commandes)");
   }
   // A grid column added to ACCESS_CMD_COLS after the tab was created is
-  // appended at the right, with checkboxes. Rows that already hold an
-  // e-mail get it TICKED: a missing column meant "allowed", so nothing
-  // changes for anyone until Kim unticks a box.
+  // appended at the right, with checkboxes, TICKED on every row: the
+  // grid default is "allowed" (Kim, 2026-09-15). A missing column meant
+  // "allowed" too, so nothing changes for anyone until Kim unticks a box.
   const shX = ssA.getSheetByName(ACCESS_CMD_TAB);
   const headX = shX.getRange(1, 1, 1, Math.max(1, shX.getLastColumn())).getValues()[0]
     .map(function (h) { return String(h || "").trim().toLowerCase(); });
   const rowsX = Math.max(shX.getLastRow(), 51) - 1;   // the seeded 50 rows, or more if used
-  const emailsX = shX.getRange(2, 1, rowsX, 1).getValues();
   ACCESS_CMD_COLS.slice(2).forEach(function (col) {
     if (headX.indexOf(col[0].toLowerCase()) >= 0) return;
     const c = headX.length + 1;
     shX.getRange(1, c).setValue(col[0]).setFontWeight("bold");
-    shX.getRange(2, c, rowsX, 1).insertCheckboxes()
-      .setValues(emailsX.map(function (r) { return [String(r[0] || "").trim() !== ""]; }));
+    shX.getRange(2, c, rowsX, 1).insertCheckboxes().check();   // default = allowed, every row
     headX.push(col[0].toLowerCase());
-    console.log("Colonne ajoutée : « " + col[0] + " » (cochée pour les comptes existants)");
+    console.log("Colonne ajoutée : « " + col[0] + " » (cochée sur toutes les lignes)");
   });
   const values = accessReadTab();
   const cacheKeys = [];
