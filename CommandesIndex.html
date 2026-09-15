@@ -92,7 +92,6 @@
        Three users, all zones that live inside the open order card:
          #waZone  - the WhatsApp delivery report, shown once.
          #modZone - Modifier la commande.
-         #recuZone - the "commande recue, plus modifiable" notice.
        The class is put on the ZONE, never on the card, so clearing the
        class returns the zone to the flow. position:fixed, so no parent
        may carry transform or filter. */
@@ -4046,8 +4045,8 @@
     const montantTxt = Number(o.montantAr || 0).toLocaleString('fr-FR') + ' Ar' +
       (Number(o.remise) > 0
         ? ' (remise ' + Number(o.remise).toLocaleString('fr-FR') + ' % incluse)' : '');
-    // RECU (Kim, 2026-09-10): a received order is frozen. Only the
-    // payment can still be recorded; the server enforces the same rule.
+    // RECU: the edit freeze was removed 2026-09-15 (Kim). recu now
+    // only picks the buttons (facture / annuler) and the invoice flow.
     const recu = String(o.reception || '').trim() !== '';
     const LIV_LABELS = { enlevement: 'Enlèvement à la ferme',
                          environs: 'Livraison environs de la ferme',
@@ -4077,10 +4076,6 @@
         '</div>' +
         '<div class="muted" style="font-size:15px;padding-bottom:6px">' +
           'Livraison : ' + esc(livTxt) + '</div>' +
-        // The freeze notice is a POPUP, not a line in the card
-        // (Kim, 2026-09-12). recuPopup fills this zone after the form
-        // is built; the zone dies with the card when it closes.
-        '<div id="recuZone"></div>' +
         // Read in the order of the steps: livraison, remise, réception, paiement.
         '<div class="row">' +
           '<div><label>Date livraison</label><input type="date" id="uLivraison" value="'+esc(toISO(o.dateLivraison))+'"></div>' +
@@ -4114,29 +4109,16 @@
             'border:1px solid #dadce0;border-radius:4px;padding:10px 14px;' +
             'font-size:17px;cursor:pointer">Fermer</button>' +
         '</div>' +
-        // HIDDEN once the order is received (Kim, 2026-09-10): nothing
-        // but the payment may change after that. Until then quantity,
-        // lot and price are all editable, delivered or not.
-        // One row, Annuler to the right of Modifier. modZone stays
-        // OUTSIDE the flex row: the edit form is a block, not a
-        // third button sharing the line.
-        // Kim, 2026-09-12: a received order prints its invoice here.
+        // FREEZE REMOVED (Kim, 2026-09-15): Modifier stays on a
+        // received order. Annuler is hidden once received (cancel is
+        // still refused server-side). Imprimer la facture appears once
+        // received. One row; modZone stays OUTSIDE the flex row: the
+        // edit form is a block, not a third button sharing the line.
         // factPdf is the same server function the Historique tab calls,
         // so there is ONE invoice builder. The button is shown on every
         // received order: factPdf's own refusal (cancelled order, or a
         // client with no Adresse in CRM column M) is printed under it,
         // rather than the button being hidden with no reason given.
-        (recu
-        ? '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">' +
-            (RIGHTS.facture !== false
-            ? '<button id="btnFacture" onclick="fulFacture(this)" ' +
-              'style="background:#fff;color:#1a73e8;border:1px solid #1a73e8;' +
-              'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
-              'Imprimer la facture</button>'
-            : '') +
-          '</div>' +
-          '<div id="facMsg"></div>'
-        :
         '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">' +
           (RIGHTS.modifier !== false
           ? '<button id="btnMod" onclick="loadModify()" ' +
@@ -4144,23 +4126,30 @@
             'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
             'Modifier la commande</button>'
           : '') +
-          (RIGHTS.annuler !== false
+          (recu && RIGHTS.facture !== false
+          ? '<button id="btnFacture" onclick="fulFacture(this)" ' +
+            'style="background:#fff;color:#1a73e8;border:1px solid #1a73e8;' +
+            'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
+            'Imprimer la facture</button>'
+          : '') +
+          (!recu && RIGHTS.annuler !== false
           ? '<button id="btnCancel" onclick="askCancel()" ' +
             'style="background:#fff;color:#c5221f;border:1px solid #c5221f;' +
             'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
             'Annuler la commande</button>'
           : '') +
-        '</div>') +
+        '</div>' +
+        '<div id="facMsg"></div>' +
         '<div id="modZone"></div>' +
       '</div>';
 
-    // GATES (Kim, 2026-09-10): livrée -> reçue -> payée.
-    // Réception and remise need a delivery date; paiement needs a
-    // réception date. On a received order livraison, réception and
-    // remise are read-only. Fields are locked rather than validated on
-    // save, so the rule is visible before the user types. Values are
-    // NEVER cleared: a disabled field still sends its value, so an order
-    // carrying a payment date recorded before these rules keeps it.
+    // GATES (Kim, 2026-09-10; reception freeze removed 2026-09-15):
+    // livrée -> reçue -> payée. Réception and remise need a delivery
+    // date; paiement needs a réception date. Fields are locked rather
+    // than validated on save, so the rule is visible before the user
+    // types. Values are NEVER cleared: a disabled field still sends its
+    // value, so an order carrying a payment date recorded before these
+    // rules keeps it.
     // Field id -> grid right. A field refused by the grid stays locked
     // whatever the gates say; its stored value is still sent on save.
     const FIELD_RIGHT = { uPaiement: 'paiement', uLivraison: 'livraison',
@@ -4177,11 +4166,10 @@
     function fulSyncPaiement() {
       const liv = String(el('uLivraison').value || '').trim() !== '';
       const rec = String(el('uReception').value || '').trim() !== '';
-      const frozen = 'Commande reçue — seul le paiement est modifiable.';
       const needLiv = "Renseignez d'abord la date de livraison.";
-      fulLock('uLivraison', !recu, frozen);
-      fulLock('uReception', !recu && liv, recu ? frozen : needLiv);
-      fulLock('uRemise', !recu && liv, recu ? frozen : needLiv);
+      fulLock('uLivraison', true, '');
+      fulLock('uReception', liv, needLiv);
+      fulLock('uRemise', liv, needLiv);
       fulLock('uPaiement', rec, "Renseignez d'abord la date de réception.");
       fulLock('uContact', true, '');
       fulLock('uFacture', true, '');
@@ -4191,9 +4179,6 @@
       el(id).addEventListener('input', fulSyncPaiement);
     });
     fulSyncPaiement();
-
-    // A received order says so on opening, over the card.
-    if (recu) recuPopup();
 
     // The order box sits under its own summary line. The WhatsApp box
     // is NOT drawn on opening: doFulfil opens it once (Kim, 2026-09-15).
@@ -4209,35 +4194,6 @@
     if (!d) return '';
     const m = String(d).match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
     return m ? m[3]+'-'+m[2]+'-'+m[1] : '';
-  }
-
-  /**
-   * RECEIVED ORDER — the freeze notice (Kim, 2026-09-12).
-   * Same popup shell as Modifier la commande and the WhatsApp report:
-   * the class goes on #recuZone, never on the card. Closing it changes
-   * nothing — fulSyncPaiement locks the fields whether it is open or
-   * not, so this only tells the user why they are locked.
-   */
-  function recuPopup() {
-    const z = el('recuZone');
-    if (!z) return;
-    z.className = 'popup';
-    z.innerHTML =
-      '<div class="card">' +
-        '<button class="popX" onclick="recuClose()" aria-label="Fermer">\u00d7</button>' +
-        '<h3>Commande re\u00e7ue par le client</h3>' +
-        '<div style="font-size:16px;padding:6px 0 12px">' +
-          'Elle ne peut plus \u00eatre modifi\u00e9e. ' +
-          'Seul le paiement peut \u00eatre enregistr\u00e9.</div>' +
-        '<button class="go" style="margin-top:0" onclick="recuClose()">' +
-          'J\'ai compris</button>' +
-      '</div>';
-  }
-
-  /** Back to the order card. The zone returns to the flow, empty. */
-  function recuClose() {
-    const z = el('recuZone');
-    if (z) { z.className = ''; z.innerHTML = ''; }
   }
 
   /**
@@ -4416,11 +4372,9 @@
   function loadModify() {
     const o = hits.filter(h => h.key === selectedKey)[0];
     if (!o) return;
-    // Kim, 2026-09-10: quantity, lot and price stay editable until the
-    // order is RECEIVED, no longer frozen at delivery. The Modifier
-    // button is hidden on a received order, so this form never opens on
-    // one. modDelivered is therefore always false and its price-only
-    // branches below are unreachable.
+    // Freeze removed 2026-09-15 (Kim): quantity, lot and price stay
+    // editable after delivery AND after reception. modDelivered is
+    // kept false: the same full edit form opens on every order.
     modDelivered = false;
     // After delivery a changed fry number is the number RECEIVED and is
     // taken from stock without the +5 % (server: cmdModifyOrder).

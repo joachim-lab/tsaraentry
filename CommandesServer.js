@@ -775,15 +775,16 @@ function cmdRecordFulfilment(rows, payload) {
   // (recorded before this rule) stays re-saveable, or setting its moyen
   // de paiement would be impossible.
   //
-  // RECEIVED = FROZEN. Once AE holds a date, V, AE and AF are no longer
-  // written here, and every other edit path (quantity, lot, price,
-  // delivery, cancel) refuses the order — see cmdOrderReceived.
+  // FREEZE REMOVED (Kim, 2026-09-15). A received order stays editable:
+  // dates, remise, quantity, lot, price and delivery can all change.
+  // Only cancellation stays refused — see cmdCancelOrder. The invoice
+  // number is minted at reception, so after a later edit the facture
+  // must be reprinted (Imprimer la facture).
   // A wrong reception date is undone by clearing AE in the sheet.
-  const locked = cmdOrderReceived(sh, targets);
-  if (!locked && cmdParseDate(f.reception) && !cmdParseDate(f.dateLivraison)) {
+  if (cmdParseDate(f.reception) && !cmdParseDate(f.dateLivraison)) {
     throw new Error("Date de réception impossible sans date de livraison.");
   }
-  if (cmdParseDate(f.paiement) && !locked && !cmdParseDate(f.reception)) {
+  if (cmdParseDate(f.paiement) && !cmdParseDate(f.reception)) {
     const firstRow = Math.min.apply(null, targets);
     const already = sh.getRange(firstRow, C.PAIEMENT).getDisplayValue();
     if (!String(already || "").trim()) {
@@ -807,7 +808,7 @@ function cmdRecordFulfilment(rows, payload) {
   // after the put loop below. The remise applies to the fish or fry
   // price only, NEVER to J / P (transport) — Kim, 2026-09-10.
   var remiseJob = null;
-  if (!locked) {
+  { // plain block: keeps the remise planning variables scoped.
     const remTxt = String(f.remise == null ? "" : f.remise).trim();
     var rem = "";
     if (remTxt !== "") {
@@ -848,10 +849,8 @@ function cmdRecordFulfilment(rows, payload) {
     }
 
     put(C.PAIEMENT, cmdParseDate(f.paiement), "Paiement reçu");
-    if (!locked) {
-      put(C.DATE_LIVRAISON, cmdParseDate(f.dateLivraison), "Date livraison");
-      put(C.RECU, cmdParseDate(f.reception), "Date réception");
-    }
+    put(C.DATE_LIVRAISON, cmdParseDate(f.dateLivraison), "Date livraison");
+    put(C.RECU, cmdParseDate(f.reception), "Date réception");
     put(C.MOYEN_PAIEMENT, f.moyenPaiement, "Moyen paiement");
     put(C.CONTACT, f.contact, "Téléphone");
     // Invoice / delivery-note numbers usually arrive after the order is
@@ -884,8 +883,8 @@ function cmdRecordFulfilment(rows, payload) {
   //
   // THE RULE IS RECEPTION (Kim, 2026-09-10; was delivery since
   // 2026-09-09). A number is minted on the save that records a Date
-  // réception (AE). Quantity, price and remise can change until then,
-  // so an earlier number could sit on an amount that later moves.
+  // réception (AE). Since 2026-09-15 the amount can also change AFTER
+  // reception; the number is kept and the facture is reprinted.
   //
   // This restores the pre-2026-08-30 trigger WITHOUT the fault that
   // caused it to be dropped. Back then AutoCommandes minted from onEdit,
@@ -1019,8 +1018,9 @@ function cmdCancelOrder(rows) {
  * Q3 =(O3*L3)+P3, W3 =IF(V3<>"";"x";"")), so the totals recompute
  * on their own. Writing K or Q would kill the formula for good.
  *
- * GATE: no row may carry AE (Date réception) or AA. Received or
- * cancelled orders are refused (the gate was V until 2026-09-10).
+ * GATE: no row may carry AA (annulé); cancelled orders are refused.
+ * The AE (réception) gate was removed 2026-09-15 (Kim): received
+ * orders stay editable.
  *
  * H IS REWRITTEN. Alevins "à livrer" (H) is a typed value, not a
  * formula; the browser seeds it as round(F*1.05) at order time.
@@ -1129,10 +1129,6 @@ function cmdUpdateOrderPrices(payload) {
   const C = CMD_CFG.COL;
   const lastRow = findNextCommandeRow(sh) - 1;
 
-  if (cmdOrderReceived(sh, lines.map(function (ln) { return ln.row; }))) {
-    throw new Error("Commande reçue par le client — modification impossible.");
-  }
-
   // ---- read, gate, plan. Nothing is written until every line passes.
   const jobs = [];
   lines.forEach(function (ln) {
@@ -1222,10 +1218,6 @@ function cmdUpdateDelivery(payload) {
     }
   });
 
-  if (cmdOrderReceived(sh, rows)) {
-    throw new Error("Commande reçue par le client — modification impossible.");
-  }
-
   const first = rows[0];
   const isAl = cmdToNum(sh.getRange(first, C.ALEVINS_NB).getValue()) != null;
   const costCol = isAl ? C.TRANSPORT : C.FRAIS;
@@ -1285,11 +1277,11 @@ function cmdRemiseFormulas(r) {
 }
 
 /**
- * RECU (Kim, 2026-09-10). True when any row of the order carries a
- * Date réception (AE). From that moment the order is frozen: no
- * quantity, lot, price, delivery, remise or cancellation change.
- * Only the payment can still be recorded (cmdRecordFulfilment).
- * A wrong reception date is undone by clearing AE in the sheet.
+ * RECU. True when any row of the order carries a Date réception (AE).
+ * The edit freeze was removed 2026-09-15 (Kim); this now gates only
+ * cancellation (cmdCancelOrder) and invoice minting
+ * (cmdRecordFulfilment). A wrong reception date is undone by clearing
+ * AE in the sheet.
  */
 function cmdOrderReceived(sh, rows) {
   return (rows || []).map(Number).some(function (r) {
@@ -1336,13 +1328,10 @@ function cmdModifyOrder(payload) {
   const C = CMD_CFG.COL;
   const lastRow = findNextCommandeRow(sh) - 1;
 
-  // RECU (Kim, 2026-09-10): quantity, PM and lot stay editable after
-  // delivery, until the order is received. The gate used to be Date
-  // livraison. The stock reconcile below already handles a row the
-  // engine has deducted, so a post-delivery change is covered.
-  if (cmdOrderReceived(sh, lines.map(function (ln) { return ln.row; }))) {
-    throw new Error("Commande reçue par le client — modification impossible.");
-  }
+  // FREEZE REMOVED (Kim, 2026-09-15): quantity, PM and lot stay
+  // editable after delivery AND after reception. The stock reconcile
+  // below already handles a row the engine has deducted, so a
+  // post-reception change is covered.
 
   // ---- read current state, gate, plan the jobs ----
   const jobs = [];
