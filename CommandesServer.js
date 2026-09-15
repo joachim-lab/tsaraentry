@@ -162,7 +162,7 @@ function cmdGetOptions() {
  * }
  * Returns { firstRow, lastRow, orderNumber, rowCount }.
  */
-function cmdCreateOrder(payload) {
+function cmdCreateOrderPrbBody(payload) {
   const f = payload || {};
   const lines = f.lines || [];
 
@@ -205,12 +205,14 @@ function cmdCreateOrder(payload) {
              qty: (kg != null && pm != null && pm > 0) ? kg * 1000 / pm : null };
   });
   const verdict = cmdValidateOrderLines(vLines, f.type);
+  prbMark("validation");
   if (!verdict.ok) {
     throw new Error("Commande refusée : " + verdict.blocks.join(" ; "));
   }
 
   const sh = cmdSheet();
   const firstRow = findNextCommandeRow(sh);
+  prbMark("open+scan");
   const C = CMD_CFG.COL;
 
   lines.forEach((ln, i) => {
@@ -298,6 +300,7 @@ function cmdCreateOrder(payload) {
   col(C.LIVRE,          function (r) { return "=IF(V" + r + "<>\"\";\"x\";\"\")"; });
 
   SpreadsheetApp.flush();
+  prbMark("puts+formulas+flush");
 
   // Order numbers: edit triggers never fire on programmatic writes.
   //
@@ -315,8 +318,10 @@ function cmdCreateOrder(payload) {
       const row = firstRow + i;
       sh.getRange(row, C.ORDER_NO).setValue(i === 0 ? f.type : "commande groupée");
       SpreadsheetApp.flush();
+      prbMark("row" + i + " B+flush");
       AutoCommandes.generateOrderNumbersForRows(row, row);
       SpreadsheetApp.flush();
+      prbMark("row" + i + " lib+flush");
     }
     orderNumber = sh.getRange(firstRow, C.ORDER_NO).getDisplayValue();
   } catch (err) {
@@ -331,6 +336,7 @@ function cmdCreateOrder(payload) {
   // The contact reaches the Clients tab and the client drop-down now,
   // not at the next CRM > Actualiser la table.
   crmFillContact(f.client, f.contact);
+  prbMark("readB+crm");
 
   return { firstRow: firstRow, lastRow: lastRow, orderNumber: orderNumber,
            rowCount: lines.length, warnings: verdict.warnings || [] };
@@ -378,11 +384,12 @@ function cmdNumFromDisplay_(s) {
  * newest 25. Whatever the cap, `totals` and `counts` always cover every
  * match — the list alone is capped.
  */
-function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
+function cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
                        wantAlevins, wantPoisson, noCap) {
   const sh = cmdSheet();
   const C = CMD_CFG.COL;
   const lastRow = findNextCommandeRow(sh) - 1;
+  prbMark("find:open+scan");
   const zero = function () { return { kg: 0, al: 0, ar: 0 }; };
   // `selected` (Kim 2026-09-15): kg / alevins / Ar over the orders the
   // four boxes and the query SELECT, uncapped — the summary header
@@ -407,6 +414,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
   // follows the cell format: under a date format 50 reads "18/02/1900"
   // and became a remise of 18 021 900 % (live test, 2026-09-10).
   const remRaw = sh.getRange(CMD_CFG.START_ROW, C.REMISE, n, 1).getValues();
+  prbMark("find:block reads");
   const q = String(query || "").trim().toLowerCase();
 
   const groups = {};
@@ -563,6 +571,7 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
     // that used to sit here silently under-reported both (2026-09-15).
     if (noCap || out.length < 25) out.push(g);
   }
+  prbMark("find:loop");
   return { orders: out, closedMatches: closedMatches, totals: totals, counts: counts };
 }
 
@@ -621,6 +630,7 @@ function fulPickOrders(keys) {
 function fulBuildSheet(p) {
   p = p || {};
   const pick = fulPickOrders(p.keys);
+  prbMark("pick");
   const orders = pick.orders;                      // newest first, like the screen
   const tz = Session.getScriptTimeZone();
 
@@ -649,6 +659,7 @@ function fulBuildSheet(p) {
     " (généré " + Utilities.formatDate(now, tz, "dd-MM-yy HH:mm").replace(":", "h") + ")";
   const ss = SpreadsheetApp.create(name);
   DriveApp.getFileById(ss.getId()).moveTo(folder);
+  prbMark("create+move");
   ss.setSpreadsheetTimeZone(tz);
   const sh = ss.getSheets()[0].setName(FUL_REPORT_CFG.SHEET);
 
@@ -684,6 +695,7 @@ function fulBuildSheet(p) {
   sh.getRange(2, 1).setValue("Sélection de " + data.length + " commande(s)" +
     " · généré le " + Utilities.formatDate(now, tz, "dd/MM/yy HH:mm"));
   SpreadsheetApp.flush();
+  prbMark("format+flush");
 
   return { ss: ss, sh: sh, count: data.length, missing: pick.missing,
            lastRow: lastRow, ncol: NCOL };
@@ -697,7 +709,7 @@ function fulBuildSheet(p) {
  * Export parameters are the Stock poisson ones (tempBuildPdf), plus
  * fzr=true: the title and the header row repeat on every page.
  */
-function fulReport(p) {
+function fulReportPrbBody(p) {
   const b = fulBuildSheet(p);
   const file = DriveApp.getFileById(b.ss.getId());
   var pdf;
@@ -720,11 +732,14 @@ function fulReport(p) {
       + "&r2=" + b.lastRow
       + "&c2=" + b.ncol;
     pdf = tempFetchPdf(url, "Commandes_ouvertes");
+    prbMark("export");
   } finally {
     // Export done or failed, the Sheet has served: bin it either way.
     file.setTrashed(true);
   }
+  prbMark("trash");
   pdf = imprWithArchive("COMMANDES", pdf);
+  prbMark("archive+prune");
   pdf.count = b.count;
   pdf.missing = b.missing;
   return pdf;
@@ -737,10 +752,11 @@ function fulReport(p) {
  * `rows` comes from cmdFindOrders, so the caller never guesses.
  * Returns { rows, changed: [...] }.
  */
-function cmdRecordFulfilment(rows, payload) {
+function cmdRecordFulfilmentPrbBody(rows, payload) {
   const sh = cmdSheet();
   const C = CMD_CFG.COL;
   const lastRow = findNextCommandeRow(sh) - 1;
+  prbMark("open+scan");
 
   const targets = (rows || []).map(Number).filter(r =>
     isFinite(r) && r >= CMD_CFG.START_ROW && r <= lastRow);
@@ -837,6 +853,7 @@ function cmdRecordFulfilment(rows, payload) {
     });
     if (remRows.length) remiseJob = { rows: remRows, rem: rem };
   }
+  prbMark("gates+remise check");
 
   targets.forEach(r => {
     function put(col, value, label) {
@@ -860,6 +877,7 @@ function cmdRecordFulfilment(rows, payload) {
     put(C.REMARQUES, f.remarques, "Remarques");
   });
 
+  prbMark("puts");
   if (remiseJob) {
     remiseJob.rows.forEach(function (r) {
       const cell = sh.getRange(r, C.REMISE);
@@ -874,6 +892,7 @@ function cmdRecordFulfilment(rows, payload) {
   }
 
   SpreadsheetApp.flush();
+  prbMark("remise+flush");
 
   // Mint the invoice number. THIS IS THE ONLY PLACE IT HAPPENS
   // (2026-08-30, Kim). AutoCommandes no longer mints from onEdit: that
@@ -941,8 +960,10 @@ function cmdRecordFulfilment(rows, payload) {
     // Before/after, so a number finance typed above is not reported as
     // "généré". The library leaves such an order alone, and this says so.
     const before = targets.map(r => sh.getRange(r, C.FACTURE).getDisplayValue());
+    prbMark("received+before reads");
     AutoCommandes.acFillFactureForRows(sh, anyRow, anyRow);
     SpreadsheetApp.flush();
+    prbMark("lib mint+flush");
     targets.forEach((r, i) => {
       const after = sh.getRange(r, C.FACTURE).getDisplayValue();
       if (after && after !== before[i]) {
@@ -5035,3 +5056,97 @@ function cmdWhatsappRapport(rows) {
   return { text: text, count: 1 };
 }
 
+/* ============================================================
+ * TEMPORARY TIMING PROBE (2026-09-15). Remove by restoring this file
+ * from _parked/pull/tsaraentry_20260915-2347/CommandesServer.js.
+ *
+ * One record per probed call: date, function, total seconds, the
+ * phases as "label=seconds | ...", and a note. Written AFTER the
+ * timing stops, so the write itself is not measured. A missing
+ * PRB_SHEET_ID property means: log to the console only.
+ * ============================================================ */
+var PRB = { active: null };
+
+function prbStart(name, note) {
+  if (PRB.active) return false;                 // nested: marks join the outer record
+  var now = Date.now();
+  PRB.active = { name: name, note: note || "", t0: now, last: now, marks: [] };
+  return true;
+}
+
+function prbMark(label) {
+  var p = PRB.active;
+  if (!p) return;
+  var now = Date.now();
+  p.marks.push(label + "=" + ((now - p.last) / 1000).toFixed(2));
+  p.last = now;
+}
+
+function prbEnd(owner, label) {
+  var p = PRB.active;
+  if (!owner || !p) return;
+  prbMark(label || "end");
+  PRB.active = null;
+  var total = ((Date.now() - p.t0) / 1000).toFixed(2);
+  var phases = p.marks.join(" | ");
+  console.log("PRB " + p.name + " total=" + total + "s " + phases + " " + p.note);
+  try {
+    var id = PropertiesService.getScriptProperties().getProperty("PRB_SHEET_ID");
+    if (id) {
+      SpreadsheetApp.openById(id).getSheets()[0]
+        .appendRow([new Date(), p.name, Number(total), phases, p.note]);
+    }
+  } catch (e) {
+    console.error("PRB write: " + e);
+  }
+}
+
+/** RUN FROM EDITOR ONCE: tsaraentry -> CommandesServer.js -> prbSetup.
+ *  Creates the probe spreadsheet in "Rapports Commande" and stores its
+ *  id in the script property PRB_SHEET_ID. Logs the URL. */
+function prbSetup() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty("PRB_SHEET_ID");
+  if (id) {
+    Logger.log("PRB sheet already set: https://docs.google.com/spreadsheets/d/" + id);
+    return;
+  }
+  var ss = SpreadsheetApp.create("Perf probe Commandes 2026-09");
+  DriveApp.getFileById(ss.getId()).moveTo(DriveApp.getFolderById(HIST_REPORT_CFG.FOLDER_ID));
+  ss.getSheets()[0].getRange(1, 1, 1, 5)
+    .setValues([["Date", "Fonction", "Total (s)", "Phases", "Note"]]).setFontWeight("bold");
+  props.setProperty("PRB_SHEET_ID", ss.getId());
+  Logger.log("PRB sheet: " + ss.getUrl());
+}
+
+function cmdCreateOrder(payload) {
+  var own = prbStart("cmdCreateOrder",
+    "lines=" + (((payload || {}).lines) || []).length);
+  try { return cmdCreateOrderPrbBody(payload); }
+  finally { prbEnd(own); }
+}
+
+function cmdRecordFulfilment(rows, payload) {
+  var f = payload || {};
+  var own = prbStart("cmdRecordFulfilment",
+    "rows=" + (rows || []).length + " liv=" + (f.dateLivraison ? 1 : 0) +
+    " rec=" + (f.reception ? 1 : 0) + " pai=" + (f.paiement ? 1 : 0) +
+    " rem=" + (String(f.remise == null ? "" : f.remise).trim() !== "" ? 1 : 0));
+  try { return cmdRecordFulfilmentPrbBody(rows, payload); }
+  finally { prbEnd(own, "after reads"); }
+}
+
+function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
+                       wantAlevins, wantPoisson, noCap) {
+  var own = prbStart("cmdFindOrders", "q=" + (query ? 1 : 0) + (noCap ? " noCap" : ""));
+  try {
+    return cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
+                                wantAlevins, wantPoisson, noCap);
+  } finally { prbEnd(own); }
+}
+
+function fulReport(p) {
+  var own = prbStart("fulReport", "keys=" + (((p || {}).keys) || []).length);
+  try { return fulReportPrbBody(p); }
+  finally { prbEnd(own); }
+}
