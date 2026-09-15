@@ -3548,6 +3548,58 @@
       .cmdSellablePool();
   }
 
+  /** "Imprimer": one Sheet of the orders the current filters show,
+   *  written server-side into "Rapports Commande" — the histPrint
+   *  pattern exactly. The tab is opened BEFORE the server call, or
+   *  the browser's popup blocker eats it. */
+  function fulPrint() {
+    const btn = el('fulPrintBtn');
+    const msg = el('fulPrintMsg');
+    msg.innerHTML = '';
+    btn.disabled = true;
+    btn.textContent = 'Pr\u00e9paration\u2026';
+    const win = window.open('', '_blank');
+    if (win) {
+      // Cosmetic only: a waiting text in the new tab. If a browser
+      // refuses the write, the tab stays blank and the report still opens.
+      try {
+        win.document.write('<title>Commandes ouvertes</title>' +
+          '<p style="font-family:Arial,sans-serif;font-size:18px">Pr\u00e9paration du rapport\u2026</p>');
+      } catch (err) { /* blank tab is acceptable */ }
+    }
+
+    function done() {
+      btn.disabled = false;
+      btn.textContent = 'Imprimer';
+    }
+
+    google.script.run
+      .withSuccessHandler(function (r) {
+        done();
+        const link = '<a href="' + esc(r.url) + '" target="_blank">Ouvrir le rapport</a>';
+        if (win && !win.closed) {
+          win.location.href = r.url;
+          msg.innerHTML = '<div class="ok">Rapport pr\u00eat : ' + fmtNum(r.count) +
+            ' commande(s). ' + link + '</div>';
+        } else {
+          msg.innerHTML = '<div class="warn">Rapport pr\u00eat : ' + fmtNum(r.count) +
+            ' commande(s). Le navigateur a bloqu\u00e9 le nouvel onglet : ' + link + '</div>';
+        }
+      })
+      .withFailureHandler(function (e) {
+        done();
+        if (win && !win.closed) win.close();
+        msg.innerHTML = '<div class="err">' + esc(e.message) + '</div>';
+      })
+      .fulReport({
+        query: el('ficherche').value,
+        deliveredUnpaid: el('fDeliveredUnpaid').checked,
+        undelivered: el('fUndelivered').checked,
+        alevins: el('fAlevins').checked,
+        poisson: el('fPoisson').checked
+      });
+  }
+
   function renderFul() {
     el('paneFul').innerHTML =
       '<div class="card">' +
@@ -3581,6 +3633,10 @@
             '</div>' +
           '</div>' +
         '</div>' +
+        // "Imprimer" (Kim, 2026-09-15): one Sheet of what the filters
+        // above currently show. Same pattern as the Historique button.
+        '<button id="fulPrintBtn" class="primary" style="margin-top:12px" onclick="fulPrint()">Imprimer</button>' +
+        '<div id="fulPrintMsg"></div>' +
       '</div>' +
       // Collapsible summary (Kim 2026-09-11): the two category
       // totals, the order count over every match, and the farm-wide
@@ -3723,6 +3779,18 @@
     return n + word + (parts.length ? ' (' + parts.join(', ') + ')' : '');
   }
 
+  /** " — 350 kg + 4 000 alevins" for the summary HEADER (Kim,
+   *  2026-09-15): kg and fry summed over EVERY order the query and the
+   *  four checkboxes match — server-side, uncapped — so the total shows
+   *  without opening the card. Empty when nothing matches. */
+  function fulTotLine(t) {
+    if (!t) return '';
+    const bits = [];
+    if (Number(t.kg) > 0) bits.push(fmtNum(Number(t.kg)) + ' kg');
+    if (Number(t.al) > 0) bits.push(fmtNum(Number(t.al)) + ' alevins');
+    return bits.length ? ' \u2014 ' + bits.join(' + ') : '';
+  }
+
   function doSearch(keepMsg, done) {
     setStatus('banner', 'Recherche…');
     fulLoadPool();
@@ -3731,7 +3799,8 @@
     google.script.run
       .withSuccessHandler(res => {
         hits = res.orders;
-        el('fulTotalCount').textContent = fulCountLine(res.counts);
+        el('fulTotalCount').textContent = fulCountLine(res.counts) +
+          fulTotLine((res.totals || {}).selected);
         const tot = res.totals || {};
         fulSetTot('fTotDU', tot.deliveredUnpaid);
         fulSetTot('fTotUD', tot.undelivered);

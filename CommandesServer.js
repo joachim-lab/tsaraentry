@@ -370,14 +370,22 @@ function cmdNumFromDisplay_(s) {
  * when either of the things it holds is ticked, so a mixed order stays
  * visible under either box. An order carrying no quantity at all is
  * never hidden this way — see the test below for why.
+ *
+ * `noCap` (fulReport only): return EVERY matching order instead of the
+ * newest 25. Whatever the cap, `totals` and `counts` always cover every
+ * match — the list alone is capped.
  */
 function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
-                       wantAlevins, wantPoisson) {
+                       wantAlevins, wantPoisson, noCap) {
   const sh = cmdSheet();
   const C = CMD_CFG.COL;
   const lastRow = findNextCommandeRow(sh) - 1;
   const zero = function () { return { kg: 0, al: 0, ar: 0 }; };
-  const totals = { deliveredUnpaid: zero(), undelivered: zero() };
+  // `selected` (Kim 2026-09-15): kg / alevins / Ar over the orders the
+  // four boxes and the query SELECT, uncapped — the summary header
+  // shows it without opening the card. Unlike the two category totals,
+  // it follows the checkboxes.
+  const totals = { deliveredUnpaid: zero(), undelivered: zero(), selected: zero() };
   // Counts the order-TYPE breakdown of the list this call returns, e.g.
   // "12 commandes (2 alevins, 10 poisson)" (Kim 2026-09-09). Filled in
   // below, after the same delivered/undelivered + Alevins/Poisson
@@ -539,6 +547,9 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
     if (hasAlevins && hasPoisson) counts.mix++;
     else if (hasAlevins) counts.alv++;
     else if (hasPoisson) counts.pois++;
+    totals.selected.kg += g.poissonKgTotal;
+    totals.selected.al += g.alevinsTotal;
+    totals.selected.ar += g.montantAr;
 
     // One order should hold one price per kg. The sheet does not
     // enforce it, so distinct values are kept and the card shows all
@@ -546,10 +557,119 @@ function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
     g.prixKg = g.prixKg.filter(function (v, k, a) { return a.indexOf(v) === k; });
     g.prixAl = g.prixAl.filter(function (v, k, a) { return a.indexOf(v) === k; });
 
-    out.push(g);
-    if (out.length >= 25) break;
+    // The cap trims the LIST only. The loop keeps running so the
+    // totals and counts above stay true past 25 matches — the break
+    // that used to sit here silently under-reported both (2026-09-15).
+    if (noCap || out.length < 25) out.push(g);
   }
   return { orders: out, closedMatches: closedMatches, totals: totals, counts: counts };
+}
+
+/***************************************************************
+ * MODE B — "Imprimer" on Paiement & livraison (Kim, 2026-09-15).
+ *
+ * One report file of the orders the tab currently SHOWS: same query,
+ * same four checkboxes, uncapped where the screen stops at 25. The
+ * file lands in "Rapports Commande" (HIST_REPORT_CFG.FOLDER_ID),
+ * like the Historique report; printing happens from Sheets.
+ ***************************************************************/
+const FUL_REPORT_CFG = {
+  NAME: "Commandes ouvertes",
+  SHEET: "Rapport",
+  HEADER_ROW: 4,
+  HEADERS: ["Date", "N° commande", "Client", "Téléphone", "Lots",
+            "Kg", "Alevins", "Montant (Ar)", "Statut"]
+};
+
+/**
+ * p = { query, deliveredUnpaid, undelivered, alevins, poisson } — the
+ * screen's search box and four checkboxes, as the user set them.
+ * Returns { url, name, count }.
+ */
+function fulReport(p) {
+  p = p || {};
+  if (!p.deliveredUnpaid && !p.undelivered) {
+    throw new Error("Cocher au moins une case : livrées et non-payées, ou non-livrées.");
+  }
+  if (!p.alevins && !p.poisson) {
+    throw new Error("Cocher Alevins ou Poisson pour imprimer des commandes.");
+  }
+  const res = cmdFindOrders(String(p.query || ""), !!p.deliveredUnpaid,
+    !!p.undelivered, !!p.alevins, !!p.poisson, true);
+  const orders = res.orders;                       // newest first, like the screen
+  const tz = Session.getScriptTimeZone();
+
+  var kg = 0, alv = 0, ar = 0;
+  const data = orders.map(function (o) {
+    kg += o.poissonKgTotal; alv += o.alevinsTotal; ar += o.montantAr;
+    const delivered = String(o.dateLivraison || "").trim() !== "";
+    return [
+      String(o.dateCommande || ""),
+      o.orderNumber || "(sans numéro)",
+      o.client,
+      String(o.contact || "").trim(),
+      o.lots.join(", "),
+      o.poissonKgTotal || "",
+      o.alevinsTotal || "",
+      o.montantAr || "",
+      delivered ? "Livrée non-payée" : "Non livrée"
+    ];
+  });
+
+  // Folder FIRST: a wrong or unreachable folder fails before any file
+  // is made, so no stray report lands in the My Drive root.
+  const folder = DriveApp.getFolderById(HIST_REPORT_CFG.FOLDER_ID);
+  const now = new Date();
+  const name = FUL_REPORT_CFG.NAME +
+    " (généré " + Utilities.formatDate(now, tz, "dd-MM-yy HH:mm").replace(":", "h") + ")";
+  const ss = SpreadsheetApp.create(name);
+  DriveApp.getFileById(ss.getId()).moveTo(folder);
+  ss.setSpreadsheetTimeZone(tz);
+  const sh = ss.getSheets()[0].setName(FUL_REPORT_CFG.SHEET);
+
+  const HR = FUL_REPORT_CFG.HEADER_ROW;
+  const NCOL = FUL_REPORT_CFG.HEADERS.length;
+  const lastRow = HR + data.length + 1;            // header + orders + total
+
+  // Exact size: a new file is 1000 x 26; nothing below the total.
+  if (sh.getMaxRows() < lastRow) sh.insertRowsAfter(sh.getMaxRows(), lastRow - sh.getMaxRows());
+  if (sh.getMaxRows() > lastRow) sh.deleteRows(lastRow + 1, sh.getMaxRows() - lastRow);
+  if (sh.getMaxColumns() > NCOL) sh.deleteColumns(NCOL + 1, sh.getMaxColumns() - NCOL);
+
+  sh.getRange(HR, 1, 1, NCOL).setValues([FUL_REPORT_CFG.HEADERS])
+    .setFontWeight("bold").setBackground("#e8eaed");
+  if (data.length) {
+    // Date and phone as TEXT: the sheet's display strings must not be
+    // re-parsed under the new file's locale; "034…" keeps its zero.
+    sh.getRange(HR + 1, 1, data.length, 1).setNumberFormat("@");
+    sh.getRange(HR + 1, 4, data.length, 1).setNumberFormat("@");
+    sh.getRange(HR + 1, 1, data.length, NCOL).setValues(data);
+  }
+  sh.getRange(lastRow, 1, 1, NCOL).setValues([[
+    "Total", data.length + " commande(s)", "", "", "", kg || "", alv || "", ar || "", ""
+  ]]).setFontWeight("bold").setBorder(true, null, null, null, null, null);
+  sh.getRange(HR + 1, 6, data.length + 1, 1).setNumberFormat("#,##0.0");
+  sh.getRange(HR + 1, 7, data.length + 1, 2).setNumberFormat("#,##0");
+  sh.setFrozenRows(HR);                            // header repeats on every printed page
+  sh.autoResizeColumns(1, NCOL);
+
+  const picked = [];
+  if (p.deliveredUnpaid) picked.push("livrées et non-payées");
+  if (p.undelivered) picked.push("non-livrées");
+  const types = [];
+  if (p.alevins) types.push("Alevins");
+  if (p.poisson) types.push("Poisson");
+  const q = String(p.query || "").trim();
+
+  // Title AFTER the resize: a long title in A1 would widen column A.
+  sh.getRange(1, 1).setValue(FUL_REPORT_CFG.NAME + " — Paiement & livraison")
+    .setFontWeight("bold").setFontSize(14);
+  sh.getRange(2, 1).setValue("Commandes " + picked.join(" + ") + " · " + types.join(" + ") +
+    (q ? " · recherche : " + q : "") +
+    " · généré le " + Utilities.formatDate(now, tz, "dd/MM/yy HH:mm"));
+  SpreadsheetApp.flush();
+
+  return { url: ss.getUrl() + "#gid=" + sh.getSheetId(), name: name, count: data.length };
 }
 
 /**
