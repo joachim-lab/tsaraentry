@@ -3502,6 +3502,14 @@
     if (all) all.checked = hits.length > 0 && n === hits.length;
   }
 
+  /** Unticks every order (Kim, 2026-09-15): called once a printout is
+   *  built, so back on the screen nothing is still ticked from it. */
+  function fulPickClear() {
+    fulPick = {};
+    document.querySelectorAll('#hits input[data-pick]').forEach(cb => { cb.checked = false; });
+    fulPickRefresh();
+  }
+
   /** Ticks or unticks every order on screen, and only those. */
   function fulPickAllToggle() {
     const on = el('fulPickAll').checked;
@@ -3544,6 +3552,9 @@
         const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
         link.href = url;
         link.target = '_blank';
+        // The PDF exists: the selection has served. Only the success
+        // path clears it; a failure keeps the ticks for a retry.
+        fulPickClear();
 
         const note =
           (r.missing ? '<br>' + fmtNum(r.missing) + ' commande(s) coch\u00e9e(s) plus ouverte(s) : ' +
