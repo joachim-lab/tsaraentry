@@ -76,9 +76,6 @@
     <label for="type">Type</label>
     <select id="type"><option value="">Chargement...</option></select>
 
-    <label for="dateCommande">Date commande</label>
-    <input type="date" id="dateCommande">
-
     <label for="unite">Unité</label>
     <select id="unite"><option value="">Chargement...</option></select>
 
@@ -88,7 +85,7 @@
     <button id="addBtn" onclick="addRow()">+ Ajouter à la liste</button>
 
     <table id="pending" style="display:none">
-      <thead><tr><th>Type</th><th>Date cmd</th><th>Unité</th><th>Cmdé</th><th></th></tr></thead>
+      <thead><tr><th>Type</th><th>Unité</th><th>Cmdé</th><th></th></tr></thead>
       <tbody id="pendingBody"></tbody>
     </table>
 
@@ -99,9 +96,6 @@
     <label for="pendingSel">Commande en attente de livraison</label>
     <select id="pendingSel"><option value="">Chargement...</option></select>
     <button id="reloadBtn" onclick="loadPendingRows()">Recharger la liste</button>
-
-    <label for="recDate">Date réception</label>
-    <input type="date" id="recDate">
 
     <label for="recQty">Nbre reçu</label>
     <input type="number" id="recQty" min="0" step="any" placeholder="ex: 20">
@@ -137,8 +131,8 @@
       const d = new Date();
       return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
     }
-    document.getElementById('dateCommande').value = todayISO();
-    document.getElementById('recDate').value = todayISO();
+    // 2026-09-15: no date field on either tab. todayISO() is read at SAVE
+    // time, so a tab left open overnight still saves the real day.
 
     function setMode(m) {
       document.getElementById('secCmd').style.display  = (m === 'cmd')  ? '' : 'none';
@@ -194,19 +188,18 @@
 
     function addRow() {
       const type = document.getElementById('type').value;
-      const dateCommande = document.getElementById('dateCommande').value;
       const unite = document.getElementById('unite').value;
       const nbreCommande = document.getElementById('nbreCommande').value;
       const dateReception = '';
       const nbreRecu = '';
       const commentaire = '';
 
-      if (!type || !dateCommande || !unite || !nbreCommande || Number(nbreCommande) <= 0) {
-        showMsg('err', 'Type, date commande, unité et nbre commandé sont obligatoires (nbre > 0).');
+      if (!type || !unite || !nbreCommande || Number(nbreCommande) <= 0) {
+        showMsg('err', 'Type, unité et nbre commandé sont obligatoires (nbre > 0).');
         return;
       }
 
-      pending.push({ type, dateCommande, unite, nbreCommande, dateReception, nbreRecu, commentaire });
+      pending.push({ type, unite, nbreCommande, dateReception, nbreRecu, commentaire });
       document.getElementById('nbreCommande').value = '';
       hideMsg();
       renderPending();
@@ -232,7 +225,7 @@
       } else {
         table.style.display = '';
         body.innerHTML = pending.map((p, i) =>
-          '<tr><td>' + esc(p.type) + '</td><td>' + esc(p.dateCommande) + '</td><td>' + esc(p.unite) +
+          '<tr><td>' + esc(p.type) + '</td><td>' + esc(p.unite) +
           '</td><td>' + esc(p.nbreCommande) + '</td>' +
           '<td class="del" onclick="removeRow(' + i + ')">\u2715</td></tr>'
         ).join('');
@@ -261,17 +254,16 @@
           document.getElementById('submitBtn').disabled = false;
           showMsg('err', e.message);
         })
-        .submitInventaire(pending);
+        .submitInventaire(pending.map(p => Object.assign({}, p, { dateCommande: todayISO() })));
     }
 
     function submitReception() {
       const row = document.getElementById('pendingSel').value;
-      const dateReception = document.getElementById('recDate').value;
+      const dateReception = todayISO();
       const nbreRecu = document.getElementById('recQty').value;
       const commentaire = document.getElementById('recComment').value;
 
       if (!row) { showMsg('err', 'Choisissez une commande en attente.'); return; }
-      if (!dateReception) { showMsg('err', 'Date réception obligatoire.'); return; }
       if (nbreRecu === '' || Number(nbreRecu) < 0) {
         showMsg('err', 'Nbre reçu obligatoire, positif ou zéro.');
         return;
