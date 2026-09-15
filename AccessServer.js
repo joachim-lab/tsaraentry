@@ -7,7 +7,9 @@
  *   A = email   B = nom   C = écrans
  * C holds screen keys separated by commas, or * for every screen:
  *   nourrissage, inventaires, impressions, databassins, creerlot,
- *   commandes, morts, lot, tracabilite
+ *   commandes, morts, lot, tracabilite, paiement
+ * paiement: the Commandes screen with ONLY the Paiement & livraison
+ * tab (the tab bar is hidden). commandes = the full screen.
  * The first row with the e-mail wins. Unknown words in C are ignored
  * (testAccess lists them).
  *
@@ -30,7 +32,7 @@
  ***************************************************************/
 
 var ACCESS_KEYS = ["nourrissage", "inventaires", "impressions", "databassins",
-  "creerlot", "commandes", "morts", "lot", "tracabilite"];
+  "creerlot", "commandes", "morts", "lot", "tracabilite", "paiement"];
 
 /** ?screen= value -> access key. A sub-screen takes its tile's key. */
 var ACCESS_SCREEN_KEY = {
@@ -104,7 +106,19 @@ function accessMenuKeys() {
 /** True when the current account may open this ?screen= value. */
 function accessAllows(screen) {
   if (!Object.prototype.hasOwnProperty.call(ACCESS_SCREEN_KEY, screen)) return false;
-  return accessMenuKeys().indexOf(ACCESS_SCREEN_KEY[screen]) >= 0;
+  const keys = accessMenuKeys();
+  const k = ACCESS_SCREEN_KEY[screen];
+  if (k === "commandes" && keys.indexOf("paiement") >= 0) return true;
+  return keys.indexOf(k) >= 0;
+}
+
+/**
+ * True when the current account holds the full "commandes" key.
+ * With "paiement" alone, the Commandes screen opens on Paiement &
+ * livraison and the tab bar is hidden (CommandesIndex.html).
+ */
+function accessFullCommandes() {
+  return accessMenuKeys().indexOf("commandes") >= 0;
 }
 
 function accessEscape(s) {

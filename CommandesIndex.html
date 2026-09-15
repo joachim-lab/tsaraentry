@@ -230,7 +230,7 @@
   <a class="backlink" id="backLink" href="#">&larr; Menu</a>
   <h1>Commandes</h1>
 
-  <div class="tabsWrap"><div class="tabs">
+  <div class="tabsWrap"<?!= accessFullCommandes() ? '' : ' style="display:none"' ?>><div class="tabs">
     <div class="tab" id="tabDem" onclick="switchMode('dem')">Pr&eacute;-commandes</div>
     <div class="tab" id="tabNew" onclick="switchMode('new')">Nouvelle cmd</div>
     <div class="tab" id="tabRec" onclick="switchMode('rec')">R&eacute;currentes</div>
