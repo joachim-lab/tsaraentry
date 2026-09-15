@@ -187,7 +187,8 @@
                  display: flex; align-items: center; gap: 12px; }
     .stockBtn { flex: 0 0 auto; background: #188038; color: #fff; }
     .stockRead { font-size: 15px; line-height: 1.35; }
-    .floorWrap { flex: 0 0 auto; margin-left: auto; }
+    .floorWrap { flex: 0 0 auto; }
+    #floorWrapDem .floorBox { margin-top: 8px; }
     .floorBox { display: inline-flex; align-items: center; gap: 8px;
                 padding: 4px 5px 4px 10px; border: 1px solid #f0d79a;
                 border-radius: 6px; background: rgba(255, 255, 255, 0.72);
@@ -1189,7 +1190,8 @@
         '<span class="demReadout">' +
           '<span id="demPool" class="muted"></span>' +
           '<div id="demWant" class="muted" style="margin-top:4px"></div>' +
-        '</span></div>' +
+        '</span>' +
+        '<div id="floorWrapDem"></div></div>' +
       '<div id="demList">Chargement…</div>' +
       '<div id="demForm"></div>';
     demMarkSubtabs();
@@ -1219,7 +1221,8 @@
    * THE STOCK BAR — one definition, three panes (Kim 2026-09-07).
    *
    * sfx is the pane suffix ('New', 'Rec'); Pré-commandes keeps its own
-   * markup because its bar also carries the queue save/cancel buttons.
+   * markup because its bar also carries the queue save/cancel buttons,
+   * but paintStockBars fills its floor field too, via #floorWrapDem.
    * Every id is suffixed: all panes live in the DOM at once, so a
    * duplicate id would silently bind the wrong field.
    */
@@ -1259,7 +1262,7 @@
 
   /** Repaint every bar that is currently in the DOM. */
   function paintStockBars() {
-    ['New', 'Rec'].forEach(function (sfx) {
+    ['New', 'Rec', 'Dem'].forEach(function (sfx) {
       var p = el('pool' + sfx);
       if (p) p.innerHTML = demPools ? stockPoolText() : '';
       var f = el('floorWrap' + sfx);
