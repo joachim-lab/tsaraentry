@@ -141,7 +141,8 @@ var ACCESS_CMD_COLS = [
   ["Champ N° facture", "nfacture"],
   ["Bouton Modifier", "modifier"],
   ["Bouton Annuler", "annuler"],
-  ["Bouton Facture", "facture"]
+  ["Bouton Facture", "facture"],
+  ["Bouton BL", "bl"]
 ];
 
 /**

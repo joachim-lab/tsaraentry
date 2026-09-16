@@ -882,6 +882,12 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
   }
   prbMark("gates+remise check");
 
+  // BL ORIGINE (Kim, 2026-09-16): was the order delivered BEFORE this
+  // save? Read before the puts. The save that records the first Date
+  // livraison also copies the goods (BonLivraisonServer.js -> blSnapshot).
+  const blLivBefore = String(sh.getRange(Math.min.apply(null, targets),
+    C.DATE_LIVRAISON).getDisplayValue() || "").trim() !== "";
+
   targets.forEach(r => {
     function put(col, value, label) {
       if (value === undefined || value === null || value === "") return;
@@ -920,6 +926,22 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
 
   SpreadsheetApp.flush();
   prbMark("remise+flush");
+
+  // BL ORIGINE: AFTER the flush, so the copy is what the sheet holds.
+  // Never fatal: the delivery is saved; a failed copy is returned as
+  // blWarn and shown on screen beside the invoice line.
+  var blWarn = null;
+  if (!blLivBefore && cmdParseDate(f.dateLivraison)) {
+    try {
+      const nSnap = blSnapshot(sh, targets);
+      changed.push("BL origine : " + nSnap + " ligne(s) enregistrée(s)");
+    } catch (err) {
+      blWarn = "Livraison enregistrée, mais version d'origine du bon de livraison " +
+               "NON enregistrée : " + err.message + ". Prévenir Kim.";
+      console.error(blWarn);
+    }
+    prbMark("bl snapshot");
+  }
 
   // Mint the invoice number. THIS IS THE ONLY PLACE IT HAPPENS
   // (2026-08-30, Kim). AutoCommandes no longer mints from onEdit: that
@@ -972,7 +994,8 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
     return {
       rows: targets, changed: changed, facture: null,
       factureNow: sh.getRange(anyRow, C.FACTURE).getDisplayValue() || null,
-      factureWhy: "la commande n'est pas encore reçue"
+      factureWhy: "la commande n'est pas encore reçue",
+      blWarn: blWarn
     };
   }
 
@@ -1008,6 +1031,7 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
 
   return {
     rows: targets, changed: changed, facture: facture,
+    blWarn: blWarn,
     factureNow: factureNow,
     factureWhy: facture ? null
       : (factureNow ? "cette commande a déjà un numéro"
