@@ -998,10 +998,14 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
  * be reactivated. cmdFindOrders skips cancelled rows, so the order
  * disappears from the search as soon as this returns.
  *
- * Stock is not touched here. The engine settles it on its next run: an
- * order it had already deducted is re-credited to the lot exactly once
- * (guarded against a second credit), and an order it never processed
- * simply becomes ineligible, so nothing moves.
+ * Stock (2026-09-16): a row the engine had already deducted is
+ * re-credited to the lot file HERE, at click time, with the engine's
+ * own "Cancelled & re-credited on" stamp in Y — the nightly pass
+ * checks that stamp first, so it never credits the row a second time.
+ * If the re-credit fails (lot file or cell not found), Y stays
+ * unstamped and the nightly pass settles it: the old behaviour is the
+ * fallback. A row the engine never processed simply becomes
+ * ineligible, so nothing moves.
  */
 function cmdCancelOrder(rows) {
   const sh = cmdSheet();
@@ -1029,7 +1033,67 @@ function cmdCancelOrder(rows) {
 
   targets.forEach(function (r) { sh.getRange(r, C.ANNULE).setValue("x"); });
   SpreadsheetApp.flush();
-  return { rows: targets, alreadyCancelled: already };
+
+  // ---- immediate re-credit (2026-09-16) ----
+  // Same resolver, same quantity source and same Y stamp as the
+  // engine's nightly cancellation pass (engine_core.js). Write order
+  // mirrors cmdModifyOrder: stock first, stamp after, each flushed.
+  // AA is already set, so any failure below leaves the row exactly
+  // where the old code left it — settled by the engine tonight.
+  const stock = [];
+  const stampNow = Utilities.formatDate(new Date(), Session.getScriptTimeZone(),
+                                        "yyyy-MM-dd HH:mm");
+  targets.forEach(function (r) {
+    if (already.indexOf(r) !== -1) return;
+    const y = String(sh.getRange(r, C.LOG).getValue() || "");
+    const key = cmdCanonKey(sh.getRange(r, C.LOT).getValue());
+    if (y.indexOf("Processed on") !== 0) {
+      stock.push(key + " : rien n'avait encore \u00e9t\u00e9 d\u00e9duit \u2014 rien \u00e0 recr\u00e9diter.");
+      return;
+    }
+    if (y.indexOf("Cancelled & re-credited on ") !== -1) return;
+    const m = /\[qty=([0-9][0-9.,]*)\]/.exec(y);
+    var qty = m ? cmdToNum(m[1]) : null;
+    if (qty == null || !(qty > 0)) {
+      qty = cmdDeduction(sh.getRange(r, C.ALEVINS_LIVRER).getValue(),
+                         sh.getRange(r, C.POISSON_NB).getValue());
+    }
+    if (qty == null || !(qty > 0)) {
+      stock.push("\u26a0 " + key + " : quantit\u00e9 d\u00e9duite illisible \u2014 le moteur recr\u00e9ditera cette nuit.");
+      return;
+    }
+    const lotNum = key.split("-")[0];
+    const list = getLotFileList();
+    var fileId = null;
+    for (var i = 0; i < list.length; i++) {
+      if (cmdCanonKey(list[i].lotNumber) === lotNum) { fileId = list[i].fileId; break; }
+    }
+    if (!fileId) {
+      stock.push("\u26a0 " + key + " : fichier lot introuvable \u2014 le moteur r\u00e9essaiera cette nuit.");
+      return;
+    }
+    const lotSS = SpreadsheetApp.openById(fileId);
+    const hit = findSubLotColumnByOrderKey(lotSS, key);
+    if (!hit.found) {
+      stock.push("\u26a0 " + key + " : cellule introuvable dans le fichier lot \u2014 le moteur r\u00e9essaiera cette nuit.");
+      return;
+    }
+    const newCount = (Number(hit.count) || 0) + qty;
+    if (hit.source === "GROSS") {
+      lotSS.getSheetByName(LOT_CFG.GROSS_SHEET)
+           .getRange(LOT_CFG.GROSS_ROW_NOMBRE, hit.col).setValue(newCount);
+    } else {
+      lotSS.getSheetByName(hit.source).getRange(hit.row, 2).setValue(newCount);
+    }
+    SpreadsheetApp.flush();
+    sh.getRange(r, C.LOG).setValue(
+      y + " | Cancelled & re-credited on " + stampNow + " [qty=" + qty + "]");
+    SpreadsheetApp.flush();
+    stock.push(key + " : " + Math.round(qty) +
+      " poisson(s) recr\u00e9dit\u00e9(s) dans le fichier lot \u2014 vendables imm\u00e9diatement.");
+  });
+
+  return { rows: targets, alreadyCancelled: already, stock: stock };
 }
 
 /***************************************************************
