@@ -818,6 +818,23 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
     }
   }
 
+  // GATE 3 (Kim, 2026-09-16) — BON DE LIVRAISON EXTERNE IS MANDATORY
+  // TO MARK THE ORDER DELIVERED. No Date livraison (V) without a BL
+  // number: in this save (f.bl) or already in the sheet (col D).
+  // Same re-save rule as GATE 2: only a NEW delivery date is refused.
+  // A row that already carries one (recorded before this rule) stays
+  // re-saveable, or completing its moyen de paiement would be
+  // impossible. A hand edit of col V in the sheet is NOT gated here.
+  if (cmdParseDate(f.dateLivraison) && !String(f.bl || "").trim()) {
+    const firstRow = Math.min.apply(null, targets);
+    const livAlready = sh.getRange(firstRow, C.DATE_LIVRAISON).getDisplayValue();
+    const blAlready = sh.getRange(firstRow, C.BL).getDisplayValue();
+    if (!String(livAlready || "").trim() && !String(blAlready || "").trim()) {
+      throw new Error("Bon de livraison externe obligatoire pour " +
+                      "enregistrer la date de livraison.");
+    }
+  }
+
   // NO ADDRESS GATE HERE (Kim, 2026-09-11): a reception date is saved
   // without the client address. The address is required to PRINT the
   // invoice instead - see factData in FactureServer.js.
