@@ -273,7 +273,7 @@
   let hits = [];               // fulfilment search results
   // Historique > Modifier (Kim, 2026-09-16). fulExact: the search
   // returns only this order, closed or not, until the user searches,
-  // ticks a box, clicks "Afficher la liste" or leaves the tab.
+  // ticks a box, clicks "Fermer" or leaves the tab.
   // fulOpenAfter: open this order's card once the list is drawn.
   let fulExact = '';
   let fulOpenAfter = '';
@@ -3904,8 +3904,8 @@
         if (fulExact) {
           el('hits').insertAdjacentHTML('afterbegin',
             '<div class="warn">Commande ouverte depuis Historique. ' +
-            '<button onclick="fulSearchNew()" style="margin-left:8px;' +
-            'padding:4px 10px;font-size:15px">Afficher la liste</button></div>');
+            '<button class="ghost" onclick="fulSearchNew()" style="margin-left:8px;' +
+            'padding:4px 10px;font-size:15px">Fermer</button></div>');
         }
         if (fulOpenAfter) {
           const openKey = fulOpenAfter;
@@ -4027,15 +4027,10 @@
           '<div><label>Bon de livraison externe</label><input type="text" id="uBl" value="'+esc(o.bl || '')+'"></div>' +
         '</div>' +
         '<label>Remarques</label><input type="text" id="uRemarques" value="'+esc(o.remarques || '')+'">' +
-        // Fermer sits right of Enregistrer, as on the Clients card.
-        // .go carries its own margin-top, so the row uses align-items
-        // rather than a margin of its own.
+        // The bottom Fermer button was removed (Kim, 2026-09-16). The
+        // card closes by clicking its title bar or its summary line.
         '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
           '<button class="go" id="btnFul" onclick="doFulfil()">Enregistrer</button>' +
-          '<button id="btnFulClose" onclick="fulClose()" ' +
-            'style="margin-top:18px;background:#fff;color:#5f6368;' +
-            'border:1px solid #dadce0;border-radius:4px;padding:10px 14px;' +
-            'font-size:17px;cursor:pointer">Fermer</button>' +
         '</div>' +
         // FREEZE REMOVED (Kim, 2026-09-15): Modifier stays on a
         // received order. Annuler is hidden once received (cancel is
