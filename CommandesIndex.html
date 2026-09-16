@@ -3975,6 +3975,8 @@
         ? ' (remise ' + Number(o.remise).toLocaleString('fr-FR') + ' % incluse)' : '');
     // RECU: the edit freeze was removed 2026-09-15 (Kim). recu now
     // only picks the buttons (facture / annuler) and the invoice flow.
+    // Stale lines from a previous card must not drive a save here.
+    modLines = [];
     const recu = String(o.reception || '').trim() !== '';
     const LIV_LABELS = { enlevement: 'Enlèvement à la ferme',
                          environs: 'Livraison environs de la ferme',
@@ -4032,18 +4034,21 @@
         '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
           '<button class="go" id="btnFul" onclick="doFulfil()">Enregistrer</button>' +
         '</div>' +
-        // FREEZE REMOVED (Kim, 2026-09-15): Modifier stays on a
-        // received order. Annuler is hidden once received (cancel is
-        // still refused server-side). Imprimer la facture appears once
-        // received. One row; modZone stays OUTSIDE the flex row: the
-        // edit form is a block, not a third button sharing the line.
+        // RECEIVED = ONE BOX (Kim, 2026-09-16): on a received order
+        // the quantity/price/delivery form is embedded under the card
+        // and the single Enregistrer saves everything, so the Modifier
+        // button is hidden there. On a non-received order the button
+        // stays: it is the only door to those fields. Annuler is
+        // hidden once received (cancel is still refused server-side).
+        // Imprimer la facture appears once received. One row; modZone
+        // stays OUTSIDE the flex row.
         // factPdf is the same server function the Historique tab calls,
         // so there is ONE invoice builder. The button is shown on every
         // received order: factPdf's own refusal (cancelled order, or a
         // client with no Adresse in CRM column M) is printed under it,
         // rather than the button being hidden with no reason given.
         '<div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">' +
-          (RIGHTS.modifier !== false
+          (!recu && RIGHTS.modifier !== false
           ? '<button id="btnMod" onclick="loadModify()" ' +
             'style="background:#fff;color:#1a73e8;border:1px solid #1a73e8;' +
             'border-radius:4px;padding:10px 14px;font-size:17px;cursor:pointer">' +
@@ -4102,6 +4107,11 @@
       el(id).addEventListener('input', fulSyncPaiement);
     });
     fulSyncPaiement();
+
+    // RECEIVED = ONE BOX (Kim, 2026-09-16): embed the quantity/price/
+    // delivery form under the card. doFulfil saves it before the card
+    // fields, so one Enregistrer drives the whole box.
+    if (recu && RIGHTS.modifier !== false) loadModify(true);
 
     // The order box sits under its own summary line. The WhatsApp box
     // is NOT drawn on opening: doFulfil opens it once (Kim, 2026-09-15).
@@ -4197,6 +4207,14 @@
     // Delivered before this save? The WhatsApp box opens only on the
     // save that records the delivery date for the first time.
     const livBefore = String(o.dateLivraison || '').trim() !== '';
+
+    // RECEIVED = ONE BOX (Kim, 2026-09-16): with the embedded form
+    // present and CHANGED, save it first (delivery, prices,
+    // quantities), then run the card save. Untouched form: card save
+    // alone, as fast as before. runFulfil keeps its body's original
+    // indentation so this diff stays readable.
+    var modParts = [];
+    function runFulfil() {
     setStatus('banner', 'Enregistrement…');
 
     google.script.run
@@ -4223,6 +4241,8 @@
               ? 'Numéro facture : <b>' + esc(res.factureNow) + '</b> — ' +
                 esc(res.factureWhy || '')
               : 'Pas de numéro facture — ' + esc(res.factureWhy || ''));
+        const extra = modParts.length
+          ? '<br>' + modParts.map(esc).join('<br>') : '';
 
         // Reopen the order that was just saved. The message is drawn by
         // selectHit like any other opening, so there is ONE path that
@@ -4245,17 +4265,17 @@
           });
         };
         if (!(recuNow && !recuBefore && String(o.orderNumber || '').trim())) {
-          finish({ cls: 'ok', html: line });
+          finish({ cls: 'ok', html: line + extra });
           return;
         }
         setStatus('banner', 'Enregistr\u00e9. Pr\u00e9paration de la facture\u2026');
         google.script.run
           .withSuccessHandler(function (r) {
-            finish({ cls: 'ok', html: line + '<br>Facture : ' +
+            finish({ cls: 'ok', html: line + extra + '<br>Facture : ' +
               '<a href="' + esc(r.url) + '" target="_blank">' + esc(r.name) + '</a>' });
           })
           .withFailureHandler(function (e) {
-            finish({ cls: 'warn', html: line + '<br>Facture non produite : ' + esc(e.message) });
+            finish({ cls: 'warn', html: line + extra + '<br>Facture non produite : ' + esc(e.message) });
           })
           .factPdf(o.orderNumber);
       })
@@ -4271,6 +4291,24 @@
         bl: el('uBl').value,
         remarques: el('uRemarques').value
       });
+    }
+
+    const modReady = modLines.length && el('uModLiv');
+    if (recuBefore && modReady && modFieldsDirty()) {
+      setStatus('banner', 'Enregistrement des quantités et prix…');
+      fulSaveModify(function (parts) {
+        modParts = parts;
+        // Stock may have moved NOW (cmdModifyOrder): refresh the gate
+        // before the card save redraws the screen.
+        loadGateData();
+        runFulfil();
+      }, function (msg) {
+        btn.disabled = false;
+        setStatusAndScroll('err', msg);
+      });
+    } else {
+      runFulfil();
+    }
   }
 
   /**
@@ -4292,7 +4330,7 @@
   var modLines = [];
   var modDelivered = false;
 
-  function loadModify() {
+  function loadModify(embedded) {
     const o = hits.filter(h => h.key === selectedKey)[0];
     if (!o) return;
     // Freeze removed 2026-09-15 (Kim): quantity, lot and price stay
@@ -4302,7 +4340,7 @@
     // After delivery a changed fry number is the number RECEIVED and is
     // taken from stock without the +5 % (server: cmdModifyOrder).
     const livree = String(o.dateLivraison || '').trim() !== '';
-    el('btnMod').disabled = true;
+    if (el('btnMod')) el('btnMod').disabled = true;
     setStatus('banner', 'Chargement\u2026');
     google.script.run
       .withSuccessHandler(lines => {
@@ -4310,14 +4348,17 @@
         modLines = lines;
         const qtyOn = !modDelivered;
         const lv = String(o.livraison || '').trim() || 'enlevement';
-        el('modZone').className = 'popup';
+        el('modZone').className = embedded ? '' : 'popup';
         el('modZone').innerHTML =
-          '<div class="card">' +
+          (embedded
+          ? '<div style="border-top:2px solid #dadce0;margin-top:14px">' +
+            '<h3 style="margin-top:10px">Quantités, prix et livraison</h3>'
+          : '<div class="card">' +
             '<button class="popX" onclick="closeModify()" ' +
-              'aria-label="Fermer">\u00d7</button>' +
-            '<h3>Modifier la commande \u2014 ' +
-              esc(o.orderNumber || '(sans num\u00e9ro)') + ' \u00b7 ' +
-              esc(o.client) + '</h3>' +
+              'aria-label="Fermer">×</button>' +
+            '<h3>Modifier la commande — ' +
+              esc(o.orderNumber || '(sans numéro)') + ' · ' +
+              esc(o.client) + '</h3>') +
           '<div class="row" style="margin-top:8px">' +
             '<div><label>Livraison</label>' +
               '<select id="uModLiv" onchange="modLivChanged(true)">' +
@@ -4370,6 +4411,7 @@
           (qtyOn ? '' :
             '<div class="warn">Commande livr\u00e9e \u2014 seuls les prix ' +
             'sont modifiables.</div>') +
+          (embedded ? '' :
           '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
             '<button class="go" id="btnModSave" onclick="doModify()">' +
               'Enregistrer les modifications</button>' +
@@ -4377,12 +4419,12 @@
               'style="margin-top:18px;background:#fff;color:#5f6368;' +
               'border:1px solid #dadce0;border-radius:4px;padding:10px 14px;' +
               'font-size:17px;cursor:pointer">Fermer</button>' +
-          '</div>' +
+          '</div>') +
           '</div>';
         modLivChanged();
       })
       .withFailureHandler(e => {
-        el('btnMod').disabled = false;
+        if (el('btnMod')) el('btnMod').disabled = false;
         setStatusAndScroll('err', esc(e.message));
       })
       .cmdGetOrderLines(o.rows);
@@ -4442,22 +4484,24 @@
     fld.value = pm;
   }
 
-  function doModify() {
-    if (!modLines.length) return;
-    const btn = el('btnModSave');
-    btn.disabled = true;
-    setStatus('banner', 'Enregistrement\u2026');
+  /**
+   * Save the Modifier form: delivery, then prices, then quantities.
+   * One implementation, two callers (Kim, 2026-09-16):
+   *   - doModify: the popup's own button, on a non-received order.
+   *   - doFulfil: the embedded form on a received order, before the
+   *     card save, so ONE Enregistrer drives the whole box.
+   * Delivery first: its write is idempotent, so a refusal of prices
+   * or quantities later can be corrected and re-saved without the
+   * delivery fields drifting. onDone(parts) gets the confirmation
+   * lines; onFail(msg) gets a ready-to-show message that names any
+   * write already landed.
+   */
+  function fulSaveModify(onDone, onFail) {
     const o = hits.filter(h => h.key === selectedKey)[0];
-    if (!o) { btn.disabled = false; return; }
-    // Delivery first. Its write is idempotent, so a refusal of prices
-    // or quantities later can be corrected and re-saved without the
-    // delivery fields drifting.
+    if (!o || !modLines.length) { onFail('Commande introuvable.'); return; }
     google.script.run
-      .withSuccessHandler(function (dres) { modSavePrices(dres, btn); })
-      .withFailureHandler(function (e) {
-        btn.disabled = false;
-        setStatusAndScroll('err', esc(e.message));
-      })
+      .withSuccessHandler(function (dres) { msmPrices(dres, onDone, onFail); })
+      .withFailureHandler(function (e) { onFail(esc(e.message)); })
       .cmdUpdateDelivery({
         rows: o.rows,
         livraison: (el('uModLiv') || {}).value,
@@ -4467,8 +4511,8 @@
   }
 
   /** Prices, then quantities — rules unchanged from before the
-   *  delivery stage was added. dres rides along into modDone. */
-  function modSavePrices(dres, btn) {
+   *  delivery stage was added. dres rides along into msmDone. */
+  function msmPrices(dres, onDone, onFail) {
     // Empty price fields are NOT sent. cmdUpdateOrderPrices refuses an
     // empty price, so sending them would block a quantity-only edit on
     // a line whose price is not set yet.
@@ -4477,10 +4521,8 @@
       .filter(p => String(p.prix).trim() !== '');
 
     if (!modPrices.length) {
-      // Delivered + no prices typed: the delivery write above is the
-      // whole edit — a legitimate save, no longer an error.
-      if (modDelivered) { modDone(null, null, dres); return; }
-      modSaveQty(null, btn, dres);
+      if (modDelivered) { msmDone(null, null, dres, onDone); return; }
+      msmQty(null, dres, onDone, onFail);
       return;
     }
 
@@ -4488,18 +4530,15 @@
       .withSuccessHandler(pres => {
         // Delivered: the quantity fields were never rendered and the
         // server would refuse them. Stop here.
-        if (modDelivered) { modDone(pres, null, dres); return; }
-        modSaveQty(pres, btn, dres);
+        if (modDelivered) { msmDone(pres, null, dres, onDone); return; }
+        msmQty(pres, dres, onDone, onFail);
       })
-      .withFailureHandler(e => {
-        btn.disabled = false;
-        setStatusAndScroll('err', esc(e.message));
-      })
+      .withFailureHandler(e => { onFail(esc(e.message)); })
       .cmdUpdateOrderPrices({ lines: modPrices });
   }
 
   /** Quantity call. pres is the price result, or null if none was sent. */
-  function modSaveQty(pres, btn, dres) {
+  function msmQty(pres, dres, onDone, onFail) {
     const lines = modLines.map((ln, i) => {
       const q = el('modQ' + i).value;
       const p = el('modP' + i).value;
@@ -4511,38 +4550,70 @@
         : { row: ln.row, kg: q, pm: p, lot: lot };
     });
     google.script.run
-      .withSuccessHandler(res => modDone(pres, res, dres))
+      .withSuccessHandler(res => msmDone(pres, res, dres, onDone))
       .withFailureHandler(e => {
-        btn.disabled = false;
         // If a price was already written, say so, or the next attempt
         // is made against a state the user does not know.
-        setStatusAndScroll('err',
-          (pres ? 'Prix enregistr\u00e9(s). Quantit\u00e9s refus\u00e9es : ' : '') +
-          esc(e.message));
+        onFail((pres ? 'Prix enregistré(s). Quantités refusées : ' : '') +
+               esc(e.message));
       })
       .cmdModifyOrder({ lines: lines });
   }
 
-  /**
-   * One confirmation for both calls. The stock lines state, per lot,
-   * whether the correction happened now, happens tonight, or FAILED
-   * and needs Kim. changed/totals state what the price write did.
-   * Nothing is swallowed into a generic "OK".
-   */
-  function modDone(pres, res, dres) {
-    // A quantity edit moved stock NOW (see cmdModifyOrder). Without this
-    // the freed fish stay invisible until a reload, and the next order
-    // on the same lot is refused against numbers the worker cannot see.
-    loadGateData();
-    const parts = []
+  /** Collect the confirmation lines for both callers. */
+  function msmDone(pres, res, dres, onDone) {
+    onDone([]
       .concat((dres && dres.montant) ? [dres.montant] : [])
       .concat((pres && pres.changed) || [])
       .concat((pres && pres.totals) || [])
       .concat((res && res.stock) || [])
-      .concat((res && res.warnings) || []);
-    doSearch({ cls: 'ok',
-      html: 'Commande modifi\u00e9e.' +
-            (parts.length ? '<br>' + parts.map(esc).join('<br>') : '') });
+      .concat((res && res.warnings) || []));
+  }
+
+  /**
+   * Did the user change anything in the embedded form? Compared as
+   * trimmed strings against the loaded state. A false positive only
+   * costs an idempotent re-write, never a wrong value.
+   */
+  function modFieldsDirty() {
+    const o = hits.filter(h => h.key === selectedKey)[0];
+    if (!o || !el('uModLiv')) return false;
+    const t = function (v) { return String(v == null ? '' : v).trim(); };
+    if (t(el('uModLiv').value) !== (t(o.livraison) || 'enlevement')) return true;
+    if (t(el('uModLiv').value) === 'ambohim' &&
+        t((el('uModKm') || {}).value) !== t(o.km)) return true;
+    if (t((el('uModCout') || {}).value) !== t(o.coutLivraison)) return true;
+    for (var i = 0; i < modLines.length; i++) {
+      const ln = modLines[i];
+      if (t((el('modLot' + i) || {}).value) !== '') return true;
+      if (t((el('modQ' + i) || {}).value) !== t(ln.isAlevins ? ln.nombre : ln.kg)) return true;
+      if (t((el('modP' + i) || {}).value) !== t(ln.isAlevins ? ln.pmAl : ln.pmGr)) return true;
+      if (t((el('modPrix' + i) || {}).value) !== t(ln.prix)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * One confirmation for the popup save. The stock lines state, per
+   * lot, whether the correction happened now, happens tonight, or
+   * FAILED and needs Kim. Nothing is swallowed into a generic "OK".
+   * A quantity edit moved stock NOW (see cmdModifyOrder), so the gate
+   * data is reloaded before the redraw.
+   */
+  function doModify() {
+    if (!modLines.length) return;
+    const btn = el('btnModSave');
+    btn.disabled = true;
+    setStatus('banner', 'Enregistrement…');
+    fulSaveModify(function (parts) {
+      loadGateData();
+      doSearch({ cls: 'ok',
+        html: 'Commande modifiée.' +
+              (parts.length ? '<br>' + parts.map(esc).join('<br>') : '') });
+    }, function (msg) {
+      btn.disabled = false;
+      setStatusAndScroll('err', msg);
+    });
   }
 
   /**
