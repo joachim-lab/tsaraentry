@@ -271,6 +271,12 @@
   let lines = [{}];            // create mode: one line per lot
   let mode = 'ful';
   let hits = [];               // fulfilment search results
+  // Historique > Modifier (Kim, 2026-09-16). fulExact: the search
+  // returns only this order, closed or not, until the user searches,
+  // ticks a box, clicks "Afficher la liste" or leaves the tab.
+  // fulOpenAfter: open this order's card once the list is drawn.
+  let fulExact = '';
+  let fulOpenAfter = '';
   let selectedKey = null;
 
   function el(id) { return document.getElementById(id); }
@@ -430,6 +436,7 @@
     el('paneHist').style.display = (m === 'hist' ? '' : 'none');
     el('panePrix').style.display = (m === 'prix' ? '' : 'none');
     el('paneCli').style.display = (m === 'cli' ? '' : 'none');
+    if (m !== 'ful') fulExact = '';
     setStatus('', '');
     // 2026-08-30: refresh on EVERY visit, not only the first. The list
     // was built once and then only unhidden, so an order saved in the
@@ -2431,7 +2438,7 @@
       '<th style="' + cell + '">Quantité</th>' +
       '<th style="' + cell + '">Montant</th>' +
       '<th style="' + cell + '">Statut</th>' +
-      '<th style="' + cell + '">Facture</th></tr>';
+      '<th style="' + cell + '">Actions</th></tr>';
 
     rows.forEach(function (o, i) {
       total += Number(o.montantAr || 0);
@@ -2449,6 +2456,11 @@
         '<td style="' + cell + ';white-space:nowrap">' +
           ((o.orderNumber && String(o.facture || '').trim() && o.statut !== 'Annulé')
             ? '<button style="padding:4px 10px;font-size:15px" onclick="histFacture(this,' + i + ')">Imprimer</button>'
+            : '') +
+          // Modifier (Kim, 2026-09-16): opens the order card in
+          // Paiement & livraison, even when delivered and paid.
+          ((o.orderNumber && o.statut !== 'Annulé' && RIGHTS.ful !== false)
+            ? ' <button style="padding:4px 10px;font-size:15px" onclick="histModify(' + i + ')">Modifier</button>'
             : '') + '</td>' +
         '</tr>';
     });
@@ -2501,6 +2513,18 @@
         setStatusAndScroll('err', esc(e.message));
       })
       .factPdf(o.orderNumber);
+  }
+
+  // ---------- Historique: Modifier (Kim, 2026-09-16) ----------
+  // Opens the order in Paiement & livraison, in the usual card: same
+  // edit rules, same Enregistrer, same Imprimer la facture. switchMode
+  // runs the search; doSearch opens the card once the list is drawn.
+  function histModify(i) {
+    const o = histShown[i];
+    if (!o) return;
+    fulExact = o.key;
+    fulOpenAfter = o.key;
+    switchMode('ful');
   }
 
   // ---------- Historique: rapport (Kim, 2026-09-11) ----------
@@ -3610,7 +3634,7 @@
           '<div><label>Recherche (n° commande, client ou lot)</label>' +
             '<input type="text" id="ficherche" placeholder="ex: AL-26-155 ou Adelaiade"></div>' +
           '<div style="flex:0 0 220px"><label>&nbsp;</label>' +
-            '<button class="primary" style="width:100%" onclick="doSearch()">Rechercher</button></div>' +
+            '<button class="primary" style="width:100%" onclick="fulSearchNew()">Rechercher</button></div>' +
         '</div>' +
         // Two columns, one block (Kim 2026-09-09; totals moved into
         // the collapsible summary card below, 2026-09-11). Left: the
@@ -3678,14 +3702,14 @@
       '<div id="fulForm"></div>' +
       '<div id="waZone"></div>' +
       '<div id="hits"></div>';
-    el('ficherche').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
-    el('fDeliveredUnpaid').addEventListener('change', () => doSearch());
-    el('fUndelivered').addEventListener('change', () => doSearch());
+    el('ficherche').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); fulSearchNew(); } });
+    el('fDeliveredUnpaid').addEventListener('change', () => fulSearchNew());
+    el('fUndelivered').addEventListener('change', () => fulSearchNew());
     // A re-search, not a local redraw. The list is capped at 25 orders
     // server-side, so filtering the rows already on screen would filter
     // the cap instead of the year. See patch_fultype_srv_20260907r.py.
-    el('fAlevins').addEventListener('change', () => doSearch());
-    el('fPoisson').addEventListener('change', () => doSearch());
+    el('fAlevins').addEventListener('change', () => fulSearchNew());
+    el('fPoisson').addEventListener('change', () => fulSearchNew());
 
     // One delegated listener on the container: survives every re-render
     // of the results list, so nothing has to be re-attached.
@@ -3813,6 +3837,12 @@
     return bits.length ? ' \u2014 ' + bits.join(' + ') : '';
   }
 
+  /** A search the USER starts: leaves the Historique single-order view. */
+  function fulSearchNew() {
+    fulExact = '';
+    doSearch();
+  }
+
   function doSearch(keepMsg, done) {
     setStatus('banner', 'Recherche…');
     fulLoadPool();
@@ -3833,7 +3863,9 @@
         // empty list with no explanation reads as a broken search.
         const noCat  = !el('fDeliveredUnpaid').checked && !el('fUndelivered').checked;
         const noType = !el('fAlevins').checked && !el('fPoisson').checked;
-        const empty = noCat
+        const empty = fulExact
+          ? 'Commande introuvable (annulée ?).'
+          : noCat
           ? 'Cocher au moins une case : livrées et non-payées, ou non-livrées.'
           : noType
           ? 'Cocher Alevins ou Poisson pour afficher des commandes.'
@@ -3869,6 +3901,17 @@
               '</div>').join('')
           : '<div class="warn">' + esc(empty) + '</div>';
         fulPickRefresh();
+        if (fulExact) {
+          el('hits').insertAdjacentHTML('afterbegin',
+            '<div class="warn">Commande ouverte depuis Historique. ' +
+            '<button onclick="fulSearchNew()" style="margin-left:8px;' +
+            'padding:4px 10px;font-size:15px">Afficher la liste</button></div>');
+        }
+        if (fulOpenAfter) {
+          const openKey = fulOpenAfter;
+          fulOpenAfter = '';
+          if (el('hit_' + openKey)) selectHit(openKey);
+        }
         // Runs only once the list exists, so anything that anchors
         // itself to a summary line finds one.
         if (done) done();
@@ -3876,7 +3919,7 @@
       .withFailureHandler(e => setStatus('err', esc(e.message)))
       .cmdFindOrders(el('ficherche').value,
         el('fDeliveredUnpaid').checked, el('fUndelivered').checked,
-        el('fAlevins').checked, el('fPoisson').checked);
+        el('fAlevins').checked, el('fPoisson').checked, false, fulExact);
   }
 
   /**

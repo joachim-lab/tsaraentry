@@ -379,9 +379,15 @@ function cmdNumFromDisplay_(s) {
  * `noCap` (fulReport only): return EVERY matching order instead of the
  * newest 25. Whatever the cap, `totals` and `counts` always cover every
  * match — the list alone is capped.
+ *
+ * `exactKey` (Historique > Modifier, Kim 2026-09-16): return ONLY the
+ * order with that key, closed (delivered and paid) or not. The query,
+ * the closed rule and the four boxes are all ignored. A cancelled order
+ * is still never returned: its rows are skipped before grouping.
  */
 function cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
-                       wantAlevins, wantPoisson, noCap) {
+                       wantAlevins, wantPoisson, noCap, exactKey) {
+  const exact = String(exactKey || "").trim();
   const sh = cmdSheet();
   const C = CMD_CFG.COL;
   const lastRow = findNextCommandeRow(sh) - 1;
@@ -495,7 +501,8 @@ function cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
   for (let i = order.length - 1; i >= 0; i--) {              // newest first
     const g = groups[order[i]];
 
-    if (q) {
+    if (exact && g.key !== exact) continue;
+    if (q && !exact) {
       const hay = (g.orderNumber + " " + g.client + " " + g.lots.join(" ")).toLowerCase();
       if (hay.indexOf(q) === -1) continue;
     }
@@ -504,7 +511,7 @@ function cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
 
     // Closed. Counted so the screen can say WHY nothing is listed rather
     // than reporting a search that found nothing.
-    if (delivered && paid) { closedMatches++; continue; }
+    if (delivered && paid && !exact) { closedMatches++; continue; }
 
     // Category totals over every open order that matches the query,
     // whatever is ticked and beyond the 25-order cap below. They
@@ -524,7 +531,7 @@ function cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
     // not silently fall back to showing everything.
     const keep = (wantDeliveredUnpaid && delivered) ||
                  (wantUndelivered && !delivered);
-    if (!keep) continue;
+    if (!keep && !exact) continue;
 
     // Content filter, mirroring Historique: EITHER content ticked shows
     // the order, so a mixed alevins+poisson order stays visible under
@@ -541,7 +548,7 @@ function cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
     // order nobody can see is money nobody can mark paid.
     const hasAlevins = g.alevinsTotal > 0;
     const hasPoisson = g.poissonKgTotal > 0;
-    if (hasAlevins || hasPoisson) {
+    if ((hasAlevins || hasPoisson) && !exact) {
       if (!((wantAlevins && hasAlevins) || (wantPoisson && hasPoisson))) continue;
     }
 
@@ -1198,9 +1205,9 @@ function cmdGetOrderLines(rows) {
  * A cell already holding a formula is REFUSED, not overwritten. A
  * hand-built price formula must not be destroyed by a farm-floor edit.
  *
- * Delivered-and-paid orders never reach this function: cmdFindOrders
- * drops them before they can be selected. Cancelled rows are refused
- * here as well, because a client can call any server function.
+ * Delivered-and-paid orders reach this function only through
+ * Historique > Modifier (cmdFindOrders exactKey, 2026-09-16). Cancelled
+ * rows are refused here, because a client can call any server function.
  *
  * NO trace of the tariff override is recorded. Kim decided this on
  * 2026-09-03. Do not add a stamp without asking him.
@@ -5022,11 +5029,12 @@ function cmdRecordFulfilment(rows, payload) {
 }
 
 function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
-                       wantAlevins, wantPoisson, noCap) {
-  var own = prbStart("cmdFindOrders", "q=" + (query ? 1 : 0) + (noCap ? " noCap" : ""));
+                       wantAlevins, wantPoisson, noCap, exactKey) {
+  var own = prbStart("cmdFindOrders", "q=" + (query ? 1 : 0) + (noCap ? " noCap" : "") +
+                     (exactKey ? " exact" : ""));
   try {
     return cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
-                                wantAlevins, wantPoisson, noCap);
+                                wantAlevins, wantPoisson, noCap, exactKey);
   } finally { prbEnd(own); }
 }
 
