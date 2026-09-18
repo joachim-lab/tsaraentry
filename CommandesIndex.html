@@ -80,6 +80,15 @@
        a laptop and scrolls sideways on a phone. The page body itself
        never scrolls horizontally. */
     .demWrap { overflow-x: auto; width: 100%; }
+    /* Commentaires cell: free text, and the only column with no
+       natural width. Uncapped, one long comment stretched the whole
+       table and the tab scrolled sideways while every other tab kept
+       its width (Kim, 2026-09-18). The cap sits on a div INSIDE the
+       cell, not on the td: a td's max-width is advisory in an
+       auto-layout table, a block's is not. overflow-wrap: anywhere
+       also breaks a comment typed as one long word. */
+    .demComm { max-width: 320px; white-space: normal;
+               overflow-wrap: anywhere; }
     /* Sheet is wide for the two big tables (Dem, Hist); the form panes keep
        the old 820px column (788px content), centred under the tabs. */
     #paneNew, #paneFul, #paneRes, #paneRec, #panePrix, #paneCli { max-width: 788px; margin: 0 auto; }
@@ -1646,7 +1655,8 @@
               ? Math.round(r.nombre * r.poids / 100) / 10 : '') + '</td>' : '') +
         demPrixCell(r) +
         '<td style="padding:6px 8px;border:1px solid #dadce0">' + (r.poids == null ? '' : esc(r.poids)) + '</td>' +
-        '<td style="padding:6px 8px;border:1px solid #dadce0">' + esc(r.commentaires) + '</td>' +
+        '<td style="padding:6px 8px;border:1px solid #dadce0">' +
+          '<div class="demComm">' + esc(r.commentaires) + '</div></td>' +
         (demStock ? demDispoCell(r) : '') +
         '<td style="padding:6px 8px;border:1px solid #dadce0;white-space:nowrap">' +
           '<button class="demBtn" onclick="demMove(' + r.row + ',-1)" title="Monter"' +
