@@ -3599,6 +3599,24 @@ function testDemCheckStock() {
   });
 }
 
+/** The weights on offer for a PM line: "0,32 g, 10,33 g". Same list
+ *  and same wording as the screen (Kim, 2026-09-18). */
+function demPmList(proche) {
+  const out = [];
+  (proche || []).forEach(function (l) {
+    const t = demFmtPm(l.pm) + " g";
+    if (out.indexOf(t) < 0) out.push(t);
+  });
+  return out.join(", ");
+}
+
+/** French decimal, and enough digits to tell fry weights apart. */
+function demFmtPm(n) {
+  if (n == null || !isFinite(n)) return "—";
+  const r = Math.abs(n) < 1 ? Number(n.toFixed(4)) : Math.round(n * 100) / 100;
+  return String(r).replace(".", ",");
+}
+
 /** One-line verdict, shared by the editor tests and the mail. */
 function demVerdictText(d, v) {
   if (!v.statut) return "— (ligne incomplète)";
@@ -3609,12 +3627,11 @@ function demVerdictText(d, v) {
   }
   if (v.statut === "PM") {
     if (v.proche && v.proche.length) {
-      return "PM PAS DISPONIBLE  le plus proche : " + v.proche.map(function (l) {
-        return l.lot + " (" + l.nb + " à " + l.pm + " g)";
-      }).join(", ");
+      return "DISPONIBLE MAIS PAS AU POIDS DEMANDÉ  disponible : " +
+             demPmList(v.proche);
     }
-    return "PM PAS DISPONIBLE  " + v.bande + " à " + d.poids + " g ±" +
-           Math.round(DEM_PM_TOL * 100) + " %";
+    return "DISPONIBLE MAIS PAS AU POIDS DEMANDÉ  " + v.bande + " à " +
+           d.poids + " g ±" + Math.round(DEM_PM_TOL * 100) + " %";
   }
   return "INDISPONIBLE  manque " + v.manque;
 }
@@ -3624,7 +3641,8 @@ function demVerdictText(d, v) {
  *
  * Once a night: run demCheckStock. If ANY pré-commande is new or has
  * a different status than at the last run, mail the whole list in
- * three sections - Disponible, PM pas disponible, Indisponible - with
+ * three sections - Disponible, Disponible mais pas au poids demandé,
+ * Indisponible - with
  * the changed lines marked. No change overnight, no mail.
  *
  * HOUR 7, one hour after refreshNotSellableMap at 6. demCheckStock
@@ -3672,7 +3690,7 @@ function demGetNotified() {
  */
 function demStatutLabel(st) {
   return st === "DISPONIBLE" ? "Disponible"
-       : st === "PM"         ? "PM pas disponible"
+       : st === "PM"         ? "Disponible mais pas au poids demandé"
        : st === "INDISPONIBLE" ? "Indisponible" : "—";
 }
 
@@ -3718,7 +3736,7 @@ function demBuildReport() {
               INDISPONIBLE: sections.INDISPONIBLE.length };
 
   var body = "Pré-commandes — état du jour   (" + changed + " changement(s))\n\n";
-  [["DISPONIBLE", "DISPONIBLES"], ["PM", "PM PAS DISPONIBLE"],
+  [["DISPONIBLE", "DISPONIBLES"], ["PM", "DISPONIBLE MAIS PAS AU POIDS DEMANDÉ"],
    ["INDISPONIBLE", "INDISPONIBLES"]].forEach(function (p) {
     body += p[1] + " (" + n[p[0]] + ")\n" +
             (sections[p[0]].length ? sections[p[0]].join("\n") : "  (aucune)\n") + "\n";

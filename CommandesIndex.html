@@ -1310,16 +1310,28 @@
       '<span id="floorWrap' + sfx + '" class="floorWrap"></span></div>';
   }
 
-  /** Both pools in one sentence. '' until a check has run. */
-  function stockPoolText() {
+  /**
+   * The pool, in one sentence. '' until a check has run.
+   *
+   * `type` names the ONE pool to show: 'Alevins' or 'Poisson'. The
+   * Pré-commandes bar passes the tab it is on, so each tab reads its
+   * own figure and nothing else (Kim, 2026-09-18). Called with no type
+   * — Nouvelle commande, Récurrentes — it still shows both, because
+   * those bars serve an order of either kind.
+   */
+  function stockPoolText(type) {
     if (!demPools) return '';
-    // Two numbers, because they answer two questions: how many fish are
-    // in the water, and how many a client may order — the second is the
-    // first divided by the +5 % counted out at delivery. (2026-09-12)
-    return 'Disponible : ' + fmtNum(demPools.Alevins) + ' alevins' +
+    const fry = 'Disponible : ' + fmtNum(demPools.Alevins) + ' alevins';
+    const kg  = fmtNum(demPools.Poisson) + ' kg' +
+                (demGrBlock != null ? ' (&ge; ' + demGrBlock + ' g)' : '');
+    if (type === 'Alevins') return fry;
+    if (type === 'Poisson') return 'Total disponible : ' + kg;
+    // Both: the fry figure keeps its "commandables" reading — the
+    // number a client may write on an order, the pool divided by the
+    // +5 % counted out at delivery. (2026-09-12)
+    return fry +
            ' (commandables : ' + fmtNum(Math.floor(demPools.Alevins / 1.05)) + ')' +
-           ' &nbsp;&middot;&nbsp; ' + fmtNum(demPools.Poisson) + ' kg' +
-           (demGrBlock != null ? ' (&ge; ' + demGrBlock + ' g)' : '');
+           ' &nbsp;&middot;&nbsp; ' + kg;
   }
 
   /** The floor field for one bar. Blank until a check has run. */
@@ -1340,7 +1352,11 @@
       var p = el('pool' + sfx);
       if (p) p.innerHTML = demPools ? stockPoolText() : '';
       var f = el('floorWrap' + sfx);
-      if (f) f.innerHTML = floorFieldHtml('flr' + sfx);
+      // The floor is the grossis sale weight. On the Pré-commandes bar
+      // it shows on the Poisson tab only (Kim, 2026-09-18): the alevins
+      // figure carries no "≥ x g", so the box explained nothing there.
+      if (f) f.innerHTML = (sfx === 'Dem' && demType !== 'Poisson')
+        ? '' : floorFieldHtml('flr' + sfx);
     });
     demPoolLine();
   }
@@ -1382,7 +1398,7 @@
     const n = el('demPool');
     if (!n) return;
     if (!demPools) { n.textContent = ''; return; }
-    var h = stockPoolText();
+    var h = stockPoolText(demType);
     // What this tab's queue cannot deliver for lack of fish. Only
     // INDISPONIBLE counts: a PM row has the fish at the wrong size,
     // which is not "too little stock". Alevins tab totals fish,
@@ -1547,14 +1563,19 @@
         }).join(', ')) + '</div></td>';
     }
     if (v.statut === 'PM') {
-      // The nearest lots by weight, not the size of the shortfall: the
-      // question this cell has to answer is "which lot instead?".
-      var near = (v.proche && v.proche.length)
-        ? 'le plus proche : ' + esc(v.proche.map(function (l) {
-            return l.lot + ' (' + fmtNum(l.nb) + ' à ' + fmtPm(l.pm) + ' g)';
-          }).join(', '))
+      // The weights on offer, not the lots and not the shortfall: the
+      // question this cell has to answer is "at what weight, then?".
+      // Identical weights are listed once (Kim, 2026-09-18).
+      var pms = [];
+      (v.proche || []).forEach(function (l) {
+        var t = fmtPm(l.pm) + ' g';
+        if (pms.indexOf(t) < 0) pms.push(t);
+      });
+      var near = pms.length
+        ? 'disponible : ' + esc(pms.join(', '))
         : fmtNum(v.bande) + ' à ' + esc(r.poids) + ' g ±' + demTol + ' %';
-      return '<td style="' + base + ';color:#e37400;font-weight:bold">PM pas disponible' +
+      return '<td style="' + base + ';color:#e37400;font-weight:bold">' +
+        'Disponible mais pas au poids demandé' +
         sub + near + '</div></td>';
     }
     return '<td style="' + base + ';color:#d93025;font-weight:bold">Indisponible' +
