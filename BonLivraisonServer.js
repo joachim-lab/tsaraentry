@@ -563,7 +563,7 @@ function testBonLivraison() {
   const snap = SpreadsheetApp.openById(CMD_CFG.SS_ID).getSheetByName(BL_CFG.SNAP_SHEET);
   Logger.log(snap ? "Onglet « BL origine » : " + Math.max(0, snap.getLastRow() - 1) + " ligne(s)."
                   : "Onglet « BL origine » ABSENT : lancer blSetup.");
-  const o = cmdFindOrders("", true, false, true, true, true).orders.filter(function (x) {
+  const o = cmdFindOrders("", null, true, true, true).orders.filter(function (x) {
     return String(x.dateLivraison || "").trim() && String(x.bl || "").trim();
   })[0];
   if (!o) { Logger.log("Aucune commande livrée avec un N° BL dans la liste."); return; }

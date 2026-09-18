@@ -362,14 +362,30 @@ function cmdNumFromDisplay_(s) {
 }
 
 /**
- * Search open orders. An order is DELIVERED when it has a delivery date
- * (col V) and PAID when it has a payment date (col U); "livré" (col W) is
- * a formula from V, so V is the truth. Orders both delivered and paid are
- * closed and never listed. The two flags narrow the rest:
- *   wantDeliveredUnpaid — delivered, not paid
- *   wantUndelivered     — not delivered
- * Both flags list both groups. NEITHER flag lists nothing: each flag
- * INCLUDES a category, it does not exclude one.
+ * The name of one order state, from its three steps. One source for
+ * the empty-list message and for the Statut column of the printout.
+ */
+function cmdStateLabel(delivered, received, paid) {
+  if (!delivered) return paid ? "payée, non livrée" : "non livrée";
+  if (!received)  return paid ? "payée, non reçue" : "livrée, non reçue";
+  return paid ? "livrée et payée" : "reçue, non payée";
+}
+
+/**
+ * Search orders. An order is DELIVERED when it has a delivery date
+ * (col V), RECEIVED when it has a reception date (col AE) and PAID when
+ * it has a payment date (col U); "livré" (col W) is a formula from V, so
+ * V is the truth.
+ *
+ * `st` is the STATE the screen asks for (Kim, 2026-09-18):
+ *   { liv: bool, rec: bool, pay: bool }
+ * Each field is one step and says whether that step is DONE. The three
+ * are read together, so they name ONE exact state rather than including
+ * a category: { liv:false, rec:false, pay:false } is the orders not yet
+ * shipped, { liv:true, rec:true, pay:false } the ones received and still
+ * to pay. Every combination is reachable and none is hidden by a rule
+ * the screen does not show.
+ * `st` null or omitted filters no state (internal callers).
  *
  * wantAlevins / wantPoisson narrow that list by CONTENT. An order shows
  * when either of the things it holds is ticked, so a mixed order stays
@@ -382,11 +398,11 @@ function cmdNumFromDisplay_(s) {
  *
  * `exactKey` (Historique > Modifier, Kim 2026-09-16): return ONLY the
  * order with that key, closed (delivered and paid) or not. The query,
- * the closed rule and the four boxes are all ignored. A cancelled order
+ * the state and content boxes are all ignored. A cancelled order
  * is still never returned: its rows are skipped before grouping.
  */
-function cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
-                       wantAlevins, wantPoisson, noCap, exactKey) {
+function cmdFindOrdersPrbBody(query, st, wantAlevins, wantPoisson,
+                       noCap, exactKey) {
   const exact = String(exactKey || "").trim();
   const sh = cmdSheet();
   const C = CMD_CFG.COL;
@@ -394,20 +410,22 @@ function cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
   prbMark("find:open+scan");
   const zero = function () { return { kg: 0, al: 0, ar: 0 }; };
   // `selected` (Kim 2026-09-15): kg / alevins / Ar over the orders the
-  // four boxes and the query SELECT, uncapped — the summary header
+  // five boxes and the query SELECT, uncapped — the summary header
   // shows it without opening the card. Unlike the two category totals,
   // it follows the checkboxes.
-  const totals = { deliveredUnpaid: zero(), undelivered: zero(), selected: zero() };
+  const totals = { notShipped: zero(), shippedNotReceived: zero(),
+                   receivedNotPaid: zero(), selected: zero() };
   // Counts the order-TYPE breakdown of the list this call returns, e.g.
   // "12 commandes (2 alevins, 10 poisson)" (Kim 2026-09-09). Filled in
-  // below, after the same delivered/undelivered + Alevins/Poisson
+  // below, after the same state + Alevins/Poisson
   // filters as `out`, but BEFORE the 25-order cap -- like the kg/al/ar
   // totals above, it must count every matching order, not just the
   // page shown. total can exceed alv+pois+mix by the rare order that
   // carries neither quantity (see the "exempt" comment below).
   const counts = { total: 0, alv: 0, pois: 0, mix: 0 };
   if (lastRow < CMD_CFG.START_ROW) {
-    return { orders: [], closedMatches: 0, totals: totals, counts: counts };
+    return { orders: [], otherState: 0, otherLabel: "",
+             totals: totals, counts: counts };
   }
 
   const n = lastRow - CMD_CFG.START_ROW + 1;
@@ -497,7 +515,8 @@ function cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
   }
 
   const out = [];
-  let closedMatches = 0;
+  let otherState = 0;
+  let otherLabel = "";
   for (let i = order.length - 1; i >= 0; i--) {              // newest first
     const g = groups[order[i]];
 
@@ -507,31 +526,36 @@ function cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
       if (hay.indexOf(q) === -1) continue;
     }
     const delivered = String(g.dateLivraison || "").trim() !== "";
+    const received  = String(g.reception || "").trim() !== "";
     const paid      = String(g.paiement || "").trim() !== "";
 
-    // Closed. Counted so the screen can say WHY nothing is listed rather
-    // than reporting a search that found nothing.
-    if (delivered && paid && !exact) { closedMatches++; continue; }
+    // Category totals over every UNPAID order that matches the query,
+    // whatever is ticked and beyond the 25-order cap below. Three
+    // disjoint steps of one pipeline: they describe the work left to
+    // do, so they must not shrink when a box is unticked or when the
+    // list is cut. ar = alevins + poisson amount, same sum as the
+    // card's montant. A paid order is not work left, so it is out.
+    if (!paid) {
+      const t = !delivered ? totals.notShipped
+              : !received  ? totals.shippedNotReceived
+                           : totals.receivedNotPaid;
+      t.kg += g.poissonKgTotal;
+      t.al += g.alevinsTotal;
+      t.ar += g.montantAr;
+    }
 
-    // Category totals over every open order that matches the query,
-    // whatever is ticked and beyond the 25-order cap below. They
-    // describe the population each box selects, so they must not
-    // shrink when a box is unticked or when the list is cut.
-    // ar = alevins + poisson amount, same sum as the card's montant.
-    const t = delivered ? totals.deliveredUnpaid : totals.undelivered;
-    t.kg += g.poissonKgTotal;
-    t.al += g.alevinsTotal;
-    t.ar += g.montantAr;
-
-    // Each box INCLUDES a category. Fully closed orders (delivered and
-    // paid) were already dropped above, so "delivered" here always means
-    // delivered-and-unpaid. The two categories are therefore disjoint
-    // and together cover every open order: both ticked = the whole list.
-    // Nothing ticked selects nothing, and the client says so - it must
-    // not silently fall back to showing everything.
-    const keep = (wantDeliveredUnpaid && delivered) ||
-                 (wantUndelivered && !delivered);
-    if (!keep && !exact) continue;
+    // STATE FILTER (Kim, 2026-09-18). The three boxes name one exact
+    // state, so the order is kept only when its three steps match.
+    // An order rejected here is COUNTED: a search that finds nothing
+    // must say the order is in another state, not that it does not
+    // exist. With one such order the state itself is named.
+    if (st && !exact) {
+      if (delivered !== !!st.liv || received !== !!st.rec || paid !== !!st.pay) {
+        otherState++;
+        if (otherState === 1) otherLabel = cmdStateLabel(delivered, received, paid);
+        continue;
+      }
+    }
 
     // Content filter, mirroring Historique: EITHER content ticked shows
     // the order, so a mixed alevins+poisson order stays visible under
@@ -582,7 +606,8 @@ function cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
   cmdFifoSort(out);
   if (!noCap && out.length > 25) out.length = 25;
   prbMark("find:loop");
-  return { orders: out, closedMatches: closedMatches, totals: totals, counts: counts };
+  return { orders: out, otherState: otherState, otherLabel: otherLabel,
+           totals: totals, counts: counts };
 }
 
 /***************************************************************
@@ -609,11 +634,12 @@ const FUL_REPORT_CFG = {
 };
 
 /**
- * The open orders whose key is in `keys`, newest first like the screen.
- * The keys are re-read against the sheet NOW: an order paid-and-
- * delivered or cancelled since the screen was drawn is dropped, and
- * counted in `missing` so the screen can say so. No Sheets or Drive
- * call beyond cmdFindOrders, so the Node harness can test it.
+ * The orders whose key is in `keys`, newest first like the screen.
+ * The keys are re-read against the sheet NOW: an order cancelled since
+ * the screen was drawn is dropped, and counted in `missing` so the
+ * screen can say so. No state filter: the screen prints what it shows.
+ * No Sheets or Drive call beyond cmdFindOrders, so the Node harness
+ * can test it.
  * Returns { orders, missing }.
  */
 function fulPickOrders(keys) {
@@ -624,11 +650,11 @@ function fulPickOrders(keys) {
   });
   const asked = Object.keys(want).length;
   if (!asked) throw new Error("Cocher au moins une commande à imprimer.");
-  const orders = cmdFindOrders("", true, true, true, true, true).orders
+  const orders = cmdFindOrders("", null, true, true, true).orders
     .filter(function (o) { return want[o.key]; });
   if (!orders.length) {
-    throw new Error("Les commandes cochées ne sont plus ouvertes " +
-      "(livrées et payées, ou annulées). Relancer la recherche.");
+    throw new Error("Les commandes cochées ne sont plus dans la liste " +
+      "(annulées ?). Relancer la recherche.");
   }
   return { orders: orders, missing: asked - orders.length };
 }
@@ -647,7 +673,10 @@ function fulBuildSheet(p) {
   var kg = 0, alv = 0, ar = 0;
   const data = orders.map(function (o) {
     kg += o.poissonKgTotal; alv += o.alevinsTotal; ar += o.montantAr;
-    const delivered = String(o.dateLivraison || "").trim() !== "";
+    const lab = cmdStateLabel(
+      String(o.dateLivraison || "").trim() !== "",
+      String(o.reception || "").trim() !== "",
+      String(o.paiement || "").trim() !== "");
     return [
       String(o.dateCommande || ""),
       o.orderNumber || "(sans numéro)",
@@ -657,7 +686,7 @@ function fulBuildSheet(p) {
       o.poissonKgTotal || "",
       o.alevinsTotal || "",
       o.montantAr || "",
-      delivered ? "Livrée non-payée" : "Non livrée"
+      lab.charAt(0).toUpperCase() + lab.slice(1)
     ];
   });
 
@@ -1727,12 +1756,13 @@ function testCommandesServer() {
   Logger.log("Types: " + opts.types.join(" | "));
 
   Logger.log("--- 3 dernières commandes (groupées) ---");
-  cmdFindOrders("", true, true, true, true).orders.slice(0, 3).forEach(o =>
+  cmdFindOrders("", null, true, true).orders.slice(0, 3).forEach(o =>
     Logger.log(o.orderNumber + " | " + o.client + " | lots: " + o.lots.join(", ") +
       " | lignes: " + o.rows.join(",") + " | payé: " + (o.paiement || "non")));
 
-  Logger.log("--- commandes non soldées (max 3) ---");
-  cmdFindOrders("", true, false, true, true).orders.slice(0, 3).forEach(o =>
+  Logger.log("--- commandes reçues non payées (max 3) ---");
+  cmdFindOrders("", { liv: true, rec: true, pay: false }, true, true)
+    .orders.slice(0, 3).forEach(o =>
     Logger.log(o.orderNumber + " / " + o.client + " / lots: " + o.lots.join(", ") +
       " / lignes: " + o.rows.join(",")));
 
@@ -5103,13 +5133,12 @@ function cmdRecordFulfilment(rows, payload) {
   finally { prbEnd(own, "after reads"); }
 }
 
-function cmdFindOrders(query, wantDeliveredUnpaid, wantUndelivered,
-                       wantAlevins, wantPoisson, noCap, exactKey) {
+function cmdFindOrders(query, st, wantAlevins, wantPoisson, noCap, exactKey) {
   var own = prbStart("cmdFindOrders", "q=" + (query ? 1 : 0) + (noCap ? " noCap" : "") +
                      (exactKey ? " exact" : ""));
   try {
-    return cmdFindOrdersPrbBody(query, wantDeliveredUnpaid, wantUndelivered,
-                                wantAlevins, wantPoisson, noCap, exactKey);
+    return cmdFindOrdersPrbBody(query, st, wantAlevins, wantPoisson,
+                                noCap, exactKey);
   } finally { prbEnd(own); }
 }
 

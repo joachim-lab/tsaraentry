@@ -3654,20 +3654,23 @@
         '</div>' +
         // Two columns, one block (Kim 2026-09-09; totals moved into
         // the collapsible summary card below, 2026-09-11). Left: the
-        // two status boxes, stacked. Right: the content filter, the
+        // three state boxes, stacked. Right: the content filter, the
         // same pair as Historique. It narrows the status boxes by what
         // the order holds, so it is a second axis; at the top right it
-        // costs no height. .chk is inline-flex, so the two status
+        // costs no height. .chk is inline-flex, so the three state
         // labels are set to display:flex to take a full line each.
         '<div style="display:flex;gap:20px;flex-wrap:wrap;' +
              'align-items:flex-start;margin-top:10px">' +
           '<div style="flex:1 1 auto">' +
             '<label class="chk" style="display:flex">' +
-              '<input type="checkbox" id="fDeliveredUnpaid" checked>' +
-              '<span>Commandes livrées et non-payées</span></label>' +
+              '<input type="checkbox" id="fLivree">' +
+              '<span>Commandes livrées</span></label>' +
             '<label class="chk" style="display:flex;margin-top:8px">' +
-              '<input type="checkbox" id="fUndelivered" checked>' +
-              '<span>Commandes non-livrées</span></label>' +
+              '<input type="checkbox" id="fRecue">' +
+              '<span>Commandes reçues</span></label>' +
+            '<label class="chk" style="display:flex;margin-top:8px">' +
+              '<input type="checkbox" id="fPayee">' +
+              '<span>Commandes payées</span></label>' +
           '</div>' +
           '<div style="flex:0 0 auto">' +
             '<div style="display:flex;gap:16px">' +
@@ -3703,14 +3706,18 @@
           '<span id="fulTotalCount">Commandes</span></div>' +
         '<div id="fulSumBody"' + (fulSumOpen ? '' : ' style="display:none"') + '>' +
           '<div class="fulTotGrid">' +
-            '<div class="lbl">Livrées</div>' +
-            '<div class="val" id="fTotDU_kg"></div>' +
-            '<div class="val" id="fTotDU_al"></div>' +
-            '<div class="val" id="fTotDU_ar"></div>' +
-            '<div class="lbl">Non-livrées</div>' +
-            '<div class="val" id="fTotUD_kg"></div>' +
-            '<div class="val" id="fTotUD_al"></div>' +
-            '<div class="val" id="fTotUD_ar"></div>' +
+            '<div class="lbl">Non livrées</div>' +
+            '<div class="val" id="fTotNL_kg"></div>' +
+            '<div class="val" id="fTotNL_al"></div>' +
+            '<div class="val" id="fTotNL_ar"></div>' +
+            '<div class="lbl">Livrées non reçues</div>' +
+            '<div class="val" id="fTotLR_kg"></div>' +
+            '<div class="val" id="fTotLR_al"></div>' +
+            '<div class="val" id="fTotLR_ar"></div>' +
+            '<div class="lbl">Reçues non payées</div>' +
+            '<div class="val" id="fTotRP_kg"></div>' +
+            '<div class="val" id="fTotRP_al"></div>' +
+            '<div class="val" id="fTotRP_ar"></div>' +
           '</div>' +
           '<div class="fulPool" id="fulPool">Disponible à la vente : …</div>' +
         '</div>' +
@@ -3719,8 +3726,9 @@
       '<div id="waZone"></div>' +
       '<div id="hits"></div>';
     el('ficherche').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); fulSearchNew(); } });
-    el('fDeliveredUnpaid').addEventListener('change', () => fulSearchNew());
-    el('fUndelivered').addEventListener('change', () => fulSearchNew());
+    el('fLivree').addEventListener('change', () => fulSearchNew());
+    el('fRecue').addEventListener('change', () => fulSearchNew());
+    el('fPayee').addEventListener('change', () => fulSearchNew());
     // A re-search, not a local redraw. The list is capped at 25 orders
     // server-side, so filtering the rows already on screen would filter
     // the cap instead of the year. See patch_fultype_srv_20260907r.py.
@@ -3843,7 +3851,7 @@
 
   /** " — 350 kg + 4 000 alevins" for the summary HEADER (Kim,
    *  2026-09-15): kg and fry summed over EVERY order the query and the
-   *  four checkboxes match — server-side, uncapped — so the total shows
+   *  five checkboxes match — server-side, uncapped — so the total shows
    *  without opening the card. Empty when nothing matches. */
   function fulTotLine(t) {
     if (!t) return '';
@@ -3870,25 +3878,26 @@
         el('fulTotalCount').textContent = fulCountLine(res.counts) +
           fulTotLine((res.totals || {}).selected);
         const tot = res.totals || {};
-        fulSetTot('fTotDU', tot.deliveredUnpaid);
-        fulSetTot('fTotUD', tot.undelivered);
+        fulSetTot('fTotNL', tot.notShipped);
+        fulSetTot('fTotLR', tot.shippedNotReceived);
+        fulSetTot('fTotRP', tot.receivedNotPaid);
         if (keepMsg) setStatusAndScroll(keepMsg.cls, keepMsg.html); else setStatus('', '');
-        // Nothing ticked selects nothing. Said plainly, because an
-        // empty list with no explanation reads as a broken search.
-        // Two independent reasons for a blank list. Each is named: an
-        // empty list with no explanation reads as a broken search.
-        const noCat  = !el('fDeliveredUnpaid').checked && !el('fUndelivered').checked;
+        // An empty list with no explanation reads as a broken search,
+        // so every reason for one is named. The state boxes can no
+        // longer select nothing: they always name one exact state, and
+        // an order the query found in ANOTHER state is counted and
+        // reported rather than silently dropped.
         const noType = !el('fAlevins').checked && !el('fPoisson').checked;
+        const other  = Number(res.otherState || 0);
         const empty = fulExact
           ? 'Commande introuvable (annulée ?).'
-          : noCat
-          ? 'Cocher au moins une case : livrées et non-payées, ou non-livrées.'
           : noType
           ? 'Cocher Alevins ou Poisson pour afficher des commandes.'
-          : (res.closedMatches > 0
-              ? (res.closedMatches === 1
-                  ? 'Commande livrée et payée.'
-                  : res.closedMatches + ' commandes livrées et payées.')
+          : (other > 0
+              ? (other === 1
+                  ? '1 commande trouvée, dans un autre état : ' +
+                    esc(res.otherLabel || '') + '.'
+                  : other + ' commandes trouvées, dans un autre état.')
               : 'Aucune commande trouvée.');
         // hits is about to be rewritten and would take both boxes with
         // it: they are moved INTO the list when an order is open. Park
@@ -3934,7 +3943,8 @@
       })
       .withFailureHandler(e => setStatus('err', esc(e.message)))
       .cmdFindOrders(el('ficherche').value,
-        el('fDeliveredUnpaid').checked, el('fUndelivered').checked,
+        { liv: el('fLivree').checked, rec: el('fRecue').checked,
+          pay: el('fPayee').checked },
         el('fAlevins').checked, el('fPoisson').checked, false, fulExact);
   }
 
