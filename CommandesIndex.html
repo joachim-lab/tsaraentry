@@ -309,6 +309,12 @@
     return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   }
 
+  /** '2026-09-18' -> '18/09/2026'. For the read-only date lines. */
+  function dmyFromISO(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''));
+    return m ? m[3] + '/' + m[2] + '/' + m[1] : String(s || '');
+  }
+
   // Access rights in THIS screen (AccessServer.js, sheet "Accès Tsara
   // Entry", tab "commandes"): one boolean per tab / field / button.
   // No row in that tab = everything true. Keys: dem, new, rec, ful,
@@ -431,6 +437,11 @@
     el('tabPrix').className = 'tab' + (m === 'prix' ? ' active' : '');
     el('tabCli').className = 'tab' + (m === 'cli' ? ' active' : '');
     el('paneNew').style.display = (m === 'new' ? '' : 'none');
+    // The date shown in Nouvelle commande is display only. Refresh it on
+    // every visit so a tab left open overnight does not show yesterday.
+    if (m === 'new' && el('fDateShow')) {
+      el('fDateShow').innerHTML = '<b>' + esc(dmyFromISO(todayISO())) + '</b>';
+    }
     el('paneFul').style.display = (m === 'ful' ? '' : 'none');
     el('paneRes').style.display = (m === 'res' ? '' : 'none');
     el('paneDem').style.display = (m === 'dem' ? '' : 'none');
@@ -1630,10 +1641,16 @@
   // price always follows the grid (Kim 2026-09-08).
   let demPrixUser = false;
 
+  // The date demSave will write. null = new pre-commande, so the day's
+  // date is read at SAVE time, not when the form was built. An edit
+  // holds the date already recorded and keeps it. (Kim, 2026-09-18)
+  let demFormDate = null;
+
   function drawDemForm() {
     var cur = null;
     demRows.forEach(function (r) { if (r.row === demEdit) cur = r; });
     if (demEdit && !cur) demEdit = 0;          // row vanished under us
+    demFormDate = (cur && cur.date) ? cur.date : null;
 
     var type = demType;
     // Refusals land here when the form is a popup: the page status bar
@@ -1643,9 +1660,8 @@
       '<h3 style="margin:0 0 10px">' +
         (demEdit ? 'Modifier la pré-commande' : 'Nouvelle pré-commande') +
       '</h3>' +
-      '<div style="margin-bottom:10px"><label>Date<br>' +
-        '<input id="dDate" type="date" value="' +
-        esc(cur && cur.date ? cur.date : todayISO()) + '"></label></div>' +
+      '<div style="margin-bottom:10px"><label>Date</label>' +
+        '<b>' + esc(dmyFromISO(demFormDate || todayISO())) + '</b></div>' +
       '<div style="margin-bottom:10px"><label>Client<br>' +
         '<input id="dClient" type="text" size="30" list="dlClients" autocomplete="off" onchange="dlPickContact(\'dClient\',\'dContact\')" value="' + esc(cur ? cur.client : '') + '"></label></div>' +
       '<div style="margin-bottom:10px"><label>Contact<br>' +
@@ -1902,7 +1918,7 @@
   function demSave() {
     if (!demEdit) dlDupWarn('dClient');
     var p = {
-      date: el('dDate').value,
+      date: demFormDate || todayISO(),
       client: el('dClient').value.trim(),
       contact: el('dContact').value.trim(),
       type: demType,
@@ -2637,7 +2653,9 @@
         '<div class="row">' +
           '<div><label>Type</label><select id="fType" onchange="renderLines()">' +
             '<option value="">-- choisir --</option>' + typeOpts + '</select></div>' +
-          '<div><label>Date commande</label><input type="date" id="fDate" data-auto="1" onchange="this.dataset.auto=\'\'" value="'+todayISO()+'"></div>' +
+          '<div><label>Date commande</label>' +
+            '<div id="fDateShow" style="margin-top:6px;font-size:15px"><b>' +
+            esc(dmyFromISO(todayISO())) + '</b></div></div>' +
         '</div>' +
         '<div class="row">' +
           '<div><label>Client</label><input type="text" id="fClient" list="dlClients" autocomplete="off" onchange="dlPickContact(\'fClient\',\'fContact\')"></div>' +
@@ -3315,14 +3333,12 @@
     setStatus('banner', 'Enregistrement…');
 
     const al = isAlevins();
-    // The default date is filled when the form is BUILT. A tab left open
-    // overnight kept yesterday's date and saved it (AL-26-180, Kim
-    // 2026-09-10). A field nobody touched means "today at save time".
-    // A date the user picked (onchange clears data-auto) is kept as is.
-    if (el('fDate').dataset.auto === '1') el('fDate').value = todayISO();
+    // The date is no longer a field (Kim, 2026-09-18). It is read HERE, at
+    // save time, so a tab left open overnight cannot save yesterday
+    // (AL-26-180, Kim 2026-09-10).
     const payload = {
       type: el('fType').value,
-      dateCommande: el('fDate').value,
+      dateCommande: todayISO(),
       client: el('fClient').value,
       contact: el('fContact').value,
       // facture is not sent: column C belongs to the AutoCommandes generator.
