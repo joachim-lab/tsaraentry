@@ -850,22 +850,6 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
   // overwritten. Planned and checked here, before any write; written
   // after the put loop below. The remise applies to the fish or fry
   // price only, NEVER to J / P (transport) — Kim, 2026-09-10.
-  // ONE READ BEFORE, ONE READ AFTER (Kim, 2026-09-17, perf item 1a).
-  // Every value this function reads from the order rows comes from
-  // these grids, not from one getValue/getDisplayValue per cell. A read
-  // that follows a write forces the write out and waits for the sheet
-  // to recalculate: the per-cell before/after reads cost about 3.3 s
-  // per order row (probe, 2026-09-16). Writes are queued, then ONE flush.
-  // Span = first to last target row, columns A..AF (every column read
-  // or written below). The GATE 2 / GATE 3 reads above stay per cell:
-  // they run only when their condition holds.
-  const spanTop = Math.min.apply(null, targets);
-  const spanH = Math.max.apply(null, targets) - spanTop + 1;
-  const spanRng = sh.getRange(spanTop, 1, spanH, C.REMISE);
-  const rawBefore = spanRng.getValues();
-  const dispBefore = spanRng.getDisplayValues();
-  const cellAt = function (grid, r, col) { return grid[r - spanTop][col - 1]; };
-
   var remiseJob = null;
   { // plain block: keeps the remise planning variables scoped.
     const remTxt = String(f.remise == null ? "" : f.remise).trim();
@@ -880,7 +864,7 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
       }
     }
     const remRows = targets.filter(function (r) {
-      return String(cellAt(rawBefore, r, C.REMISE)) !== String(rem);
+      return String(sh.getRange(r, C.REMISE).getValue()) !== String(rem);
     });
     remRows.forEach(function (r) {
       cmdRemiseFormulas(r).forEach(function (p) {
@@ -901,17 +885,17 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
   // BL ORIGINE (Kim, 2026-09-16): was the order delivered BEFORE this
   // save? Read before the puts. The save that records the first Date
   // livraison also copies the goods (BonLivraisonServer.js -> blSnapshot).
-  const blLivBefore = String(cellAt(dispBefore, spanTop, C.DATE_LIVRAISON) || "")
-    .trim() !== "";
+  const blLivBefore = String(sh.getRange(Math.min.apply(null, targets),
+    C.DATE_LIVRAISON).getDisplayValue() || "").trim() !== "";
 
-  // Queued writes. The before/after text for `changed` is taken from
-  // dispBefore and from dispAfter (read once after the flush).
-  const written = [];
   targets.forEach(r => {
     function put(col, value, label) {
       if (value === undefined || value === null || value === "") return;
-      sh.getRange(r, col).setValue(value);
-      written.push({ r: r, col: col, label: label });
+      const cell = sh.getRange(r, col);
+      const before = cell.getDisplayValue();
+      cell.setValue(value);
+      const after = cell.getDisplayValue();
+      if (before !== after) changed.push("L" + r + " " + label + ": " + (before || "(vide)") + " -> " + after);
     }
 
     put(C.PAIEMENT, cmdParseDate(f.paiement), "Paiement reçu");
@@ -927,12 +911,12 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
   });
 
   prbMark("puts");
-  const remiseChanged = [];
   if (remiseJob) {
     remiseJob.rows.forEach(function (r) {
-      const before = cellAt(dispBefore, r, C.REMISE);
-      sh.getRange(r, C.REMISE).setValue(remiseJob.rem);
-      remiseChanged.push("L" + r + " Remise %: " + (before || "(vide)") + " -> " +
+      const cell = sh.getRange(r, C.REMISE);
+      const before = cell.getDisplayValue();
+      cell.setValue(remiseJob.rem);
+      changed.push("L" + r + " Remise %: " + (before || "(vide)") + " -> " +
                    (remiseJob.rem === "" ? "(vide)" : remiseJob.rem));
       cmdRemiseFormulas(r).forEach(function (p) {
         sh.getRange(r, p.col).setFormula(p.remise);
@@ -942,16 +926,6 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
 
   SpreadsheetApp.flush();
   prbMark("remise+flush");
-
-  const dispAfter = spanRng.getDisplayValues();
-  written.forEach(function (w) {
-    const before = cellAt(dispBefore, w.r, w.col);
-    const after = cellAt(dispAfter, w.r, w.col);
-    if (before !== after) {
-      changed.push("L" + w.r + " " + w.label + ": " + (before || "(vide)") + " -> " + after);
-    }
-  });
-  remiseChanged.forEach(function (line) { changed.push(line); });
 
   // BL ORIGINE: AFTER the flush, so the copy is what the sheet holds.
   // Never fatal: the delivery is saved; a failed copy is returned as
@@ -1016,21 +990,16 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
   // the save that writes AE and an order received on an earlier save.
   // The library still needs col V; a reception date cannot exist
   // without one (GATE 2), so every received order qualifies.
-  // Same test as cmdOrderReceived, on the after grid.
-  const received = targets.some(function (r) {
-    return String(cellAt(dispAfter, r, C.RECU) || "").trim() !== "";
-  });
-  if (!received) {
+  if (!cmdOrderReceived(sh, targets)) {
     return {
       rows: targets, changed: changed, facture: null,
-      factureNow: cellAt(dispAfter, anyRow, C.FACTURE) || null,
+      factureNow: sh.getRange(anyRow, C.FACTURE).getDisplayValue() || null,
       factureWhy: "la commande n'est pas encore reçue",
       blWarn: blWarn
     };
   }
 
   var facture = null;
-  var factAfter = null;
   try {
     // acFillFactureForRows is given ONE row, not the span. The library
     // mints for every row sharing that row's order number, so a single
@@ -1040,14 +1009,13 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
     //
     // Before/after, so a number finance typed above is not reported as
     // "généré". The library leaves such an order alone, and this says so.
-    const before = targets.map(r => cellAt(dispAfter, r, C.FACTURE));
+    const before = targets.map(r => sh.getRange(r, C.FACTURE).getDisplayValue());
     prbMark("received+before reads");
     AutoCommandes.acFillFactureForRows(sh, anyRow, anyRow);
     SpreadsheetApp.flush();
     prbMark("lib mint+flush");
-    factAfter = sh.getRange(spanTop, C.FACTURE, spanH, 1).getDisplayValues();
     targets.forEach((r, i) => {
-      const after = factAfter[r - spanTop][0];
+      const after = sh.getRange(r, C.FACTURE).getDisplayValue();
       if (after && after !== before[i]) {
         changed.push("L" + r + " N° facture (généré): " + after);
         facture = after;
@@ -1059,9 +1027,7 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
 
   // Read back, so factureNow reports the sheet and not what this
   // function hoped it wrote.
-  // The column read after the mint, or one cell when the mint threw first.
-  const factureNow = (factAfter ? factAfter[anyRow - spanTop][0]
-                                : sh.getRange(anyRow, C.FACTURE).getDisplayValue()) || null;
+  const factureNow = sh.getRange(anyRow, C.FACTURE).getDisplayValue() || null;
 
   return {
     rows: targets, changed: changed, facture: facture,

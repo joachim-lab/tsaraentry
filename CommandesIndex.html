@@ -268,12 +268,6 @@
   // or emptied since the last rebuild. One set, two sources of entries.
   const NOT_SELLABLE = {};
   let GATE_FAILED = false;     // true once cmdGetLotGateData has thrown
-  // INSTANT STOCK CHECK (Kim, 2026-09-17). GATE_AT = when GATE last
-  // loaded. LOT_AVAIL = the last lot readout per selected lot value:
-  // { key, available, count, reserved, pending, pm, at }. Filled by
-  // onLotChange, emptied after every saved order. Read by doCreate.
-  let GATE_AT = 0;
-  const LOT_AVAIL = {};
   let lines = [{}];            // create mode: one line per lot
   let mode = 'ful';
   let hits = [];               // fulfilment search results
@@ -379,7 +373,6 @@
     .withSuccessHandler(g => {
       GATE = g;
       GATE_FAILED = false;
-      GATE_AT = Date.now();
       showGateMsg();
       if (g && g.notSellable) {
         Object.keys(g.notSellable).forEach(k => { NOT_SELLABLE[k] = true; });
@@ -2861,53 +2854,6 @@
     return kg * 1000 / pm;
   }
 
-  /**
-   * INSTANT STOCK CHECK (Kim, 2026-09-17). The quantity of each lot,
-   * summed over the lines, against the available count this page already
-   * shows. Returns the server's own "stock insuffisant" messages (same
-   * text as cmdValidateOrderLines), or [] to let the server decide.
-   *
-   * It never blocks on old numbers. The available count is the lot file
-   * at selection time minus the reservations and pending orders read at
-   * page load (GATE). After the nightly engine run, or once a colleague
-   * edits a reservation, those can disagree and understate the stock.
-   * So a readout or a GATE older than 15 minutes is not used: the order
-   * goes to the server, which reads everything fresh and blocks alone.
-   * A count that is too HIGH (a colleague's order since page load) only
-   * lets the order through to the server, which still blocks it.
-   */
-  var LOCAL_STOCK_MAX_AGE_MS = 15 * 60 * 1000;
-  function localStockBlocks(lns, al, avail, gateAt, now) {
-    if (!gateAt || now - gateAt > LOCAL_STOCK_MAX_AGE_MS) return [];
-    const wanted = {};
-    const info = {};
-    const order = [];
-    lns.forEach(function (ln) {
-      const a = avail[ln.lot || ''];
-      if (!a || a.available == null || !isFinite(a.available)) return;
-      if (!a.at || now - a.at > LOCAL_STOCK_MAX_AGE_MS) return;
-      const q = lineQty(ln, al);
-      if (!(a.key in wanted)) { wanted[a.key] = 0; info[a.key] = a; order.push(a.key); }
-      wanted[a.key] += (q != null && q > 0 ? q : 0);
-    });
-    const blocks = [];
-    order.forEach(function (k) {
-      const a = info[k];
-      if (!(wanted[k] > a.available)) return;
-      const grKg = (!al && a.pm != null) ? ' (' + Math.floor(a.available * a.pm / 1000) + ' kg)' : '';
-      const excess = Math.ceil(wanted[k] - a.available);
-      const reduire = (!al && a.pm != null)
-        ? ' \u2192 r\u00e9duire de ' + Math.ceil(excess * a.pm / 1000) + ' kg'
-        : ' \u2192 r\u00e9duire de ' + excess + ' alevins';
-      blocks.push(k + ' : stock insuffisant \u2014 demand\u00e9 ' + Math.round(wanted[k]) +
-        ', disponible ' + a.available + grKg +
-        ' (stock ' + a.count +
-        (a.reserved ? ', r\u00e9serv\u00e9 ' + a.reserved : '') +
-        (a.pending ? ', en attente ' + a.pending : '') + ')' + reduire);
-    });
-    return blocks;
-  }
-
   function linePm(ln, al) { return al ? num(ln.alevinsPm) : num(ln.poissonPm); }
 
   /** 16788 -> "16 788" ; 0.73 -> "0,73". */
@@ -2983,9 +2929,6 @@
     google.script.run
       .withSuccessHandler(a => {
         if (sel.value !== key) return;          // user changed lot meanwhile
-        // Only a readout that reaches the "disponible" line below is kept.
-        // Reserved, not found, no stock, wrong type: the server refuses.
-        delete LOT_AVAIL[key];
         if (a && a.slim) a = slimAvail(a);
         if (a.reservedAll) {
           box.className = 'availBlock';
@@ -3041,9 +2984,6 @@
         // as a block, not as an informational readout. Otherwise: green
         // bold, or amber when the lot/type gate warned.
         const rien = (a.available == null || a.available <= 0);
-        LOT_AVAIL[key] = { key: a.key, available: a.available, count: a.count,
-                           reserved: a.reserved, pending: a.pending, pm: a.pm,
-                           at: Date.now() };
         box.className = rien ? 'availBlock'
                             : (verdict.level === 'warn' ? 'availWarn' : 'availOk');
         // Grossis only: fish are sold by weight, so show the kg the lot
@@ -3415,16 +3355,6 @@
     // bad order with the same messages; doubling it here doubled the
     // save time. vLines above is kept only to build localWarn.
     // Server warnings come back in res.warnings — see saveOrder.
-    // INSTANT STOCK CHECK (Kim, 2026-09-17). A refusal the page can
-    // already see is given now, not after the 3-14 s server round trip.
-    // No round trip is added: this reads only what the page holds.
-    const stockBlocks = localStockBlocks(lines, al, LOT_AVAIL, GATE_AT, Date.now());
-    if (stockBlocks.length) {
-      btn.disabled = false;
-      setStatusAndScroll('err', 'Commande refus\u00e9e : ' + stockBlocks.map(esc).join(' ; ') +
-        '<br>Rien n\u2019a \u00e9t\u00e9 enregistr\u00e9.');
-      return;
-    }
     saveOrder(payload, localWarn, btn);
   }
 
@@ -3434,8 +3364,6 @@
     google.script.run
       .withSuccessHandler(res => {
         lines = [{}];
-        // The fish just sold change every readout: none is reused.
-        Object.keys(LOT_AVAIL).forEach(function (k) { delete LOT_AVAIL[k]; });
         renderNew();
         // The counts were read at boot. Without this the fish just
         // sold stay on offer for the next order on the same page.
