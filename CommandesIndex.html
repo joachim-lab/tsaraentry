@@ -1458,7 +1458,10 @@
     demType = t;
     demEdit = 0; demArmed = 0;
     demMarkSubtabs();
-    demPoolLine();
+    // paintStockBars, not demPoolLine alone: the bar now draws its
+    // floor box for the tab (Poisson only), so a tab change has to
+    // repaint the whole bar, not only its sentence. (Kim, 2026-09-18)
+    paintStockBars();
     drawDemList(); drawDemForm();
     setStatus('', '');
   }
