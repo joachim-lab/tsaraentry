@@ -3683,8 +3683,6 @@
               '<span>Commandes livrées</span></label>' +
             '<label class="chk"><input type="checkbox" id="fRecue">' +
               '<span>Commandes reçues</span></label>' +
-            '<label class="chk"><input type="checkbox" id="fPayee">' +
-              '<span>Commandes payées</span></label>' +
           '</div>' +
           '<div style="flex:0 0 auto">' +
             '<div style="display:flex;gap:16px">' +
@@ -3740,22 +3738,18 @@
       '<div id="waZone"></div>' +
       '<div id="hits"></div>';
     el('ficherche').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); fulSearchNew(); } });
-    // The three boxes cascade (Kim, 2026-09-18): the pipeline is
-    // strict — received needs shipped, paid needs received. Ticking a
-    // later step ticks the earlier ones; unticking an earlier step
-    // clears the later ones. Only the four real states are reachable:
-    // nothing / livrées / livrées+reçues / all three.
+    // The two boxes cascade (Kim, 2026-09-18): the pipeline is strict,
+    // received needs shipped. Ticking reçues ticks livrées; unticking
+    // livrées clears reçues. Three states, in work order:
+    // nothing = à livrer / livrées = à recevoir / les deux = à payer.
     function fulStateChange(which) {
-      const L = el('fLivree'), R = el('fRecue'), P = el('fPayee');
-      if (which === 'P' && P.checked) { L.checked = true; R.checked = true; }
-      if (which === 'R' && R.checked) { L.checked = true; }
-      if (which === 'R' && !R.checked) { P.checked = false; }
-      if (which === 'L' && !L.checked) { R.checked = false; P.checked = false; }
+      const L = el('fLivree'), R = el('fRecue');
+      if (which === 'R' && R.checked) L.checked = true;
+      if (which === 'L' && !L.checked) R.checked = false;
       fulSearchNew();
     }
     el('fLivree').addEventListener('change', () => fulStateChange('L'));
     el('fRecue').addEventListener('change', () => fulStateChange('R'));
-    el('fPayee').addEventListener('change', () => fulStateChange('P'));
     // A re-search, not a local redraw. The list is capped at 25 orders
     // server-side, so filtering the rows already on screen would filter
     // the cap instead of the year. See patch_fultype_srv_20260907r.py.
@@ -3916,11 +3910,19 @@
         // reported rather than silently dropped.
         const noType = !el('fAlevins').checked && !el('fPoisson').checked;
         const other  = Number(res.otherState || 0);
+        // A paid order is finished and lives in Historique. Named
+        // first: it is the likeliest reason a searched order is not
+        // here, and the screen must point at where it is.
+        const paid   = Number(res.paidMatches || 0);
         const empty = fulExact
           ? 'Commande introuvable (annulée ?).'
           : noType
           ? 'Cocher Alevins ou Poisson pour afficher des commandes.'
-          : (other > 0
+          : (paid > 0 && !other
+              ? (paid === 1
+                  ? 'Commande payée : voir Historique.'
+                  : paid + ' commandes payées : voir Historique.')
+              : other > 0
               ? (other === 1
                   ? '1 commande trouvée, dans un autre état : ' +
                     esc(res.otherLabel || '') + '.'
@@ -3970,8 +3972,7 @@
       })
       .withFailureHandler(e => setStatus('err', esc(e.message)))
       .cmdFindOrders(el('ficherche').value,
-        { liv: el('fLivree').checked, rec: el('fRecue').checked,
-          pay: el('fPayee').checked },
+        { liv: el('fLivree').checked, rec: el('fRecue').checked, pay: false },
         el('fAlevins').checked, el('fPoisson').checked, false, fulExact);
   }
 

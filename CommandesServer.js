@@ -379,14 +379,17 @@ function cmdStateLabel(delivered, received, paid) {
  * it has a payment date (col U); "livré" (col W) is a formula from V, so
  * V is the truth.
  *
- * `st` is the STATE the screen asks for (Kim, 2026-09-18):
- *   { liv: bool, rec: bool, pay: bool }
- * Each field is one step and says whether that step is DONE. The three
- * are read together, so they name ONE exact state rather than including
- * a category: { liv:false, rec:false, pay:false } is the orders not yet
- * shipped, { liv:true, rec:true, pay:false } the ones received and still
- * to pay. Every combination is reachable and none is hidden by a rule
- * the screen does not show.
+ * A PAID order is never listed (Kim, 2026-09-18): it is finished work,
+ * and Historique already lists every one of them. It is counted in
+ * `paidMatches` so a search can say where the order went, and it stays
+ * reachable through `exactKey` (Historique > Modifier).
+ *
+ * `st` is the STATE the screen asks for, over the orders left:
+ *   { liv: bool, rec: bool, pay: bool }  — `pay` is always false now
+ * Each field is one step and says whether that step is DONE. They are
+ * read together, so they name ONE exact state rather than including a
+ * category: { liv:false, rec:false } is the orders not yet shipped,
+ * { liv:true, rec:true } the ones received and still to pay.
  * `st` null or omitted filters no state (internal callers).
  *
  * wantAlevins / wantPoisson narrow that list by CONTENT. An order shows
@@ -426,7 +429,7 @@ function cmdFindOrdersPrbBody(query, st, wantAlevins, wantPoisson,
   // carries neither quantity (see the "exempt" comment below).
   const counts = { total: 0, alv: 0, pois: 0, mix: 0 };
   if (lastRow < CMD_CFG.START_ROW) {
-    return { orders: [], otherState: 0, otherLabel: "",
+    return { orders: [], otherState: 0, otherLabel: "", paidMatches: 0,
              totals: totals, counts: counts };
   }
 
@@ -519,6 +522,7 @@ function cmdFindOrdersPrbBody(query, st, wantAlevins, wantPoisson,
   const out = [];
   let otherState = 0;
   let otherLabel = "";
+  let paidMatches = 0;
   for (let i = order.length - 1; i >= 0; i--) {              // newest first
     const g = groups[order[i]];
 
@@ -535,20 +539,23 @@ function cmdFindOrdersPrbBody(query, st, wantAlevins, wantPoisson,
     // gap, not a state. Without this they would match no view at all.
     const received  = String(g.reception || "").trim() !== "" || paid;
 
+    // Paid = finished. It leaves before the totals and the boxes, so no
+    // view on this screen can show it. Counted, so a search for one
+    // says "payée, voir Historique" instead of "aucune commande".
+    if (paid && !exact) { paidMatches++; continue; }
+
     // Category totals over every UNPAID order that matches the query,
     // whatever is ticked and beyond the 25-order cap below. Three
     // disjoint steps of one pipeline: they describe the work left to
     // do, so they must not shrink when a box is unticked or when the
     // list is cut. ar = alevins + poisson amount, same sum as the
-    // card's montant. A paid order is not work left, so it is out.
-    if (!paid) {
-      const t = !delivered ? totals.notShipped
-              : !received  ? totals.shippedNotReceived
-                           : totals.receivedNotPaid;
-      t.kg += g.poissonKgTotal;
-      t.al += g.alevinsTotal;
-      t.ar += g.montantAr;
-    }
+    // card's montant. Paid orders already left above.
+    const t = !delivered ? totals.notShipped
+            : !received  ? totals.shippedNotReceived
+                         : totals.receivedNotPaid;
+    t.kg += g.poissonKgTotal;
+    t.al += g.alevinsTotal;
+    t.ar += g.montantAr;
 
     // STATE FILTER (Kim, 2026-09-18). The three boxes name one exact
     // state, so the order is kept only when its three steps match.
@@ -613,7 +620,7 @@ function cmdFindOrdersPrbBody(query, st, wantAlevins, wantPoisson,
   if (!noCap && out.length > 25) out.length = 25;
   prbMark("find:loop");
   return { orders: out, otherState: otherState, otherLabel: otherLabel,
-           totals: totals, counts: counts };
+           paidMatches: paidMatches, totals: totals, counts: counts };
 }
 
 /***************************************************************
