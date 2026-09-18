@@ -251,6 +251,8 @@
   <div id="paneCli" style="display:none"></div>
 
   <datalist id="dlClients"></datalist>
+  <!-- Says when the client list is missing (2026-09-18). Hidden when it loaded. -->
+  <div id="dlWarn" style="display:none"></div>
 
 <script>
 
@@ -499,8 +501,19 @@
     return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toUpperCase();
   }
 
+  /** Show or hide the "no client list" line. msg = null hides it. */
+  function dlWarn(msg) {
+    var w = el('dlWarn');
+    if (!w) return;
+    if (!msg) { w.style.display = 'none'; w.innerHTML = ''; return; }
+    w.style.display = '';
+    w.innerHTML = '<div class="warn">Liste des clients indisponible \u2014 ' + msg +
+      '<br>Le nom du client se tape \u00e0 la main. L\u2019enregistrement fonctionne.</div>';
+  }
+
   function dlFill(rows) {
     var list = (rows || []).filter(function (r) { return r && r.client; });
+    dlWarn(list.length ? null : 'la liste re\u00e7ue est vide (onglet Clients).');
     dlClientNames = list.map(function (r) { return r.client; });
     dlClientNames.sort(function (a, b) {
       return a.localeCompare(b, 'fr', { sensitivity: 'base' });
@@ -519,7 +532,10 @@
   function dlRefresh() {
     google.script.run
       .withSuccessHandler(function (res) { dlFill((res && res.rows) || []); })
-      .withFailureHandler(function () {})   // advisory: silence is safe
+      .withFailureHandler(function (e) {
+        // Was silent until 2026-09-18. A missing list now names itself.
+        dlWarn('la lecture a \u00e9chou\u00e9 : ' + esc(e && e.message ? e.message : e));
+      })
       .crmClientList();
   }
 
