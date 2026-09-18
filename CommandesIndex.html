@@ -187,7 +187,6 @@
     .stockBtn { flex: 0 0 auto; background: #188038; color: #fff; }
     .stockRead { font-size: 15px; line-height: 1.35; }
     .floorWrap { flex: 0 0 auto; }
-    #floorWrapDem .floorBox { margin-top: 8px; }
     .floorBox { display: inline-flex; align-items: center; gap: 8px;
                 padding: 4px 5px 4px 10px; border: 1px solid #f0d79a;
                 border-radius: 6px; background: rgba(255, 255, 255, 0.72);
@@ -1253,19 +1252,23 @@
         '<div class="subtab pois" id="subDemPoisson" ' +
           'onclick="demSetType(\'Poisson\')">Poisson</div>' +
       '</div>' +
-      '<div class="warn" style="margin-top:0;margin-bottom:10px">' +
-        '<button class="demBtn" onclick="demVerifStock();loadGateData()" ' +
-          'style="background:#188038;color:#fff;border-color:#188038">' +
-          'Actualiser le stock</button> ' +
-        '<span id="demOrderBtns"></span>' +
-        // demPool and demWant share ONE inline-block: the second line
-        // then starts where "Disponible" starts, and keeps that
-        // alignment when the save/cancel pair widens the button row.
-        '<span class="demReadout">' +
-          '<span id="demPool" class="muted"></span>' +
-          '<div id="demWant" class="muted" style="margin-top:4px"></div>' +
-        '</span>' +
-        '<div id="floorWrapDem"></div></div>' +
+      // The SAME flex row as the other two bars (.stockBar, see
+      // stockBarHtml): readout on the left, floor control on the right,
+      // so the box no longer costs a line of its own. (Kim, 2026-09-18)
+      '<div class="warn stockBar">' +
+        '<div class="stockMain">' +
+          '<button class="demBtn stockBtn" onclick="demVerifStock();loadGateData()">' +
+            'Actualiser le stock</button>' +
+          '<span id="demOrderBtns"></span>' +
+          // demPool and demWant share ONE inline-block: the second line
+          // then starts where "Disponible" starts, and keeps that
+          // alignment when the save/cancel pair widens the button row.
+          '<span class="demReadout">' +
+            '<span id="demPool" class="muted"></span>' +
+            '<div id="demWant" class="muted" style="margin-top:4px"></div>' +
+          '</span>' +
+        '</div>' +
+        '<span id="floorWrapDem" class="floorWrap"></span></div>' +
       '<div id="demList">Chargement…</div>' +
       '<div id="demForm"></div>';
     demMarkSubtabs();
