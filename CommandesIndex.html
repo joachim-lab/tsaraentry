@@ -3654,22 +3654,20 @@
         '</div>' +
         // Two columns, one block (Kim 2026-09-09; totals moved into
         // the collapsible summary card below, 2026-09-11). Left: the
-        // three state boxes, stacked. Right: the content filter, the
-        // same pair as Historique. It narrows the status boxes by what
-        // the order holds, so it is a second axis; at the top right it
-        // costs no height. .chk is inline-flex, so the three state
-        // labels are set to display:flex to take a full line each.
+        // three state boxes, on one line (Kim 2026-09-18: stacked, they
+        // cost three lines of height before the list). Right: the
+        // content filter, the same pair as Historique. It narrows the
+        // state boxes by what the order holds, so it is a second axis;
+        // at the top right it costs no height. .chk is inline-flex, so
+        // the three labels sit side by side on their own.
         '<div style="display:flex;gap:20px;flex-wrap:wrap;' +
              'align-items:flex-start;margin-top:10px">' +
-          '<div style="flex:1 1 auto">' +
-            '<label class="chk" style="display:flex">' +
-              '<input type="checkbox" id="fLivree">' +
+          '<div style="flex:1 1 auto;display:flex;gap:18px;flex-wrap:wrap">' +
+            '<label class="chk"><input type="checkbox" id="fLivree">' +
               '<span>Commandes livrées</span></label>' +
-            '<label class="chk" style="display:flex;margin-top:8px">' +
-              '<input type="checkbox" id="fRecue">' +
+            '<label class="chk"><input type="checkbox" id="fRecue">' +
               '<span>Commandes reçues</span></label>' +
-            '<label class="chk" style="display:flex;margin-top:8px">' +
-              '<input type="checkbox" id="fPayee">' +
+            '<label class="chk"><input type="checkbox" id="fPayee">' +
               '<span>Commandes payées</span></label>' +
           '</div>' +
           '<div style="flex:0 0 auto">' +
@@ -3685,7 +3683,7 @@
           '<button id="fulPrintBtn" class="primary" style="margin-top:0" onclick="fulPrint()" disabled>' +
             'Imprimer la s\u00e9lection (0)</button>' +
           '<label class="chk"><input type="checkbox" id="fulPickAll" onchange="fulPickAllToggle()">' +
-            'Tout cocher</label>' +
+            'Sélectionner toutes les commandes</label>' +
           // Total of the TICKED orders (Kim, 2026-09-15). Filled by fulPickRefresh.
           '<span id="fulPickTot" style="font-size:17px;font-weight:bold"></span>' +
         '</div>' +
