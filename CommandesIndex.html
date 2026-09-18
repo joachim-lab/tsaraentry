@@ -3724,9 +3724,22 @@
       '<div id="waZone"></div>' +
       '<div id="hits"></div>';
     el('ficherche').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); fulSearchNew(); } });
-    el('fLivree').addEventListener('change', () => fulSearchNew());
-    el('fRecue').addEventListener('change', () => fulSearchNew());
-    el('fPayee').addEventListener('change', () => fulSearchNew());
+    // The three boxes cascade (Kim, 2026-09-18): the pipeline is
+    // strict — received needs shipped, paid needs received. Ticking a
+    // later step ticks the earlier ones; unticking an earlier step
+    // clears the later ones. Only the four real states are reachable:
+    // nothing / livrées / livrées+reçues / all three.
+    function fulStateChange(which) {
+      const L = el('fLivree'), R = el('fRecue'), P = el('fPayee');
+      if (which === 'P' && P.checked) { L.checked = true; R.checked = true; }
+      if (which === 'R' && R.checked) { L.checked = true; }
+      if (which === 'R' && !R.checked) { P.checked = false; }
+      if (which === 'L' && !L.checked) { R.checked = false; P.checked = false; }
+      fulSearchNew();
+    }
+    el('fLivree').addEventListener('change', () => fulStateChange('L'));
+    el('fRecue').addEventListener('change', () => fulStateChange('R'));
+    el('fPayee').addEventListener('change', () => fulStateChange('P'));
     // A re-search, not a local redraw. The list is capped at 25 orders
     // server-side, so filtering the rows already on screen would filter
     // the cap instead of the year. See patch_fultype_srv_20260907r.py.

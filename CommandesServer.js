@@ -366,8 +366,10 @@ function cmdNumFromDisplay_(s) {
  * the empty-list message and for the Statut column of the printout.
  */
 function cmdStateLabel(delivered, received, paid) {
+  // Paid implies received — same rule as the state filter.
+  if (paid) received = true;
   if (!delivered) return paid ? "payée, non livrée" : "non livrée";
-  if (!received)  return paid ? "payée, non reçue" : "livrée, non reçue";
+  if (!received)  return "livrée, non reçue";
   return paid ? "livrée et payée" : "reçue, non payée";
 }
 
@@ -526,8 +528,12 @@ function cmdFindOrdersPrbBody(query, st, wantAlevins, wantPoisson,
       if (hay.indexOf(q) === -1) continue;
     }
     const delivered = String(g.dateLivraison || "").trim() !== "";
-    const received  = String(g.reception || "").trim() !== "";
     const paid      = String(g.paiement || "").trim() !== "";
+    // Paid implies received (Kim, 2026-09-18): the pipeline is strict,
+    // an order is only paid once received. Orders paid before the
+    // réception column existed (10/09) carry no date in AE — a data
+    // gap, not a state. Without this they would match no view at all.
+    const received  = String(g.reception || "").trim() !== "" || paid;
 
     // Category totals over every UNPAID order that matches the query,
     // whatever is ticked and beyond the 25-order cap below. Three
