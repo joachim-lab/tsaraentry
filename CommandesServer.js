@@ -1854,6 +1854,7 @@ function cmdGetLotAvailability(orderKey) {
   if (m.row) out.row = m.row;
   out.count = m.count;
   out.pm = m.pm;
+  out.preTri = cmdIsPreTriSource(m.source);
 
   out.pending = cmdGetPendingQty(key);
   out.available = out.count - out.reserved - out.pending;
@@ -1898,6 +1899,7 @@ function cmdGetLotStock(orderKey) {
   if (m.row) out.row = m.row;
   out.count = m.count;
   out.pm = m.pm;
+  out.preTri = cmdIsPreTriSource(m.source);
   return out;
 }
 
@@ -2272,7 +2274,13 @@ function buildNotSellableMap() {
     const ss = SpreadsheetApp.openById(fileId);
     byLot[lotNum].forEach(function (k) {
       const m = findSubLotColumnByOrderKey(ss, k);
-      if (m.found && !m.count) out[k] = true;  // found, but the cell is empty
+      if (!m.found) return;                    // no row at all -> stays selectable
+      if (!m.count) { out[k] = true; return; } // found, but the cell is empty
+      // Stock still in a pre-tri tab: real fish, not sellable fish
+      // (Kim, 2026-09-18). Without this the pool counted lots at
+      // 0,18 g - 100 902 of them on 2026-09-18 - because the resolver
+      // finds their count in S1 and the cell is not empty.
+      if (cmdIsPreTriSource(m.source)) out[k] = true;
     });
   });
   return out;

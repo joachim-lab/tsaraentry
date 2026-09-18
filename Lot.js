@@ -44,6 +44,25 @@ const LOT_CFG = {
   ]
 };
 
+/**
+ * The tabs a lot passes through BEFORE the tri, newest first. Fish
+ * still counted in one of these have not been sorted, so they are not
+ * for sale: S2-Tri is the first sellable tab (Kim, 2026-09-18).
+ *
+ * Read from S_SHEET_ORDER, never typed twice: everything AFTER
+ * "S2-Tri" in that array is chronologically before it.
+ */
+const LOT_PRE_TRI_TABS = LOT_CFG.S_SHEET_ORDER.slice(
+  LOT_CFG.S_SHEET_ORDER.indexOf("S2-Tri") + 1);
+
+/**
+ * True when findSubLotColumnByOrderKey resolved the sub-lot in a
+ * pre-tri tab. "GROSS" and every tab from S2-Tri on are sellable.
+ */
+function cmdIsPreTriSource(source) {
+  return LOT_PRE_TRI_TABS.indexOf(String(source == null ? "" : source)) >= 0;
+}
+
 const LOT_FILE_LIST_CACHE_KEY = "lotFileList_v1";
 const LOT_FILE_LIST_CACHE_SECONDS = 300;
 

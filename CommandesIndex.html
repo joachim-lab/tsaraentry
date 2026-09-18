@@ -2923,6 +2923,7 @@
     const rAll = !!(GATE.reservedAll && GATE.reservedAll[k]);
     return {
       key: k, found: s.found, source: s.source, count: s.count, pm: s.pm,
+      preTri: !!s.preTri,
       reserved: rAll ? 'TOUT' : res, pending: pnd, reservedAll: rAll,
       available: (rAll || !s.found || !s.count) ? null
                                                 : s.count - res - pnd
@@ -2978,12 +2979,14 @@
                           'la d\u00e9duction \u00e9chouera cette nuit.';
           return;
         }
-        // The sub-lot exists but its stock cell is empty: fry that have
-        // not yet been through the tri are not on sale. Stock Poisson
-        // still shows the fish, so this cannot be caught before the lot
-        // file is opened - hence the block lands here, not in the list.
-        // The server refuses it again at save (qty > available = 0).
-        if (!a.count) {
+        // Not on sale, for either reason: the stock cell is empty, or
+        // the count is still in a pre-tri tab (S1 and earlier). Stock
+        // Poisson shows the fish in both cases, so this cannot be
+        // caught before the lot file is opened - hence the block lands
+        // here, not in the list. The nightly map catches the same two
+        // cases for every lot it already knows; this branch is what
+        // catches a sub-lot created since the last rebuild.
+        if (!a.count || a.preTri) {
           // Canonical key, not the raw label: renderLines looks NOT_SELLABLE
           // up under canonKey(), and "15 ter-C5" canonicalises to
           // "15TER-C5". Storing the raw label would grey nothing.
@@ -2996,7 +2999,10 @@
           box.className = 'availBlock';
           box.innerHTML = '\u26d4 Ce lot ne peut pas encore \u00eatre vendu.' +
                           '<div style="font-weight:normal;font-size: 15px;margin-top:4px">' +
-                          'Le fichier lot n\'indique aucun stock pour ce sous-lot. ' +
+                          (a.preTri
+                            ? 'Ce sous-lot n\'a pas encore pass\u00e9 le tri ' +
+                              '(onglet ' + esc(a.source) + ' du fichier lot). '
+                            : 'Le fichier lot n\'indique aucun stock pour ce sous-lot. ') +
                           'Choisir un autre lot.</div>';
           return;
         }
