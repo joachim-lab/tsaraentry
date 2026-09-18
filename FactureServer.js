@@ -37,6 +37,13 @@
  * minted before AE existed was minted at delivery and has no AE:
  * the latest V (date livraison) is its minting date.
  *
+ * BON DE LIVRAISON EXTERNE: column D of the Commandes tab,
+ * printed after the order number in the header box
+ * ("AL-26-127 du 12/09/2026 — BL BLE0042"). One BL per order:
+ * the first non-empty row of that order wins. An order with no
+ * BL yet (invoice minted at AE, before delivery) prints without
+ * it (Kim, 2026-09-18).
+ *
  * CLIENT BLOCK: the name from R. Adresse (M), téléphone (B), NIF (K)
  * and STAT (L) from the CRM row with the same canonical name.
  * Lieu de livraison (C) is NOT printed: it is where the fish go,
@@ -181,6 +188,7 @@ function factData(orderNumber) {
   const lines = [];
   const orders = [];                 // [{ no, date }], first-seen order
   const orderSeen = {};
+  const orderBl = {};              // order number -> bon de livraison externe (D)
   const clients = {};
   var client = "";
   var transport = 0, remise = 0, sheetTotal = 0;
@@ -201,6 +209,7 @@ function factData(orderNumber) {
       orderSeen[no] = true;
       orders.push({ no: no, date: factDate(cell(j, C.DATE_CMD)) });
     }
+    if (no && !orderBl[no] && txt(j, C.BL)) orderBl[no] = txt(j, C.BL);
 
     const nbAl = cmdToNum(cell(j, C.ALEVINS_NB)) || 0;
     const prixAl = cmdToNum(cell(j, C.ALEVINS_PRIX)) || 0;
@@ -287,7 +296,11 @@ function factData(orderNumber) {
     facture: facture,
     numero: numero,
     dateFacture: fmtD(dateFacture),
-    commandes: orders.map(function (o) { return o.no + (o.date ? " du " + fmtD(o.date) : ""); }),
+    commandes: orders.map(function (o) {
+      const bl = orderBl[o.no] || "";
+      return o.no + (o.date ? " du " + fmtD(o.date) : "") +
+             (bl ? " — BL " + bl : "");
+    }),
     client: client,
     tel: info.tel, adresse: info.adresse, nif: info.nif, stat: info.stat,
     lines: lines,
@@ -433,6 +446,7 @@ function testFacture() {
   if (!o) { Logger.log("Aucune commande avec un numéro de facture."); return; }
   const d = factData(o.orderNumber);
   Logger.log("Commande " + o.orderNumber + " -> facture " + d.numero + " du " + d.dateFacture);
+  Logger.log("Ligne N° Commande : " + d.commandes.join(" / "));
   Logger.log("Client : " + d.client + " | adresse=" + (d.adresse || "-") + " | tel=" + (d.tel || "-") +
              " | NIF=" + (d.nif || "-") + " | STAT=" + (d.stat || "-"));
   d.lines.forEach(function (l) {
