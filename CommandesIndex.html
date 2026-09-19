@@ -1699,6 +1699,12 @@
       '</h3>' +
       '<div style="margin-bottom:10px"><label>Date</label>' +
         '<b>' + esc(dmyFromISO(demFormDate || todayISO())) + '</b></div>' +
+      // Recorded here, used when Commander turns this into an order.
+      // It does NOT re-rank this tab: the arrows (column H) stay the
+      // authority for the pre-commande queue.
+      '<div style="margin-bottom:10px"><label>Livraison demand\u00e9e (facultatif)<br>' +
+        '<input id="dLivDem" type="date" value="' +
+        esc(cur && cur.livraisonDem ? cur.livraisonDem : '') + '"></label></div>' +
       '<div style="margin-bottom:10px"><label>Client<br>' +
         '<input id="dClient" type="text" size="30" list="dlClients" autocomplete="off" onchange="dlPickContact(\'dClient\',\'dContact\')" value="' + esc(cur ? cur.client : '') + '"></label></div>' +
       '<div style="margin-bottom:10px"><label>Contact<br>' +
@@ -1965,7 +1971,8 @@
       categorie: el('dCat') ? el('dCat').value : '',
       livraison: el('dLiv') ? el('dLiv').value : '',
       km: el('dKm') ? el('dKm').value : '',
-      prix: el('dPrix').value
+      prix: el('dPrix').value,
+      livraisonDem: el('dLivDem') ? el('dLivDem').value : ''
     };
     // All fields mandatory except Commentaires. The server re-checks;
     // this check exists so the refusal is instant and names the fields.
@@ -2078,6 +2085,8 @@
     }
     if (el('fLivraison')) el('fLivraison').value = cur.livraison || 'enlevement';
     if (el('fKm')) el('fKm').value = (cur.km != null ? cur.km : '');
+    // The date the client asked for travels with the pre-commande.
+    if (el('fLivDem')) el('fLivDem').value = cur.livraisonDem || '';
 
     var px = (cur.prix != null) ? cur.prix : '';
     if (plan.length) {
@@ -2693,6 +2702,12 @@
           '<div><label>Date commande</label>' +
             '<div id="fDateShow" style="margin-top:6px;font-size:15px"><b>' +
             esc(dmyFromISO(todayISO())) + '</b></div></div>' +
+          // Optional. When it is filled it REPLACES the date de commande
+          // in the queue, on this app and in the nightly engine alike.
+          // .row is flex, so this third column wraps on a phone.
+          '<div><label>Livraison demand\u00e9e ' +
+            '<span class="muted" style="font-weight:400">(facultatif)</span></label>' +
+            '<input type="date" id="fLivDem"></div>' +
         '</div>' +
         '<div class="row">' +
           '<div><label>Client</label><input type="text" id="fClient" list="dlClients" autocomplete="off" onchange="dlPickContact(\'fClient\',\'fContact\')"></div>' +
@@ -3387,6 +3402,8 @@
       // facture is not sent: column C belongs to the AutoCommandes generator.
       bl: el('fBl').value,
       remarques: el('fRemarques').value,
+      // Empty is the normal case: the order then queues on its own date.
+      livraisonDem: (el('fLivDem') || {}).value || '',
       livraison: (el('fLivraison') || {}).value || '',
       km: ((el('fLivraison') || {}).value === 'ambohim')
         ? num((el('fKm') || {}).value) : null,
@@ -3988,7 +4005,12 @@
                   '<input type="checkbox" data-pick="' + esc(o.key) + '"' +
                   (fulPick[o.key] ? ' checked' : '') + '>Imprimer</label>' +
                 '<b>' + esc(o.orderNumber || '(sans numéro)') + '</b> · ' + esc(o.client) +
-                '<div class="muted">' + esc(o.dateCommande) + ' · lots : ' + esc(o.lots.join(', ') || '—') +
+                '<div class="muted">' + esc(o.dateCommande) +
+                // Why this order sits where it sits. The list is ranked
+                // on this date when it is present, so it has to be read
+                // on the line, not only inside the card.
+                (o.livraisonDem ? ' · demand\u00e9e pour le ' + esc(o.livraisonDem) : '') +
+                ' · lots : ' + esc(o.lots.join(', ') || '—') +
                 hitQty(o) + hitPrix(o) +
                 (o.dateLivraison ? ' · livrée le ' + esc(o.dateLivraison) : ' · non livrée') +
                 (o.reception ? ' · reçue le ' + esc(o.reception) : '') +
@@ -4107,7 +4129,13 @@
         '</div>' +
         '<div class="muted" style="font-size:15px;padding-bottom:6px">' +
           'Livraison : ' + esc(livTxt) + '</div>' +
-        // Read in the order of the steps: livraison, remise, réception, paiement.
+        // Read in the order of the steps: demandée, livraison, remise,
+        // réception, paiement. The request comes before the delivery.
+        '<div class="row">' +
+          '<div><label>Livraison demand\u00e9e ' +
+            '<span class="muted" style="font-weight:400">(facultatif)</span></label>' +
+            '<input type="date" id="uLivDem" value="'+esc(toISO(o.livraisonDem))+'"></div>' +
+        '</div>' +
         '<div class="row">' +
           '<div><label>Date livraison</label><input type="date" id="uLivraison" value="'+esc(toISO(o.dateLivraison))+'"></div>' +
           '<div><label>Remise (%)</label><input type="text" inputmode="decimal" id="uRemise" value="'+(Number(o.remise) > 0 ? esc(String(o.remise)) : '')+'"></div>' +
@@ -4205,6 +4233,9 @@
       const liv = String(el('uLivraison').value || '').trim() !== '';
       const rec = String(el('uReception').value || '').trim() !== '';
       const needLiv = "Renseignez d'abord la date de livraison.";
+      // Open and movable at any step: a client postpones whenever he
+      // likes. It carries no grid right of its own.
+      fulLock('uLivDem', true, '');
       fulLock('uLivraison', true, '');
       fulLock('uReception', liv, needLiv);
       fulLock('uRemise', liv, needLiv);
@@ -4467,6 +4498,7 @@
       .withFailureHandler(e => { btn.disabled = false; setStatusAndScroll('err', esc(e.message)); })
       .cmdRecordFulfilment(o.rows, {
         paiement: el('uPaiement').value,
+        livraisonDem: el('uLivDem').value,
         dateLivraison: el('uLivraison').value,
         reception: el('uReception').value,
         remise: el('uRemise').value,
