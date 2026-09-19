@@ -1340,11 +1340,19 @@
    */
   function stockPoolText(type) {
     if (!demPools) return '';
-    const fry = 'Disponible : ' + fmtNum(demPools.Alevins) + ' alevins';
-    const kg  = fmtNum(demPools.Poisson) + ' kg' +
+    // Alevins: the number a client may ORDER, not the pool. Delivery
+    // counts out +5 % on top of the ordered number (column H =
+    // round(F * 1.05)), so the orderable figure is the pool DIVIDED
+    // by 1.05 - never the pool minus 5 %, which is a different number
+    // and always too low. (Kim, 2026-09-19)
+    const fry = 'Disponible : ' +
+                fmtNum(Math.floor(demPools.Alevins / 1.05)) + ' alevins';
+    // Grossis: the kg pool carries one name on every bar, whichever
+    // tab asks for it. (Kim, 2026-09-19)
+    const kg  = 'Grossis : ' + fmtNum(demPools.Poisson) + ' kg' +
                 (demGrBlock != null ? ' (&ge; ' + demGrBlock + ' g)' : '');
     if (type === 'Alevins') return fry;
-    if (type === 'Poisson') return 'Total disponible : ' + kg;
+    if (type === 'Poisson') return kg;
     // Both: one figure per pool and nothing else. The "commandables"
     // reading (the pool divided by the +5 % counted out at delivery)
     // was dropped on 2026-09-19 (Kim): two alevin numbers in one
@@ -1444,9 +1452,9 @@
    * What this tab's queue ASKS FOR, whatever the stock says. It sits
    * under the pool line so the two read together.
    *
-   * Alevins: the sum of Nombre. Same basis as "commandables" - the
-   * +5 % counted out at delivery is already taken off that side, so
-   * the two numbers compare directly.
+   * Alevins: the sum of Nombre. Same basis as the Disponible figure
+   * on the bar above - the +5 % counted out at delivery is already
+   * taken off that side, so the two numbers compare directly.
    * Poisson: nombre x poids / 1000, the arithmetic of the Kg column
    * of the list. A row with no nombre, or a poisson row with no
    * poids, adds nothing rather than a weight invented for it.
