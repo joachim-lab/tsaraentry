@@ -265,6 +265,9 @@ function cmdCreateOrderPrbBody(payload) {
     // its COST went into line 1's J/P via the browser's auto-fill.
     put(C.LIVRAISON, f.livraison);
     put(C.KM, f.km);
+    // Livraison demandee repeats on every row like the client, so the
+    // rows of a commande groupee cannot drift apart in the queue.
+    put(C.LIVRAISON_DEM, cmdParseDate(f.livraisonDem));
   });
 
   const lastRow = firstRow + lines.length - 1;
@@ -440,7 +443,9 @@ function cmdFindOrdersPrbBody(query, st, wantAlevins, wantPoisson,
   }
 
   const n = lastRow - CMD_CFG.START_ROW + 1;
-  const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.RECU).getDisplayValues();
+  // Through AG, not AE: cmdFifoSort below keys on AG (livraison
+  // demandee). AF is skipped here on purpose and read raw just below.
+  const vals = sh.getRange(CMD_CFG.START_ROW, 1, n, C.LIVRAISON_DEM).getDisplayValues();
   // AF (remise %) is read RAW, never as display text. Display text
   // follows the cell format: under a date format 50 reads "18/02/1900"
   // and became a remise of 18 021 900 % (live test, 2026-09-10).
@@ -485,6 +490,7 @@ function cmdFindOrdersPrbBody(query, st, wantAlevins, wantPoisson,
         livraison: r[C.LIVRAISON - 1],
         km: r[C.KM - 1],
         reception: r[C.RECU - 1],
+        livraisonDem: r[C.LIVRAISON_DEM - 1],
         remise: cmdToNum(remRaw[i][0]) || 0,
         coutLivraison: 0
       };
@@ -515,6 +521,9 @@ function cmdFindOrdersPrbBody(query, st, wantAlevins, wantPoisson,
     if (!g.livraison && r[C.LIVRAISON - 1]) g.livraison = r[C.LIVRAISON - 1];
     if (!g.km && r[C.KM - 1]) g.km = r[C.KM - 1];
     if (!g.reception && r[C.RECU - 1]) g.reception = r[C.RECU - 1];
+    if (!g.livraisonDem && r[C.LIVRAISON_DEM - 1]) {
+      g.livraisonDem = r[C.LIVRAISON_DEM - 1];
+    }
     if (!g.remise) g.remise = cmdToNum(remRaw[i][0]) || 0;
     // Any row carrying fulfilment data represents the order's state.
     if (!g.paiement && r[C.PAIEMENT - 1]) g.paiement = r[C.PAIEMENT - 1];
@@ -904,12 +913,12 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
   // that follows a write forces the write out and waits for the sheet
   // to recalculate: the per-cell before/after reads cost about 3.3 s
   // per order row (probe, 2026-09-16). Writes are queued, then ONE flush.
-  // Span = first to last target row, columns A..AF (every column read
+  // Span = first to last target row, columns A..AG (every column read
   // or written below). The GATE 2 / GATE 3 reads above stay per cell:
   // they run only when their condition holds.
   const spanTop = Math.min.apply(null, targets);
   const spanH = Math.max.apply(null, targets) - spanTop + 1;
-  const spanRng = sh.getRange(spanTop, 1, spanH, C.REMISE);
+  const spanRng = sh.getRange(spanTop, 1, spanH, C.LIVRAISON_DEM);
   const rawBefore = spanRng.getValues();
   const dispBefore = spanRng.getDisplayValues();
   const cellAt = function (grid, r, col) { return grid[r - spanTop][col - 1]; };
@@ -972,6 +981,11 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
     put(C.FACTURE, f.facture, "N° facture");
     put(C.BL, f.bl, "Bon de livraison");
     put(C.REMARQUES, f.remarques, "Remarques");
+    // An OPEN order keeps a movable date (Kim, 2026-09-19): a client
+    // who postpones is the normal case. Like every field here, an
+    // empty value is ignored, so the date is MOVED from this screen
+    // and removed only by clearing AG in the sheet.
+    put(C.LIVRAISON_DEM, cmdParseDate(f.livraisonDem), "Livraison demand\u00e9e");
   });
 
   prbMark("puts");
@@ -3013,7 +3027,8 @@ function demList() {
   const sh = demSheet();
   const lastRow = sh.getLastRow();
   if (lastRow < DEM_START) return [];
-  const vals = sh.getRange(DEM_START, 1, lastRow - DEM_START + 1, 12).getValues();
+  const vals = sh.getRange(DEM_START, 1, lastRow - DEM_START + 1,
+                           DEM_LIVR_DEM_COL).getValues();
   const tz = Session.getScriptTimeZone();
   const out = [];
   for (var i = 0; i < vals.length; i++) {
@@ -3037,7 +3052,10 @@ function demList() {
       categorie: String(vals[i][8] == null ? "" : vals[i][8]).trim(),
       livraison: String(vals[i][9] == null ? "" : vals[i][9]).trim(),
       prix: cmdToNum(vals[i][10]),
-      km: cmdToNum(vals[i][11])
+      km: cmdToNum(vals[i][11]),
+      livraisonDem: (vals[i][12] instanceof Date)
+        ? Utilities.formatDate(vals[i][12], tz, "yyyy-MM-dd")
+        : String(vals[i][12] == null ? "" : vals[i][12]).trim()
     });
   }
   // Manual priority (column H) decides the queue, and the queue decides
@@ -3156,6 +3174,16 @@ function demClean(p) {
   const prix = cmdToNum(p.prix);
   if (prix == null || prix <= 0) throw new Error("Prix requis (Ar).");
 
+  // Livraison demandee: OPTIONAL (Kim, 2026-09-19). Empty is the normal
+  // case. A value must still be a real date, or the queue key it feeds
+  // is silently ignored on both sides.
+  const ldStr = String(p && p.livraisonDem != null ? p.livraisonDem : "").trim();
+  var livraisonDem = null;
+  if (ldStr !== "") {
+    livraisonDem = cmdParseDate(ldStr);
+    if (!livraisonDem) throw new Error("Livraison demand\u00e9e invalide : " + ldStr);
+  }
+
   const m = dateStr.split("-");
   return {
     date: new Date(Number(m[0]), Number(m[1]) - 1, Number(m[2])),
@@ -3168,7 +3196,8 @@ function demClean(p) {
     categorie: categorie,
     livraison: livraison,
     km: km,
-    prix: prix
+    prix: prix,
+    livraisonDem: livraisonDem
   };
 }
 
@@ -3193,10 +3222,11 @@ function demAdd(p) {
   // has been waiting. Kim re-ranks with the arrows when it is urgent.
   var rang = 0;
   demList().forEach(function (d) { if (d.rang != null && d.rang > rang) rang = d.rang; });
-  sh.getRange(row, 1, 1, 12).setValues(
+  sh.getRange(row, 1, 1, DEM_LIVR_DEM_COL).setValues(
     [[c.date, c.client, c.contact, c.type, c.nombre, c.commentaires, c.poids,
       rang + 1, c.categorie, c.livraison, c.prix,
-      c.km == null ? "" : c.km]]);
+      c.km == null ? "" : c.km,
+      c.livraisonDem == null ? "" : c.livraisonDem]]);
   crmFillContact(c.client, c.contact);
   return { row: row };
 }
@@ -3210,8 +3240,9 @@ function demUpdate(p) {
   // record, and an edit must not move the line in the queue.
   sh.getRange(row, 1, 1, 7).setValues(
     [[c.date, c.client, c.contact, c.type, c.nombre, c.commentaires, c.poids]]);
-  sh.getRange(row, 9, 1, 4).setValues(
-    [[c.categorie, c.livraison, c.prix, c.km == null ? "" : c.km]]);
+  sh.getRange(row, 9, 1, DEM_LIVR_DEM_COL - 8).setValues(
+    [[c.categorie, c.livraison, c.prix, c.km == null ? "" : c.km,
+      c.livraisonDem == null ? "" : c.livraisonDem]]);
   return { row: row };
 }
 
@@ -3510,8 +3541,17 @@ function cmdFifoSort(groups) {
     if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]);
     return Infinity;
   }
+  // Livraison demandee (AG) when it parses as a date, date de commande
+  // (E) otherwise. The fallback is what keeps this identical to
+  // ttDateOrder in TSARAENGINE: there, anything that is not a Date
+  // object falls back to E. Text typed into AG must not push an order
+  // to the back of one queue and leave it in place in the other.
+  function key(g) {
+    const t = ms(g.livraisonDem);
+    return (t === Infinity) ? ms(g.dateCommande) : t;
+  }
   groups.sort(function (a, b) {
-    const ta = ms(a.dateCommande), tb = ms(b.dateCommande);
+    const ta = key(a), tb = key(b);
     if (ta !== tb) return ta < tb ? -1 : 1;
     return (a.rows[0] || 0) - (b.rows[0] || 0);
   });
