@@ -1345,12 +1345,11 @@
                 (demGrBlock != null ? ' (&ge; ' + demGrBlock + ' g)' : '');
     if (type === 'Alevins') return fry;
     if (type === 'Poisson') return 'Total disponible : ' + kg;
-    // Both: the fry figure keeps its "commandables" reading — the
-    // number a client may write on an order, the pool divided by the
-    // +5 % counted out at delivery. (2026-09-12)
-    return fry +
-           ' (commandables : ' + fmtNum(Math.floor(demPools.Alevins / 1.05)) + ')' +
-           ' &nbsp;&middot;&nbsp; ' + kg;
+    // Both: one figure per pool and nothing else. The "commandables"
+    // reading (the pool divided by the +5 % counted out at delivery)
+    // was dropped on 2026-09-19 (Kim): two alevin numbers in one
+    // sentence, and the second one was read as the stock.
+    return fry + ' &nbsp;&middot;&nbsp; ' + kg;
   }
 
   /** The floor field for one bar. Blank until a check has run. */
