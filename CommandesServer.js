@@ -55,7 +55,13 @@ const CMD_CFG = {
     // received the order: from that moment the order is frozen and only
     // the payment can be recorded. AF = remise in percent (10 = 10 %),
     // read by the K/Q formulas of rows that carry a remise.
-    RECU: 31, REMISE: 32
+    RECU: 31, REMISE: 32,
+    // AG, appended 2026-09-19 (Kim). "Livraison demandee": the date
+    // the CLIENT asks to receive the goods. Optional. When it is set
+    // it replaces the date de commande (E) as the queue key, on the
+    // Paiement & livraison list and in the nightly engine alike
+    // (cmdFifoSort here, ttDateOrder in TSARAENGINE/engine_core.js).
+    LIVRAISON_DEM: 33
   }
 };
 
@@ -1530,6 +1536,45 @@ function cmdAddRecuHeaders() {
              sh.getRange(1, C.REMISE).getValue());
 }
 
+/**
+ * RUN FROM EDITOR ONCE, BEFORE PART 3 IS PUSHED:
+ * tsaraentry -> CommandesServer.js -> cmdAddLivraisonDemandeeHeaders
+ *
+ * Creates the two "Livraison demandee" columns and nothing else:
+ *   "2026"     AG1, date format dd/mm/yyyy from row 2 down.
+ *   "Demandes" M2,  date format dd/mm/yyyy from row 3 down.
+ * Both tabs are widened first if they are narrower. An existing header
+ * is never overwritten. Re-run safe.
+ */
+function cmdAddLivraisonDemandeeHeaders() {
+  const C = CMD_CFG.COL;
+
+  const sh = cmdSheet();
+  var max = sh.getMaxColumns();
+  if (max < C.LIVRAISON_DEM) sh.insertColumnsAfter(max, C.LIVRAISON_DEM - max);
+  if (!sh.getRange(1, C.LIVRAISON_DEM).getValue()) {
+    sh.getRange(1, C.LIVRAISON_DEM)
+      .setValue("Livraison demand\u00e9e").setFontWeight("bold");
+  }
+  sh.getRange(2, C.LIVRAISON_DEM, sh.getMaxRows() - 1, 1)
+    .setNumberFormat("dd/mm/yyyy");
+
+  const dem = demSheet();
+  max = dem.getMaxColumns();
+  if (max < DEM_LIVR_DEM_COL) dem.insertColumnsAfter(max, DEM_LIVR_DEM_COL - max);
+  if (!dem.getRange(2, DEM_LIVR_DEM_COL).getValue()) {
+    dem.getRange(2, DEM_LIVR_DEM_COL)
+       .setValue("Livraison demand\u00e9e").setFontWeight("bold");
+  }
+  dem.getRange(DEM_START, DEM_LIVR_DEM_COL, dem.getMaxRows() - DEM_START + 1, 1)
+     .setNumberFormat("dd/mm/yyyy");
+
+  Logger.log("2026: " + sh.getMaxColumns() + " colonnes | AG1=" +
+             sh.getRange(1, C.LIVRAISON_DEM).getValue());
+  Logger.log("Demandes: " + dem.getMaxColumns() + " colonnes | M2=" +
+             dem.getRange(2, DEM_LIVR_DEM_COL).getValue());
+}
+
 /** payload.lines = [{row, nombre, pm}] (alevins) or [{row, kg, pm}]. */
 function cmdModifyOrder(payload) {
   const f = payload || {};
@@ -2945,6 +2990,11 @@ function testReservations() {
  ***************************************************************/
 
 const DEM_SHEET = "Demandes";
+// Column M, appended 2026-09-19 (Kim). Same meaning as AG on "2026":
+// the date the client asks to be served. Optional. It is carried into
+// the order by the Commander button; it does NOT re-rank this tab —
+// column H (the arrows) stays the authority for the pre-commande queue.
+const DEM_LIVR_DEM_COL = 13;
 const DEM_START = 3;                       // row 1 = title, row 2 = headers
 const DEM_TYPES = ["Alevins", "Poisson"];
 const DEM_POIDS_AL = [0.5, 1, 1.5, 2, 3, 4, 5, 10];
