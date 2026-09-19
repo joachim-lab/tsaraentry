@@ -173,6 +173,7 @@ function cmdCreateOrderPrbBody(payload) {
   // The delivery confirmation carries the client's number to the team,
   // so an order without one produces a message nobody can act on
   // (Kim, 2026-09-09).
+  f.contact = cmdTelNormalise(f.contact);
   if (!String(f.contact || "").trim()) {
     throw new Error("Le téléphone du client est obligatoire.");
   }
@@ -845,6 +846,7 @@ function cmdRecordFulfilmentPrbBody(rows, payload) {
   // The screen carries an editable Téléphone field for exactly this
   // reason: an order recorded before this rule can be completed here
   // instead of becoming unsaveable.
+  f.contact = cmdTelNormalise(f.contact);
   if (!String(f.contact || "").trim()) {
     throw new Error("Téléphone du client obligatoire.");
   }
@@ -3136,7 +3138,7 @@ function demClean(p) {
   const client = String(p && p.client != null ? p.client : "").trim();
   if (!client) throw new Error("Client requis.");
 
-  const contact = String(p && p.contact != null ? p.contact : "").trim();
+  const contact = cmdTelNormalise(p && p.contact != null ? p.contact : "");
   if (!contact) throw new Error("Contact requis.");
 
   const type = String(p && p.type != null ? p.type : "").trim();
@@ -4452,7 +4454,7 @@ function recClean(p, excludeRow) {
   const client = String(p && p.client != null ? p.client : "").trim();
   if (!client) throw new Error("Client requis.");
 
-  const contact = String(p && p.contact != null ? p.contact : "").trim();
+  const contact = cmdTelNormalise(p && p.contact != null ? p.contact : "");
   if (!contact) throw new Error("Contact requis.");
 
   var kg = cmdToNum(p && p.kg);
@@ -4867,6 +4869,36 @@ function crmEntrySheet() {
 
 /** Same canonical form as 06_crm.gs. Used ONLY to compare the name the
  *  browser saw against the name now in the sheet. */
+/**
+ * LEADING 0 ON A MALAGASY TELEPHONE NUMBER (Kim, 2026-09-19).
+ *
+ * Staff type "341234567". The cell is text format, so the sheet is not
+ * losing the 0 - it was never typed. This adds it.
+ *
+ * Separators are removed only to TEST the value. A number that already
+ * carries its 0 is returned exactly as typed. This function changes a
+ * value only when that value is wrong.
+ *
+ *   "341234567"       -> "0341234567"
+ *   "34 12 345 67"    -> "0341234567"
+ *   "201234567"       -> "0201234567"   (020 landline)
+ *   "0341234567"      -> "0341234567"   untouched
+ *   "034 12 345 67"   -> "034 12 345 67"  untouched, spaces kept
+ *   "+261341234567"   -> untouched
+ *   "261341234567"    -> untouched
+ *   "0033612345678"   -> untouched
+ *
+ * 9 digits starting with 2 or 3 is the whole local range: mobile
+ * 32/33/34/38 and the 020 landline block. Anything else is left alone,
+ * so an international or foreign number is never corrupted.
+ */
+function cmdTelNormalise(v) {
+  var raw = String(v == null ? "" : v).trim();
+  if (!raw) return "";
+  var compact = raw.replace(/[\s.\-()\u00a0]/g, "");
+  return /^[23]\d{8}$/.test(compact) ? "0" + compact : raw;
+}
+
 function crmCanonName(s) {
   return String(s == null ? "" : s).trim().replace(/\s+/g, " ").toUpperCase();
 }
@@ -4928,7 +4960,7 @@ function crmSaveInfo(row, clientSeen, tel, loc, notes, nif, stat, adresse) {
                     'maintenant "' + String(nameNow).trim() + '". Rechargez la page.');
   }
 
-  sh.getRange(r, CRM_COL_TEL).setValue(String(tel == null ? "" : tel).trim());
+  sh.getRange(r, CRM_COL_TEL).setValue(cmdTelNormalise(tel));
   sh.getRange(r, CRM_COL_LOC).setValue(String(loc == null ? "" : loc).trim());
   sh.getRange(r, CRM_COL_NOTES).setValue(String(notes == null ? "" : notes).trim());
   if (nif != null && stat != null) {
@@ -4988,7 +5020,7 @@ function crmSaveInfo(row, clientSeen, tel, loc, notes, nif, stat, adresse) {
 function crmFillContact(client, tel) {
   try {
     const name = String(client == null ? "" : client).trim();
-    const phone = String(tel == null ? "" : tel).trim();
+    const phone = cmdTelNormalise(tel);
     if (!name || !phone) return;
 
     const sh = crmEntrySheet();
@@ -5018,7 +5050,7 @@ function crmFillContact(client, tel) {
 function crmClientAdd(p) {
   const name = String(p && p.client != null ? p.client : "").trim();
   if (!name) throw new Error("Nom requis.");
-  const tel = String(p && p.tel != null ? p.tel : "").trim();
+  const tel = cmdTelNormalise(p && p.tel != null ? p.tel : "");
   const loc = String(p && p.loc != null ? p.loc : "").trim();
   const notes = String(p && p.notes != null ? p.notes : "").trim();
   if (!tel && !loc && !notes) {
@@ -5045,6 +5077,56 @@ function crmClientAdd(p) {
     [[name, tel, loc, "", "", "", "", "", "", notes, "", "", ""]]);
   SpreadsheetApp.flush();
   return { row: row };
+}
+
+/** MANUAL (editor Run dropdown, project TSARA Entry).
+ *  READ-ONLY. Lists every CRM row whose telephone is missing its 0.
+ *  Run this first. Nothing is written. */
+function crmTelDryRun() {
+  crmTelScanRun(false);
+}
+
+/** MANUAL (editor Run dropdown, project TSARA Entry).
+ *  WRITES. Adds the missing 0 to every row crmTelDryRun listed.
+ *  Run crmTelDryRun first and read its log. */
+function crmTelRepair() {
+  crmTelScanRun(true);
+}
+
+/** Shared body. Called with no argument from the dropdown = dry run. */
+function crmTelScanRun(write) {
+  var sh = crmEntrySheet();
+  var last = sh.getLastRow();
+  if (last < CRM_START) { Logger.log("Table CRM vide."); return; }
+
+  var n = last - CRM_START + 1;
+  var vals = sh.getRange(CRM_START, 1, n, 2).getValues();
+  var changes = [];
+
+  for (var i = 0; i < n; i++) {
+    var name = String(vals[i][0] == null ? "" : vals[i][0]).trim();
+    if (!name) continue;
+    var before = String(vals[i][1] == null ? "" : vals[i][1]).trim();
+    if (!before) continue;
+    var after = cmdTelNormalise(before);
+    if (after === before) continue;
+    changes.push({ row: CRM_START + i, client: name, before: before, after: after });
+  }
+
+  Logger.log((write ? "REPARATION" : "SIMULATION - rien n'est ecrit") +
+             " : " + changes.length + " ligne(s) sur " + n);
+  changes.forEach(function (c) {
+    Logger.log("  L" + c.row + "  " + c.client + "   " +
+               c.before + "  ->  " + c.after);
+  });
+
+  if (!write || !changes.length) return;
+
+  changes.forEach(function (c) {
+    sh.getRange(c.row, CRM_COL_TEL).setValue(c.after);
+  });
+  SpreadsheetApp.flush();
+  Logger.log("Ecrit : " + changes.length + " ligne(s).");
 }
 
 /** MANUAL CHECK (editor Run dropdown, project TSARA Entry).
